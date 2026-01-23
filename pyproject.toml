@@ -1,0 +1,113 @@
+# ---- Project Info and Dependencies ----
+
+[project.urls]
+Repository = "https://github.com/charlesbmi/FastSIMUS"
+Homepage = "https://github.com/charlesbmi/FastSIMUS"
+
+[project]
+name = "FastSIMUS"
+description = "Fast simulator for medical ultrasound, based on SIMUS/MUST"
+authors = [
+    { name = "Charles Guan" },
+]
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11,<4.0"
+version = "0.0.1"
+
+# https://pypi.org/classifiers/
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
+
+
+# ---- Main dependencies ----
+
+dependencies = [
+]
+
+
+# ---- Dev dependencies ----
+
+[dependency-groups]
+dev = [
+  {include-group = "lint"},
+  {include-group = "test"}
+]
+lint = [
+    "codespell>=2.4.1",
+    "ruff>=0.14.11",
+    "ty>=0.0.13",
+]
+test = [
+    "pytest>=9.0.2",
+    "pytest-sugar>=1.1.1",
+]
+
+
+# ---- lint settings ----
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "B",     # flake8-bugbear
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "I",     # isort
+    "RUF",   # ruff
+    "S",     # flake8-bandit
+    "SIM",   # flake8-simplify
+    "UP",    # pyupgrade
+    "W",     # pycodestyle warnings
+]
+
+ignore = [
+    # Disable some rules that are overly pedantic:
+    "SIM108", # https://docs.astral.sh/ruff/rules/if-else-block-instead-of-if-exp/
+    # We use both ruff formatter and linter so some rules should always be disabled.
+    # See: https://docs.astral.sh/ruff/formatter/#conflicting-lint-rules
+    "W191", # https://docs.astral.sh/ruff/rules/tab-indentation/
+    "E111", # https://docs.astral.sh/ruff/rules/indentation-with-invalid-multiple/
+    "E114", # https://docs.astral.sh/ruff/rules/indentation-with-invalid-multiple-comment/
+    "E117", # https://docs.astral.sh/ruff/rules/over-indented/
+    "D206", # https://docs.astral.sh/ruff/rules/docstring-tab-indentation/
+    "D300", # https://docs.astral.sh/ruff/rules/triple-single-quotes/
+    "Q000", # https://docs.astral.sh/ruff/rules/bad-quotes-inline-string/
+    "Q001", # https://docs.astral.sh/ruff/rules/bad-quotes-multiline-string/
+    "Q002", # https://docs.astral.sh/ruff/rules/bad-quotes-docstring/
+    "Q003", # https://docs.astral.sh/ruff/rules/avoidable-escaped-quote/
+    "COM812", # https://docs.astral.sh/ruff/rules/missing-trailing-comma/
+    "COM819", # https://docs.astral.sh/ruff/rules/prohibited-trailing-comma/
+    "ISC002", # https://docs.astral.sh/ruff/rules/multi-line-implicit-string-concatenation/
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.ty.rules]
+possibly-unbound-attribute = "ignore"  # array_namespace needs better typing
+
+
+# ---- test settings ----
+
+[tool.pytest.ini_options]
+python_files = ["*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+testpaths = [
+    "src",
+    "tests",
+]
+norecursedirs = []
+filterwarnings = []
