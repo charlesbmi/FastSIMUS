@@ -14,17 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v7
-        with:
-          version: "0.9.25"
-          enable-cache: true
-          python-version: "3.13"
-
-      - name: Set up Python (using uv)
-        run: uv python install
-
-      - name: Install all dependencies
-        run: uv sync --all-extras
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
 
       - name: Run tests
         run: uv run pytest

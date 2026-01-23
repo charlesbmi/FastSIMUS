@@ -3,6 +3,7 @@
 [project.urls]
 Repository = "https://github.com/charlesbmi/FastSIMUS"
 Homepage = "https://github.com/charlesbmi/FastSIMUS"
+Documentation = "https://charlesbmi.github.io/FastSIMUS/"
 
 [project]
 name = "FastSIMUS"
@@ -10,6 +11,7 @@ description = "Fast simulator for medical ultrasound, based on SIMUS/MUST"
 authors = [
     { name = "Charles Guan" },
 ]
+keywords = ["ultrasound", "simulation", "SIMUS", "array",]
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11,<4.0"
@@ -40,11 +42,20 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  {include-group = "lint"},
-  {include-group = "test"}
+    "pre-commit>=4.5.1",
+    {include-group = "docs"},
+    {include-group = "lint"},
+    {include-group = "test"},
+]
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.1",
+    "mkdocstrings[python]>=1.0.0",
+    "mkdocs-include-markdown-plugin>=4.0.0",
 ]
 lint = [
     "codespell>=2.4.1",
+    "deptry>=0.24.0",
     "ruff>=0.14.11",
     "ty>=0.0.13",
 ]
@@ -57,7 +68,9 @@ test = [
 # ---- lint settings ----
 
 [tool.ruff]
-line-length = 100
+target-version = "py311"
+line-length = 120
+fix = true
 
 [tool.ruff.lint]
 select = [
@@ -100,14 +113,12 @@ possibly-unbound-attribute = "ignore"  # array_namespace needs better typing
 
 
 # ---- test settings ----
+[tool.coverage.report]
+skip_empty = true
 
-[tool.pytest.ini_options]
-python_files = ["*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-testpaths = [
+[tool.coverage.run]
+branch = true
+source = [
     "src",
-    "tests",
 ]
-norecursedirs = []
-filterwarnings = []
+
