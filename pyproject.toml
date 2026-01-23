@@ -42,7 +42,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pre-commit>=4.5.1",
+    "poethepoet>=0.32.1",
     {include-group = "docs"},
     {include-group = "lint"},
     {include-group = "test"},
@@ -61,8 +61,51 @@ lint = [
 ]
 test = [
     "pytest>=9.0.2",
+    "pytest-cov>=6.1.0",
     "pytest-sugar>=1.1.1",
 ]
+
+
+# ---- Poe the Poet task runner ----
+
+[tool.poe.tasks]
+
+[tool.poe.tasks.install]
+help = "Install the virtual environment using uv"
+cmd = "uv sync"
+
+[tool.poe.tasks.lint]
+help = "Run code quality tools"
+sequence = [
+    { cmd = "ruff format src tests" },
+    { cmd = "ruff check --fix src tests" },
+    { cmd = "ty check" },
+    { cmd = "codespell src tests docs" },
+    { cmd = "deptry src" },
+]
+
+[tool.poe.tasks.test]
+help = "Test the code with pytest"
+cmd = "pytest --cov --cov-config=pyproject.toml --cov-report=xml"
+
+[tool.poe.tasks.build]
+help = "Build wheel file"
+sequence = [
+    { ref = "clean" },
+    { cmd = "uv build" },
+]
+
+[tool.poe.tasks.clean]
+help = "Clean build artifacts"
+script = "shutil:rmtree('dist', ignore_errors=True)"
+
+[tool.poe.tasks.docs-test]
+help = "Test if documentation can be built without warnings or errors"
+cmd = "mkdocs build -s"
+
+[tool.poe.tasks.docs]
+help = "Build and serve the documentation"
+cmd = "mkdocs serve"
 
 
 # ---- lint settings ----
@@ -107,9 +150,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
-
-[tool.ty.rules]
-possibly-unbound-attribute = "ignore"  # array_namespace needs better typing
 
 
 # ---- test settings ----
