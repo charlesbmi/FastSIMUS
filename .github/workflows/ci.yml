@@ -5,9 +5,20 @@ on:
     branches:
       - "main"
   pull_request:
-    
+
 
 jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Run pre-commit hooks
+        run: uv run prek run --all-files
+
   lint:
     strategy:
       matrix:
@@ -25,7 +36,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Run linting
-        run: uv run ruff lint
+        run: uv run poe lint
 
   test:
     strategy:
@@ -42,8 +53,25 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Run tests
-        run: uv run pytest
+      - name: Cache testmon data
+        uses: actions/cache@v4
+        with:
+          path: .testmondata
+          key: testmon-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'src/**/*.py', 'tests/**/*.py') }}
+          restore-keys: |
+            testmon-${{ runner.os }}-py${{ matrix.python-version }}-
+
+      - name: Run tests with testmon
+        run: uv run poe test
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: ${{ runner.os }}-py${{ matrix.python-version }}
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   check-docs:
     runs-on: ubuntu-latest
@@ -55,4 +83,4 @@ jobs:
         uses: ./.github/actions/setup-python-env
 
       - name: Check if documentation can be built
-        run: uv run mkdocs build -s
+        run: uv run poe docs-test

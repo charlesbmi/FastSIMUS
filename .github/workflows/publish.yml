@@ -18,10 +18,10 @@ jobs:
         uses: ./.github/actions/setup-python-env
 
       - name: Run tests
-        run: uv run pytest
+        run: uv run poe test-all
 
       - name: Build package
-        run: uv build
+        run: uv run poe build
 
       - name: Publish to PyPI
         run: uv publish --trusted-publishing always

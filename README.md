@@ -8,7 +8,8 @@ Fast simulator for medical ultrasound, based on SIMUS/MUST
 
 ## Development
 
-This project uses [uv](https://docs.astral.sh/uv/) for dependency management and [Poe the Poet](https://poethepoet.natn.io/) for running tasks, instead of a Makefile.
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management and
+[Poe the Poet](https://poethepoet.natn.io/) for running tasks, instead of a Makefile.
 
 ### Setup
 
@@ -28,6 +29,22 @@ uv tool install poethepoet
 
 This puts `poe` in your path; otherwise, you will need to run `uv run poe` instead of `poe`.
 
+### Pre-commit Hooks
+
+This project uses [prek](https://prek.j178.dev/) (a faster Rust-based alternative to pre-commit):
+
+```bash
+# Install hooks
+uv run prek install
+
+# Run manually
+uv run prek run --all-files
+```
+
 ### Available Commands
 
 To see all available tasks: `poe` or `uv run poe`
+
+- `poe test` - Run tests affected by recent changes
+- `poe lint` - Format and lint code
+- `poe docs` - Build and serve documentation

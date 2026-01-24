@@ -43,9 +43,10 @@ dependencies = [
 [dependency-groups]
 dev = [
     "poethepoet>=0.32.1",
-    {include-group = "docs"},
-    {include-group = "lint"},
-    {include-group = "test"},
+    "prek>=0.3.0",
+    { include-group = "docs" },
+    { include-group = "lint" },
+    { include-group = "test" },
 ]
 docs = [
     "mkdocs>=1.6.1",
@@ -56,6 +57,8 @@ docs = [
 lint = [
     "codespell>=2.4.1",
     "deptry>=0.24.0",
+    "mdformat>=0.7.21",
+    "mdformat-gfm>=0.3.6",
     "ruff>=0.14.11",
     "ty>=0.0.13",
 ]
@@ -63,6 +66,9 @@ test = [
     "pytest>=9.0.2",
     "pytest-cov>=6.1.0",
     "pytest-sugar>=1.1.1",
+    "pytest-xdist>=3.8.0",
+    "pytest-benchmark[histogram]>=4.0.0",
+    "pytest-testmon>=2.2.0",
 ]
 
 
@@ -80,13 +86,22 @@ sequence = [
     { cmd = "ruff format src tests" },
     { cmd = "ruff check --fix src tests" },
     { cmd = "ty check" },
-    { cmd = "codespell src tests docs" },
+    { cmd = "mdformat README.md docs --wrap 120" },
+    { cmd = "codespell src tests docs README.md" },
     { cmd = "deptry src" },
 ]
 
 [tool.poe.tasks.test]
-help = "Test the code with pytest"
-cmd = "pytest --cov --cov-config=pyproject.toml --cov-report=xml"
+help = "Test only code affected by recent changes, in parallel"
+cmd = "pytest --testmon -n auto"
+
+[tool.poe.tasks.test-all]
+help = "Test all code"
+cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml"
+
+[tool.poe.tasks.benchmark]
+help = "Run performance benchmarks"
+cmd = "pytest --benchmark-only --benchmark-autosave"
 
 [tool.poe.tasks.build]
 help = "Build wheel file"
@@ -133,16 +148,16 @@ ignore = [
     "SIM108", # https://docs.astral.sh/ruff/rules/if-else-block-instead-of-if-exp/
     # We use both ruff formatter and linter so some rules should always be disabled.
     # See: https://docs.astral.sh/ruff/formatter/#conflicting-lint-rules
-    "W191", # https://docs.astral.sh/ruff/rules/tab-indentation/
-    "E111", # https://docs.astral.sh/ruff/rules/indentation-with-invalid-multiple/
-    "E114", # https://docs.astral.sh/ruff/rules/indentation-with-invalid-multiple-comment/
-    "E117", # https://docs.astral.sh/ruff/rules/over-indented/
-    "D206", # https://docs.astral.sh/ruff/rules/docstring-tab-indentation/
-    "D300", # https://docs.astral.sh/ruff/rules/triple-single-quotes/
-    "Q000", # https://docs.astral.sh/ruff/rules/bad-quotes-inline-string/
-    "Q001", # https://docs.astral.sh/ruff/rules/bad-quotes-multiline-string/
-    "Q002", # https://docs.astral.sh/ruff/rules/bad-quotes-docstring/
-    "Q003", # https://docs.astral.sh/ruff/rules/avoidable-escaped-quote/
+    "W191",   # https://docs.astral.sh/ruff/rules/tab-indentation/
+    "E111",   # https://docs.astral.sh/ruff/rules/indentation-with-invalid-multiple/
+    "E114",   # https://docs.astral.sh/ruff/rules/indentation-with-invalid-multiple-comment/
+    "E117",   # https://docs.astral.sh/ruff/rules/over-indented/
+    "D206",   # https://docs.astral.sh/ruff/rules/docstring-tab-indentation/
+    "D300",   # https://docs.astral.sh/ruff/rules/triple-single-quotes/
+    "Q000",   # https://docs.astral.sh/ruff/rules/bad-quotes-inline-string/
+    "Q001",   # https://docs.astral.sh/ruff/rules/bad-quotes-multiline-string/
+    "Q002",   # https://docs.astral.sh/ruff/rules/bad-quotes-docstring/
+    "Q003",   # https://docs.astral.sh/ruff/rules/avoidable-escaped-quote/
     "COM812", # https://docs.astral.sh/ruff/rules/missing-trailing-comma/
     "COM819", # https://docs.astral.sh/ruff/rules/prohibited-trailing-comma/
     "ISC002", # https://docs.astral.sh/ruff/rules/multi-line-implicit-string-concatenation/
@@ -153,12 +168,13 @@ ignore = [
 
 
 # ---- test settings ----
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config"]
+markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
+
 [tool.coverage.report]
 skip_empty = true
 
 [tool.coverage.run]
-branch = true
-source = [
-    "src",
-]
-
+source = ["src"]
