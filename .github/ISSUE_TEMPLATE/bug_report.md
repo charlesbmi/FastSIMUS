@@ -10,7 +10,7 @@ assignees: ''
 **Describe the bug**
 
 **To Reproduce**
-1. 
+1.
 
 **Expected behavior**
 
@@ -19,7 +19,7 @@ assignees: ''
 **Environment:**
  - Operating system:
  - Python version:
- - Package version: 
+ - Package version:
 
 **Additional context**
 Add any other context about the problem here.
