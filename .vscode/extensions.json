@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "astral-sh.ty",
+    "charliermarsh.ruff",
+    "davidanson.vscode-markdownlint",
+    "github.vscode-github-actions",
+    "ms-python.python",
+    "tamasfe.even-better-toml",
+  ]
+}
