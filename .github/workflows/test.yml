@@ -5,39 +5,17 @@ on:
     branches:
       - "main"
   pull_request:
+    paths:
+      - "tests/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "codecov.yaml"
+      - ".github/workflows/test.yml"
+      - ".github/actions/**"
 
 
 jobs:
-  pre-commit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up the environment
-        uses: ./.github/actions/setup-python-env
-
-      - name: Run pre-commit hooks
-        run: uv run prek run --all-files
-
-  lint:
-    strategy:
-      matrix:
-        os: ["macos-latest", "ubuntu-latest"]  # common development platforms
-        python-version: ["3.13"]
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up the environment
-        uses: ./.github/actions/setup-python-env
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Run linting
-        run: uv run poe lint
-
   test:
     strategy:
       matrix:
@@ -82,7 +60,7 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-  check-docs:
+  docs-test:
     runs-on: ubuntu-latest
     steps:
       - name: Check out
