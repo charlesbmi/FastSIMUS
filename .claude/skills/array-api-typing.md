@@ -2,7 +2,8 @@
 
 ## Overview
 
-FastSIMUS uses the [Array API Standard](https://data-apis.org/array-api/2024.12/) for backend-agnostic numerical code. This enables the same code to run on NumPy, JAX, CuPy, and other compliant backends.
+FastSIMUS uses the [Array API Standard](https://data-apis.org/array-api/2024.12/) for backend-agnostic numerical code.
+This enables the same code to run on NumPy, JAX, CuPy, and other compliant backends.
 
 ## Core Pattern: Backend Detection
 
@@ -12,11 +13,11 @@ from array_api_compat import array_namespace
 def compute_delays(element_positions, focus_x, focus_z, c=1540.0):
     """Compute transmit delays - works with any Array API backend."""
     xp = array_namespace(element_positions)  # Detect backend from input
-    
+
     # Use xp.* for ALL numerical operations
     distances = xp.sqrt((element_positions - focus_x)**2 + focus_z**2)
     delays = (xp.max(distances) - distances) / c
-    
+
     return delays  # Returns same type as input
 ```
 
@@ -70,17 +71,17 @@ from array_api_compat import is_jax_array, is_cupy_array, is_numpy_array
 def frequency_loop(exp_init, exp_df, n_freq):
     """Frequency loop with backend-specific optimizations."""
     xp = array_namespace(exp_init)
-    
+
     if is_jax_array(exp_init):
         # Use JAX lax.scan for efficient accumulation
         import jax.lax as lax
         return _jax_scan_loop(exp_init, exp_df, n_freq)
-    
+
     elif is_cupy_array(exp_init):
         # Use CuPy kernel fusion
         import cupy
         return _cupy_fused_loop(exp_init, exp_df, n_freq)
-    
+
     else:
         # Pure Array API fallback (works for NumPy, array-api-strict)
         return _array_api_loop(exp_init, exp_df, n_freq)
@@ -94,15 +95,15 @@ Some functions aren't in the standard yet. Implement with backend branches:
 def histogram(x, bins, range=None, weights=None, density=False):
     """Array-api compatible histogram."""
     xp = array_namespace(x)
-    
+
     if is_numpy_array(x):
         import numpy as np
         return np.histogram(x, bins=bins, range=range, weights=weights, density=density)
-    
+
     elif is_jax_array(x):
         import jax.numpy as jnp
         return jnp.histogram(x, bins=bins, range=range, weights=weights, density=density)
-    
+
     else:
         # Fallback or warn
         import warnings
@@ -125,7 +126,7 @@ def test_delays_array_api_compliant(xp):
     """Test works with strict Array API implementation."""
     positions = xp.linspace(-0.01, 0.01, 64)
     delays = compute_delays(positions, focus_x=0.0, focus_z=0.03)
-    
+
     assert delays.shape == positions.shape
     assert hasattr(delays, '__array_namespace__')  # Is Array API compliant
 ```
@@ -138,10 +139,10 @@ from array_api_extra import isclose
 def assert_array_equal(actual, expected, rtol=1e-7, atol=0.0):
     """Array-api compatible assertion for tests."""
     xp = array_namespace(actual, expected)
-    
+
     if actual.shape != expected.shape:
         raise AssertionError(f"Shape mismatch: {actual.shape} vs {expected.shape}")
-    
+
     close = isclose(actual, expected, rtol=rtol, atol=atol, xp=xp)
     if not xp.all(close):
         max_diff = float(xp.max(xp.abs(actual - expected)))
@@ -167,7 +168,7 @@ test = [
 ## Key Rules
 
 1. **Always use `xp = array_namespace(input)`** - never hardcode numpy
-2. **Preserve input types** - output arrays should match input backend
-3. **Test with array-api-strict** - catches non-compliant operations
-4. **Document shapes** - use jaxtyping annotations on all public functions
-5. **Branch for optimization** - use `is_jax_array()` etc. for backend-specific code
+1. **Preserve input types** - output arrays should match input backend
+1. **Test with array-api-strict** - catches non-compliant operations
+1. **Document shapes** - use jaxtyping annotations on all public functions
+1. **Branch for optimization** - use `is_jax_array()` etc. for backend-specific code

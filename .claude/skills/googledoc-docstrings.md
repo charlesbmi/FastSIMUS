@@ -2,7 +2,8 @@
 
 ## Overview
 
-FastSIMUS uses [Google-style docstrings](https://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html) for all public functions, classes, and modules.
+FastSIMUS uses [Google-style docstrings](https://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
+for all public functions, classes, and modules.
 
 ## Function Docstring Template
 
@@ -24,7 +25,7 @@ def simus(
         x: X-coordinates of scatterers in meters. Parallel to transducer face.
         z: Z-coordinates of scatterers in meters. Perpendicular to transducer,
             increases with depth. Must have same shape as `x`.
-        rc: Reflection coefficients (dimensionless). Amplitude of reflected 
+        rc: Reflection coefficients (dimensionless). Amplitude of reflected
             wave relative to incident wave.
         delays: Transmit delays per element in seconds. Use `txdelay()` to
             compute for focused or diverging waves.
@@ -53,6 +54,7 @@ def simus(
 ## Section Reference
 
 ### Args
+
 Document each parameter. Type hints in signature, so focus on description:
 
 ```python
@@ -65,6 +67,7 @@ Args:
 ```
 
 ### Returns
+
 Describe the return value(s):
 
 ```python
@@ -79,6 +82,7 @@ Returns:
 ```
 
 ### Raises
+
 List exceptions that may be raised:
 
 ```python
@@ -88,6 +92,7 @@ Raises:
 ```
 
 ### Note
+
 Additional information, caveats, assumptions:
 
 ```python
@@ -97,6 +102,7 @@ Note:
 ```
 
 ### References
+
 Citations and links:
 
 ```python
@@ -138,7 +144,7 @@ class TransducerParams:
         >>> params.fc
         2700000.0
     """
-    
+
     fc: float
     pitch: float
     # ... etc
@@ -197,24 +203,28 @@ uv run pytest --doctest-modules src/fast_simus/
 ## Common Mistakes
 
 ❌ **Don't repeat type hints in Args:**
+
 ```python
 Args:
     x (np.ndarray): ...  # Wrong - type is in signature
 ```
 
 ✅ **Do focus on description:**
+
 ```python
 Args:
     x: X-coordinates of scatterers in meters.
 ```
 
 ❌ **Don't use NumPy-style section headers:**
+
 ```python
 Parameters
 ----------  # Wrong style
 ```
 
 ✅ **Do use Google-style:**
+
 ```python
 Args:
     ...

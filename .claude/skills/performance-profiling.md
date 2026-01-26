@@ -2,7 +2,8 @@
 
 ## Overview
 
-FastSIMUS targets 50-100x speedup over NumPy baseline via JAX/CuPy acceleration. This guide covers profiling tools and patterns.
+FastSIMUS targets 50-100x speedup over NumPy baseline via JAX/CuPy acceleration. This guide covers profiling tools and
+patterns.
 
 ## Quick Profiling
 
@@ -183,9 +184,9 @@ import jax.numpy as jnp
 
 def benchmark_backends(x_np, z_np, rc_np, delays_np, params, n_runs=5):
     """Compare performance across backends."""
-    
+
     results = {}
-    
+
     # NumPy baseline
     times = []
     for _ in range(n_runs):
@@ -193,16 +194,16 @@ def benchmark_backends(x_np, z_np, rc_np, delays_np, params, n_runs=5):
         _ = simus(x_np, z_np, rc_np, delays_np, params)
         times.append(time.perf_counter() - start)
     results['numpy'] = np.median(times)
-    
+
     # JAX
     x_jax = jnp.array(x_np)
     z_jax = jnp.array(z_np)
     rc_jax = jnp.array(rc_np)
     delays_jax = jnp.array(delays_np)
-    
+
     # Warmup (compile)
     _ = simus(x_jax, z_jax, rc_jax, delays_jax, params)
-    
+
     times = []
     for _ in range(n_runs):
         start = time.perf_counter()
@@ -210,13 +211,13 @@ def benchmark_backends(x_np, z_np, rc_np, delays_np, params, n_runs=5):
         result.block_until_ready()
         times.append(time.perf_counter() - start)
     results['jax'] = np.median(times)
-    
+
     # Print summary
     baseline = results['numpy']
     for backend, t in results.items():
         speedup = baseline / t
         print(f"{backend:10s}: {t:.3f}s ({speedup:.1f}x)")
-    
+
     return results
 ```
 
@@ -237,34 +238,34 @@ LARGE = dict(n_points=100_000, n_elements=256, n_freq=555)
 
 ## Performance Targets
 
-| Configuration | NumPy | JAX CPU | JAX GPU | Speedup |
-|---------------|-------|---------|---------|---------|
-| MEDIUM (10k pts) | 1.5s | 100-150ms | 15-30ms | 50-100x |
+| Configuration    | NumPy | JAX CPU   | JAX GPU | Speedup |
+| ---------------- | ----- | --------- | ------- | ------- |
+| MEDIUM (10k pts) | 1.5s  | 100-150ms | 15-30ms | 50-100x |
 
 ## Common Bottlenecks
 
 ### 1. Python Loop Overhead
-**Symptom:** Similar time for NumPy and JAX CPU
-**Fix:** Use `jax.lax.scan` or `jax.lax.fori_loop`
+
+**Symptom:** Similar time for NumPy and JAX CPU **Fix:** Use `jax.lax.scan` or `jax.lax.fori_loop`
 
 ### 2. Repeated Compilation
-**Symptom:** JAX slow on every call
-**Fix:** Ensure inputs have consistent shapes/dtypes
+
+**Symptom:** JAX slow on every call **Fix:** Ensure inputs have consistent shapes/dtypes
 
 ### 3. Host-Device Transfer
-**Symptom:** GPU not faster than CPU
-**Fix:** Keep data on GPU, minimize `.block_until_ready()` calls mid-computation
+
+**Symptom:** GPU not faster than CPU **Fix:** Keep data on GPU, minimize `.block_until_ready()` calls mid-computation
 
 ### 4. Memory Bandwidth
-**Symptom:** GPU utilization low
-**Fix:** Batch operations, use `jax.vmap` for multiple simulations
+
+**Symptom:** GPU utilization low **Fix:** Batch operations, use `jax.vmap` for multiple simulations
 
 ## Profiling Checklist
 
 1. [ ] Establish NumPy baseline with `pytest-benchmark`
-2. [ ] Profile with `cProfile` to find bottlenecks
-3. [ ] Use `line_profiler` on hot functions
-4. [ ] Measure JAX compile time separately from runtime
-5. [ ] Use `.block_until_ready()` for accurate JAX timing
-6. [ ] Check GPU utilization with `nvidia-smi` or Nsight
-7. [ ] Compare against target speedups (10x CPU, 50-100x GPU)
+1. [ ] Profile with `cProfile` to find bottlenecks
+1. [ ] Use `line_profiler` on hot functions
+1. [ ] Measure JAX compile time separately from runtime
+1. [ ] Use `.block_until_ready()` for accurate JAX timing
+1. [ ] Check GPU utilization with `nvidia-smi` or Nsight
+1. [ ] Compare against target speedups (10x CPU, 50-100x GPU)

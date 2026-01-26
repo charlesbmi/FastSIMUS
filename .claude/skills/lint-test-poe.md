@@ -2,7 +2,8 @@
 
 ## Overview
 
-FastSIMUS uses [Poe the Poet](https://poethepoet.natn.io/) as a task runner with `uv` for dependency management. All commands are defined in `pyproject.toml`.
+FastSIMUS uses [Poe the Poet](https://poethepoet.natn.io/) as a task runner with `uv` for dependency management. All
+commands are defined in `pyproject.toml`.
 
 ## Quick Reference
 
@@ -32,12 +33,13 @@ uv run poe lint
 ```
 
 This executes (in order):
+
 1. `ruff format src tests` - Format code
-2. `ruff check --fix src tests` - Lint with auto-fix
-3. `ty check` - Type checking
-4. `mdformat README.md docs --wrap 120` - Format markdown
-5. `codespell src tests docs README.md` - Spell check
-6. `deptry src` - Check for unused/missing dependencies
+1. `ruff check --fix src tests` - Lint with auto-fix
+1. `ty check` - Type checking
+1. `mdformat README.md docs --wrap 120` - Format markdown
+1. `codespell src tests docs README.md` - Spell check
+1. `deptry src` - Check for unused/missing dependencies
 
 ### Ruff Configuration
 
@@ -81,6 +83,7 @@ uv run poe test
 ```
 
 Uses `pytest-testmon` to only run tests affected by recent changes:
+
 - Tracks file dependencies
 - Caches results in `.testmondata`
 - Runs in parallel with `-n auto`
@@ -92,6 +95,7 @@ uv run poe test-all
 ```
 
 Runs full test suite with coverage reporting:
+
 - Parallel execution (`-n auto`)
 - Coverage XML output for Codecov
 
@@ -148,6 +152,7 @@ uv run poe benchmark
 ```
 
 Uses `pytest-benchmark`:
+
 - Auto-saves results to `.benchmarks/`
 - Generates histogram comparisons
 
@@ -177,6 +182,7 @@ uv run prek run --all-files
 ## CI Integration
 
 Tests run automatically on:
+
 - Push to `main`
 - Pull requests touching `src/`, `tests/`, `pyproject.toml`
 
