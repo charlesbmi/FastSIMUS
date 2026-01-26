@@ -80,6 +80,10 @@ test = [
 help = "Install the virtual environment using uv"
 cmd = "uv sync"
 
+[tool.poe.tasks.pre-commit]
+help = "Run pre-commit hooks on all files"
+cmd = "prek run --all-files"
+
 [tool.poe.tasks.lint]
 help = "Run code quality tools"
 sequence = [
@@ -89,6 +93,7 @@ sequence = [
     { cmd = "mdformat README.md docs --wrap 120" },
     { cmd = "codespell src tests docs README.md" },
     { cmd = "deptry src" },
+    { ref = "pre-commit" },
 ]
 
 [tool.poe.tasks.test]
