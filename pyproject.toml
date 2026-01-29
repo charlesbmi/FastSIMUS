@@ -32,6 +32,7 @@ classifiers = [
 ]
 dependencies = [
     "array-api-compat>=1.13",
+    "pydantic>=2.0,<3.0",
 ]
 
 [build-system]
