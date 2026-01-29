@@ -15,16 +15,9 @@ with contextlib.suppress(ImportError):
 HAS_JAX = False
 jnp = None
 with contextlib.suppress(ImportError):
-    import jax.numpy as jnp  # type: ignore[import-untyped]
+    import jax.numpy as jnp
 
     HAS_JAX = True
-
-HAS_CUPY = False
-cp = None
-with contextlib.suppress(ImportError):
-    import cupy as cp  # type: ignore[import-untyped]
-
-    HAS_CUPY = True
 
 HAS_ARRAY_API_STRICT = False
 array_api_strict = None
@@ -47,15 +40,6 @@ with contextlib.suppress(ImportError):
             id="jax",
             marks=[
                 pytest.mark.skipif(not HAS_JAX, reason="JAX not available"),
-                pytest.mark.cuda,
-            ],
-        ),
-        pytest.param(
-            cp,
-            id="cupy",
-            marks=[
-                pytest.mark.skipif(not HAS_CUPY, reason="CuPy not available"),
-                pytest.mark.cuda,
             ],
         ),
     ]
@@ -63,7 +47,6 @@ with contextlib.suppress(ImportError):
 def xp(request):
     """Fixture providing different array API backends.
 
-    Parametrizes tests to run with NumPy, array-api-strict, JAX, and CuPy.
-    GPU backends (JAX, CuPy) are marked with 'cuda' and can be skipped.
+    Parametrizes tests to run with NumPy, array-api-strict, and JAX.
     """
     return request.param

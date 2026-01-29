@@ -97,7 +97,6 @@ tests/
 ```bash
 # Optional
 JAX_ENABLE_X64=true           # 64-bit precision in JAX
-CUDA_VISIBLE_DEVICES=0        # GPU selection
 DATA_DIR=./data               # Data directory
 MAX_ARRAY_MB=1000             # Memory limit
 ```

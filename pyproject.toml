@@ -77,6 +77,7 @@ test = [
     "pytest-testmon>=2.2.0",
     "array-api-strict>=2.0",
     "numpy>=2.3",
+    "jax>=0.9",
 ]
 test-parallel = [
     { include-group = "test" },
@@ -201,7 +202,6 @@ testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "cuda: marks tests as requiring CUDA-enabled GPU (deselect with '-m \"not cuda\"')",
 ]
 
 [tool.coverage.report]
