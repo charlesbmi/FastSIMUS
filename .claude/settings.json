@@ -1,0 +1,13 @@
+{
+  "enabledPlugins": {
+    "everything-claude-code@charlesbmi-claude-code": true
+  },
+  "extraKnownMarketplaces": {
+    "charlesbmi-claude-code": {
+      "source": {
+        "source": "github",
+        "repo": "charlesbmi/everything-claude-code"
+      }
+    }
+  }
+}

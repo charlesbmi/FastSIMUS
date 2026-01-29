@@ -1,4 +1,10 @@
-# Array API Typing & Protocols
+# Array API Typing & Protocols (FastSIMUS-specific)
+
+## When to Use
+
+- Working in the FastSIMUS codebase
+- Writing ultrasound simulation code that needs multi-backend support
+- Using jaxtyping with beartype for shape validation in this project
 
 ## Overview
 
