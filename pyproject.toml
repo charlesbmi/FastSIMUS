@@ -35,6 +35,7 @@ classifiers = [
 # ---- Main dependencies ----
 
 dependencies = [
+    "array-api-compat @ git+https://github.com/data-apis/array-api-compat.git@1b0de51538deb7c21d0c268f36764a8589e40012",
 ]
 
 
@@ -69,6 +70,8 @@ test = [
     "pytest-xdist>=3.8.0",
     "pytest-benchmark[histogram]>=4.0.0",
     "pytest-testmon>=2.2.0",
+    "array-api-strict>=2.0",
+    "numpy>=1.26",
 ]
 
 
@@ -180,7 +183,10 @@ convention = "google"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
-markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "cuda: marks tests as requiring CUDA-enabled GPU (deselect with '-m \"not cuda\"')",
+]
 
 [tool.coverage.report]
 skip_empty = true
