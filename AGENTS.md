@@ -1,10 +1,12 @@
 # Example Scientific Python CLAUDE.md
 
-This is an example project-level CLAUDE.md file for Python scientific computing projects. Place this in your project root.
+This is an example project-level CLAUDE.md file for Python scientific computing projects. Place this in your project
+root.
 
 ## Project Overview
 
-FastSIMUS is an Array API-compliant ultrasound simulation library with NumPy/JAX/CuPy backends for 50-100x GPU acceleration.
+FastSIMUS is an Array API-compliant ultrasound simulation library with NumPy/JAX/CuPy backends for 50-100x GPU
+acceleration.
 
 ## Rules
 
@@ -111,6 +113,7 @@ MAX_ARRAY_MB=1000             # Memory limit
 ## Reference Skills
 
 For detailed patterns and examples, see:
+
 - `python-scientific-patterns` - Array API patterns, function signatures, dataclasses
 - `python-scientific-testing` - Test patterns, fixtures, Zarr loading
 - `coding-standards` - General Python coding standards
