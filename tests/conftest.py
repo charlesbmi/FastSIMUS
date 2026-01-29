@@ -15,14 +15,14 @@ with contextlib.suppress(ImportError):
 HAS_JAX = False
 jnp = None
 with contextlib.suppress(ImportError):
-    import jax.numpy as jnp
+    import jax.numpy as jnp  # type: ignore[import-untyped]
 
     HAS_JAX = True
 
 HAS_CUPY = False
 cp = None
 with contextlib.suppress(ImportError):
-    import cupy as cp
+    import cupy as cp  # type: ignore[import-untyped]
 
     HAS_CUPY = True
 
