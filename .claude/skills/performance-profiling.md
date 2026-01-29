@@ -1,9 +1,16 @@
-# Performance Profiling
+# Performance Profiling (FastSIMUS-specific)
+
+## When to Use
+
+- Profiling ultrasound simulation performance in FastSIMUS
+- Optimizing JAX/CuPy code for GPU acceleration
+- Benchmarking against PyMUST NumPy baseline
+- Working toward the 50-100x speedup target
 
 ## Overview
 
 FastSIMUS targets 50-100x speedup over NumPy baseline via JAX/CuPy acceleration. This guide covers profiling tools and
-patterns.
+patterns specific to the FastSIMUS project.
 
 ## Quick Profiling
 
