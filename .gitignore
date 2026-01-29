@@ -98,6 +98,9 @@ ipython_config.py
 #   intended to run in multiple environments; otherwise, check them in:
 .python-version
 
+# uv
+#   allow local overrides to uv.toml
+uv.toml
 
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
