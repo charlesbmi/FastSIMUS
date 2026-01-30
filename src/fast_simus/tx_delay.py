@@ -20,21 +20,25 @@ Sign Convention:
 from __future__ import annotations
 
 from math import inf, pi
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from array_api_compat import array_namespace
-from beartype import beartype
+from beartype import beartype as typechecker
 from jaxtyping import Float, jaxtyped
 
 from fast_simus.transducer_params import TransducerParams
 
 if TYPE_CHECKING:
-    from array_api_compat import Array
+    pass
+
+# Type alias for Array API objects (until protocol is standardized)
+ArrayAPIObj = Any
 
 
 def _compute_element_positions(
     params: TransducerParams,
-) -> tuple[Array, Array, Array | None, float]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, float]:
     """Compute transducer element positions.
 
     Args:
@@ -44,8 +48,6 @@ def _compute_element_positions(
         Tuple of (x_positions_m, z_positions_m, theta_rad, apex_offset_m)
         where theta and apex_offset are None/0.0 for linear arrays.
     """
-    import numpy as np
-
     n = params.n_elements
     pitch = params.pitch
     radius = params.radius
@@ -70,12 +72,12 @@ def _compute_element_positions(
     return x, z, theta, apex_offset
 
 
-@jaxtyped(typechecker=beartype)
+@jaxtyped(typechecker=typechecker)
 def compute_focused_delays(
     params: TransducerParams,
-    x0_m: Float[Array, " *batch"] | float,
-    z0_m: Float[Array, " *batch"] | float,
-) -> Float[Array, "*batch n_elements"]:
+    x0_m: Float[ArrayAPIObj, "*batch"] | float,
+    z0_m: Float[ArrayAPIObj, "*batch"] | float,
+) -> Float[ArrayAPIObj, "*batch n_elements"]:
     """Compute transmit time delays for focused or diverging spherical waves.
 
     Spherical waves propagate like a collapsing sphere focusing onto a point
@@ -118,7 +120,7 @@ def compute_focused_delays(
         >>> z0 = np.array([0.04, 0.05, 0.06])
         >>> delays = compute_focused_delays(params, x0_m=x0, z0_m=z0)
         >>> delays.shape
-        (3, 64)  # 3 beams × 64 elements
+        (3, 64)  # 3 beams x 64 elements
         >>>
         >>> # Diverging wave (virtual source behind array)
         >>> delays = compute_focused_delays(params, x0_m=0.0, z0_m=-0.03)
@@ -136,10 +138,7 @@ def compute_focused_delays(
             https://www.biomecardio.com/publis/ultrasonics21.pdf
             (Equation 5, extended to support virtual sources)
     """
-    # Import numpy as default for scalars
-    import numpy as np
-
-    # Convert to arrays if scalars
+    # Convert scalars to arrays
     x0_arr = np.atleast_1d(np.asarray(x0_m, dtype=np.float64)).reshape(-1, 1)
     z0_arr = np.atleast_1d(np.asarray(z0_m, dtype=np.float64)).reshape(-1, 1)
 
@@ -175,11 +174,11 @@ def compute_focused_delays(
     return delays
 
 
-@jaxtyped(typechecker=beartype)
+@jaxtyped(typechecker=typechecker)
 def compute_plane_wave_delays(
     params: TransducerParams,
-    tilt_rad: Float[Array, " *batch"] | float,
-) -> Float[Array, "*batch n_elements"]:
+    tilt_rad: Float[ArrayAPIObj, "*batch"] | float,
+) -> Float[ArrayAPIObj, "*batch n_elements"]:
     """Compute transmit time delays for plane wave transmission.
 
     Plane waves have a flat wavefront propagating in a specified direction,
@@ -218,7 +217,7 @@ def compute_plane_wave_delays(
         >>> angles = np.radians([-20, -10, 0, 10, 20])
         >>> delays = compute_plane_wave_delays(params, tilt_rad=angles)
         >>> delays.shape
-        (5, 64)  # 5 angles × 64 elements
+        (5, 64)  # 5 angles x 64 elements
         >>>
         >>> # Zero angle gives zero delays
         >>> delays_zero = compute_plane_wave_delays(params, tilt_rad=0.0)
@@ -232,10 +231,7 @@ def compute_plane_wave_delays(
         For convex arrays, the computation accounts for the curved geometry
         by computing distance to the plane perpendicular to the tilt direction.
     """
-    # Import numpy as default for scalars
-    import numpy as np
-
-    # Convert to arrays if scalars
+    # Convert scalars to arrays
     tilt_arr = np.atleast_1d(np.asarray(tilt_rad, dtype=np.float64)).reshape(-1, 1)
 
     # Get the appropriate namespace from the arrays
@@ -268,12 +264,12 @@ def compute_plane_wave_delays(
     return delays
 
 
-@jaxtyped(typechecker=beartype)
+@jaxtyped(typechecker=typechecker)
 def compute_circular_wave_delays(
     params: TransducerParams,
-    tilt_rad: Float[Array, " *batch"] | float,
-    width_rad: Float[Array, " *batch"] | float,
-) -> Float[Array, "*batch n_elements"]:
+    tilt_rad: Float[ArrayAPIObj, "*batch"] | float,
+    width_rad: Float[ArrayAPIObj, "*batch"] | float,
+) -> Float[ArrayAPIObj, "*batch n_elements"]:
     """Compute transmit time delays for circular wave transmission.
 
     Circular waves originate from a virtual point source positioned such that
@@ -325,14 +321,11 @@ def compute_circular_wave_delays(
         using geometric constraints. This creates a diverging spherical wave
         that appears to originate from behind the transducer.
     """
-    # Import numpy as default for scalars
-    import numpy as np
-
     if params.radius != inf:
         msg = "Circular wave delays are not supported for convex arrays"
         raise ValueError(msg)
 
-    # Convert to arrays if scalars
+    # Convert scalars to arrays
     tilt_arr = np.atleast_1d(np.asarray(tilt_rad, dtype=np.float64)).reshape(-1, 1)
     width_arr = np.atleast_1d(np.asarray(width_rad, dtype=np.float64)).reshape(-1, 1)
 
@@ -361,9 +354,9 @@ def compute_circular_wave_delays(
 
 def _angles_to_origin(
     L: float,
-    tilt_rad: Array,
-    width_rad: Array,
-) -> tuple[Array, Array]:
+    tilt_rad: np.ndarray,
+    width_rad: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
     """Convert tilt and width angles to virtual source position.
 
     Args:

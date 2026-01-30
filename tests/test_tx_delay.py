@@ -3,17 +3,11 @@
 These tests validate that our tx_delay implementation matches PyMUST outputs.
 """
 
-import warnings
-
 import numpy as np
 import pytest
+from pymust import getparam, txdelayCircular, txdelayFocused, txdelayPlane
 
 from fast_simus.transducer_presets import C5_2v, P4_2v
-
-# Suppress SyntaxWarnings from pymust - must be before pymust import
-warnings.filterwarnings("ignore", category=SyntaxWarning)
-
-from pymust import getparam, txdelayCircular, txdelayFocused, txdelayPlane  # noqa: E402
 
 
 class TestFocusedDelays:
@@ -230,11 +224,14 @@ class TestEdgeCases:
 
     def test_mismatched_vector_lengths(self):
         """x0 and z0 must have same length."""
+        from jaxtyping import TypeCheckError
+
         from fast_simus.tx_delay import compute_focused_delays
 
         params = P4_2v()
         x0 = np.array([0.0, 0.01])
         z0 = np.array([0.05])  # Different length
 
-        with pytest.raises(ValueError, match=r"same.*shape"):
+        # Jaxtyping catches this before our validation
+        with pytest.raises((ValueError, TypeCheckError)):
             compute_focused_delays(params, x0_m=x0, z0_m=z0)
