@@ -62,17 +62,20 @@ def element_positions(
         # Convex array: elements positioned along arc
         # Compute chord length subtended by the array
         # Each element subtends an angle: pitch / (2 * radius)
-        half_angle_per_element = xp.arcsin(pitch / 2 / radius)
+        half_angle_per_element = xp.asin(xp.asarray(pitch / 2 / radius))
         total_angle = half_angle_per_element * (n_elements - 1)
-        chord = 2 * radius * xp.sin(total_angle)
+        chord = xp.asarray(2 * radius) * xp.sin(total_angle)
 
         # Compute apex offset (distance from center to arc apex)
         # h = sqrt(radius^2 - (chord/2)^2)
-        apex_offset = float(xp.sqrt(radius**2 - (chord / 2) ** 2))
+        apex_offset_arr = xp.sqrt(xp.asarray(radius**2) - (chord / 2) ** 2)
+        apex_offset = float(apex_offset_arr)
 
         # Compute angular positions using linspace if available, otherwise manual
-        theta_start = float(xp.arctan2(-chord / 2, apex_offset))
-        theta_end = float(xp.arctan2(chord / 2, apex_offset))
+        theta_start_arr = xp.atan2(-chord / 2, apex_offset_arr)
+        theta_start = float(theta_start_arr)
+        theta_end_arr = xp.atan2(chord / 2, apex_offset_arr)
+        theta_end = float(theta_end_arr)
 
         # Try to use linspace if available (most backends support it)
         if hasattr(xp, "linspace"):
@@ -87,7 +90,7 @@ def element_positions(
 
         # Convert angular positions to (x, z) coordinates
         # z = radius * cos(theta) - h (where h is apex_offset)
-        z = radius * xp.cos(theta) - apex_offset
-        x = radius * xp.sin(theta)
+        z = xp.asarray(radius) * xp.cos(theta) - apex_offset
+        x = xp.asarray(radius) * xp.sin(theta)
 
     return x, z, theta, apex_offset
