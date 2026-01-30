@@ -29,6 +29,24 @@ uv tool install poethepoet
 
 This puts `poe` in your path; otherwise, you will need to run `uv run poe` instead of `poe`.
 
+### Docker Development Environment
+
+Alternatively, you can use Docker to set up a consistent development environment with all tools pre-installed:
+
+```bash
+# Build the Docker image
+docker build -t fastsimus-dev .
+
+# Run the container (mounts current directory to /workspace)
+docker run -it --rm -v $(pwd):/workspace fastsimus-dev
+
+# Inside the container, install dependencies and run tasks
+uv sync
+poe test
+```
+
+The Docker environment includes uv, poethepoet, and starship prompt pre-configured.
+
 ### Pre-commit Hooks
 
 This project uses [prek](https://prek.j178.dev/) (a faster Rust-based alternative to pre-commit):

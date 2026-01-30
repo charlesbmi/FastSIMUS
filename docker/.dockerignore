@@ -1,0 +1,60 @@
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Test artifacts
+.pytest_cache/
+.testmondata*
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+coverage.xml
+*.cover
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.cursor/
+.cursorignore
+.cursorindexingignore
+
+# Temporary files
+*.bak
+*.orig
+tmp/
+trash/
+attic/
+.tmp/
+
+# Documentation build
+site/
+
+# Linting/type checking cache
+.ruff_cache/
+.mypy_cache/
+.pytype/
+
+# Misc
+.env
+.envrc
+uv.lock
