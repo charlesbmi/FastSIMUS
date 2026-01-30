@@ -75,34 +75,30 @@ def _compute_element_positions(
 @jaxtyped(typechecker=typechecker)
 def compute_focused_delays(
     params: TransducerParams,
-    x0_m: Float[ArrayAPIObj, "*batch"] | float,
-    z0_m: Float[ArrayAPIObj, "*batch"] | float,
+    focus: Float[ArrayAPIObj, "*batch xz=2"] | float,
 ) -> Float[ArrayAPIObj, "*batch n_elements"]:
     """Compute transmit time delays for focused or diverging spherical waves.
 
     Spherical waves propagate like a collapsing sphere focusing onto a point
-    (positive z0_m), or an expanding sphere diverging from a virtual source
-    (negative z0_m).
+    (positive z), or an expanding sphere diverging from a virtual source
+    (negative z).
 
     Args:
         params:
             Transducer configuration including geometry and sound speed.
-        x0_m:
-            Lateral focal position(s) in meters. Shape (*batch,).
-            x0_m=0 corresponds to center of array.
-        z0_m:
-            Axial focal position(s) in meters. Shape (*batch,).
-            - Positive z0_m: Focused wave (focus in front of transducer)
-            - Negative z0_m: Diverging wave (virtual source behind transducer)
-            - z0_m=0: Treated as focusing just in front (negative delays)
+        focus:
+            Focal position(s) in meters as [..., (x, z)] coordinates.
+            Shape (*batch, 2) or (2,) for single focus.
+            - focus[..., 0]: Lateral position (x), center of array at 0
+            - focus[..., 1]: Axial position (z)
+              - Positive z: Focused wave (focus in front of transducer)
+              - Negative z: Diverging wave (virtual source behind transducer)
+              - z=0: Treated as focusing just in front (negative delays)
 
     Returns:
         Transmit time delays in seconds. Shape (*batch, n_elements).
         Delays are relative to minimum (all non-negative).
         Each row corresponds to one beam configuration.
-
-    Raises:
-        ValueError: If x0_m and z0_m have different shapes.
 
     Examples:
         >>> from fast_simus import compute_focused_delays
@@ -111,19 +107,20 @@ def compute_focused_delays(
         >>>
         >>> # Single focused beam at 5cm depth, centered laterally
         >>> params = P4_2v()
-        >>> delays = compute_focused_delays(params, x0_m=0.0, z0_m=0.05)
+        >>> focus = np.array([0.0, 0.05])  # [x, z]
+        >>> delays = compute_focused_delays(params, focus=focus)
         >>> delays.shape
         (64,)  # One delay per element
         >>>
         >>> # Vectorized: multiple focal points
-        >>> x0 = np.array([0.0, 0.01, 0.02])
-        >>> z0 = np.array([0.04, 0.05, 0.06])
-        >>> delays = compute_focused_delays(params, x0_m=x0, z0_m=z0)
+        >>> focus = np.array([[0.0, 0.04], [0.01, 0.05], [0.02, 0.06]])
+        >>> delays = compute_focused_delays(params, focus=focus)
         >>> delays.shape
         (3, 64)  # 3 beams x 64 elements
         >>>
         >>> # Diverging wave (virtual source behind array)
-        >>> delays = compute_focused_delays(params, x0_m=0.0, z0_m=-0.03)
+        >>> focus = np.array([0.0, -0.03])
+        >>> delays = compute_focused_delays(params, focus=focus)
         >>> # Creates expanding wavefront
 
     Notes:
@@ -138,16 +135,16 @@ def compute_focused_delays(
             https://www.biomecardio.com/publis/ultrasonics21.pdf
             (Equation 5, extended to support virtual sources)
     """
-    # Convert scalars to arrays
-    x0_arr = np.atleast_1d(np.asarray(x0_m, dtype=np.float64)).reshape(-1, 1)
-    z0_arr = np.atleast_1d(np.asarray(z0_m, dtype=np.float64)).reshape(-1, 1)
+    # Convert to array and get namespace
+    focus_arr = np.atleast_1d(np.asarray(focus, dtype=np.float64))
+    xp = array_namespace(focus_arr)
 
-    # Get the appropriate namespace from the arrays
-    xp = array_namespace(x0_arr, z0_arr)
+    # Ensure focus has shape (*batch, 2)
+    if focus_arr.ndim == 1:
+        focus_arr = focus_arr[np.newaxis, :]
 
-    if x0_arr.shape != z0_arr.shape:
-        msg = "x0_m and z0_m must have the same shape"
-        raise ValueError(msg)
+    x0_arr = focus_arr[..., :1]
+    z0_arr = focus_arr[..., 1:2]
 
     x_elem, z_elem, _, apex_offset = _compute_element_positions(params)
     x_elem = xp.asarray(x_elem)
@@ -267,8 +264,7 @@ def compute_plane_wave_delays(
 @jaxtyped(typechecker=typechecker)
 def compute_circular_wave_delays(
     params: TransducerParams,
-    tilt_rad: Float[ArrayAPIObj, "*batch"] | float,
-    width_rad: Float[ArrayAPIObj, "*batch"] | float,
+    angles: Float[ArrayAPIObj, "*batch angles=2"] | float,
 ) -> Float[ArrayAPIObj, "*batch n_elements"]:
     """Compute transmit time delays for circular wave transmission.
 
@@ -279,11 +275,11 @@ def compute_circular_wave_delays(
     Args:
         params:
             Transducer configuration. Must be a linear array (radius=inf).
-        tilt_rad:
-            Tilt angle(s) of the wave center in radians. Shape (*batch,).
-        width_rad:
-            Angular width(s) of the wave in radians. Shape (*batch,).
-            Must satisfy 0 < width_rad < π.
+        angles:
+            Wave angles as [..., (tilt, width)] in radians. Shape (*batch, 2) or (2,).
+            - angles[..., 0]: Tilt angle of the wave center
+            - angles[..., 1]: Angular width of the wave
+              Must satisfy 0 < width < π.
 
     Returns:
         Transmit time delays in seconds. Shape (*batch, n_elements).
@@ -291,8 +287,7 @@ def compute_circular_wave_delays(
 
     Raises:
         ValueError: If params describes a convex array (not supported).
-        ValueError: If tilt_rad and width_rad have different shapes.
-        ValueError: If any width_rad is outside (0, π).
+        ValueError: If any width is outside (0, π).
 
     Examples:
         >>> from fast_simus import compute_circular_wave_delays
@@ -301,18 +296,17 @@ def compute_circular_wave_delays(
         >>>
         >>> # Single circular wave: 30° width, 10° tilt
         >>> params = P4_2v()
-        >>> delays = compute_circular_wave_delays(
-        ...     params,
-        ...     tilt_rad=np.radians(10),
-        ...     width_rad=np.radians(30)
-        ... )
+        >>> angles = np.array([np.radians(10), np.radians(30)])  # [tilt, width]
+        >>> delays = compute_circular_wave_delays(params, angles=angles)
         >>> delays.shape
         (64,)
         >>>
         >>> # Multiple configurations
-        >>> tilt = np.array([0.0, np.radians(10)])
-        >>> width = np.array([np.radians(30), np.radians(45)])
-        >>> delays = compute_circular_wave_delays(params, tilt_rad=tilt, width_rad=width)
+        >>> angles = np.array([
+        ...     [0.0, np.radians(30)],
+        ...     [np.radians(10), np.radians(45)]
+        ... ])
+        >>> delays = compute_circular_wave_delays(params, angles=angles)
         >>> delays.shape
         (2, 64)
 
@@ -325,16 +319,16 @@ def compute_circular_wave_delays(
         msg = "Circular wave delays are not supported for convex arrays"
         raise ValueError(msg)
 
-    # Convert scalars to arrays
-    tilt_arr = np.atleast_1d(np.asarray(tilt_rad, dtype=np.float64)).reshape(-1, 1)
-    width_arr = np.atleast_1d(np.asarray(width_rad, dtype=np.float64)).reshape(-1, 1)
+    # Convert to array and get namespace
+    angles_arr = np.atleast_1d(np.asarray(angles, dtype=np.float64))
+    xp = array_namespace(angles_arr)
 
-    # Get the appropriate namespace from the arrays
-    xp = array_namespace(tilt_arr, width_arr)
+    # Ensure angles has shape (*batch, 2)
+    if angles_arr.ndim == 1:
+        angles_arr = angles_arr[np.newaxis, :]
 
-    if tilt_arr.shape != width_arr.shape:
-        msg = "tilt_rad and width_rad must have the same shape"
-        raise ValueError(msg)
+    tilt_arr = angles_arr[..., :1]
+    width_arr = angles_arr[..., 1:2]
 
     if xp.any(width_arr <= 0) or xp.any(width_arr >= pi):
         msg = "Width angles must satisfy 0 < width_rad < π"

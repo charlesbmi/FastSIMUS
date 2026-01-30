@@ -24,7 +24,8 @@ class TestFocusedDelays:
 
         # FastSIMUS implementation
         params = P4_2v()
-        fs_delays = compute_focused_delays(params, x0_m=x0, z0_m=z0)
+        focus = np.array([x0, z0])
+        fs_delays = compute_focused_delays(params, focus=focus)
 
         # Should match within numerical tolerance
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
@@ -38,7 +39,8 @@ class TestFocusedDelays:
         pymust_delays = txdelayFocused(pymust_param, x0, z0)
 
         params = P4_2v()
-        fs_delays = compute_focused_delays(params, x0_m=x0, z0_m=z0)
+        focus = np.array([x0, z0])
+        fs_delays = compute_focused_delays(params, focus=focus)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -51,7 +53,8 @@ class TestFocusedDelays:
         pymust_delays = txdelayFocused(pymust_param, x0, z0)
 
         params = C5_2v()
-        fs_delays = compute_focused_delays(params, x0_m=x0, z0_m=z0)
+        focus = np.array([x0, z0])
+        fs_delays = compute_focused_delays(params, focus=focus)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -65,7 +68,8 @@ class TestFocusedDelays:
         pymust_delays = txdelayFocused(pymust_param, x0, z0)
 
         params = P4_2v()
-        fs_delays = compute_focused_delays(params, x0_m=x0, z0_m=z0)
+        focus = np.stack([x0, z0], axis=-1)  # Shape (3, 2)
+        fs_delays = compute_focused_delays(params, focus=focus)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -140,7 +144,8 @@ class TestCircularWaveDelays:
         pymust_delays = txdelayCircular(pymust_param, tilt, width)
 
         params = P4_2v()
-        fs_delays = compute_circular_wave_delays(params, tilt_rad=tilt, width_rad=width)
+        angles = np.array([tilt, width])
+        fs_delays = compute_circular_wave_delays(params, angles=angles)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -154,7 +159,8 @@ class TestCircularWaveDelays:
         pymust_delays = txdelayCircular(pymust_param, tilt, width)
 
         params = P4_2v()
-        fs_delays = compute_circular_wave_delays(params, tilt_rad=tilt, width_rad=width)
+        angles = np.stack([tilt, width], axis=-1)  # Shape (2, 2)
+        fs_delays = compute_circular_wave_delays(params, angles=angles)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -163,8 +169,9 @@ class TestCircularWaveDelays:
         from fast_simus.tx_delay import compute_circular_wave_delays
 
         params = C5_2v()
+        angles = np.array([0.0, np.pi / 6])
         with pytest.raises(ValueError, match=r"Circular.*convex"):
-            compute_circular_wave_delays(params, tilt_rad=0.0, width_rad=np.pi / 6)
+            compute_circular_wave_delays(params, angles=angles)
 
 
 class TestArrayAPICompliance:
@@ -177,10 +184,9 @@ class TestArrayAPICompliance:
         from fast_simus.tx_delay import compute_focused_delays
 
         params = P4_2v()
-        x0 = xp.asarray([0.02])
-        z0 = xp.asarray([0.05])
+        focus = xp.asarray([[0.02, 0.05]])
 
-        delays = compute_focused_delays(params, x0_m=x0, z0_m=z0)
+        delays = compute_focused_delays(params, focus=focus)
 
         assert hasattr(delays, "__array_namespace__")
         assert xp.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
@@ -217,21 +223,21 @@ class TestEdgeCases:
 
         params = P4_2v()
         with pytest.raises(ValueError, match="Width"):
-            compute_circular_wave_delays(params, tilt_rad=0.0, width_rad=np.pi + 0.1)
+            compute_circular_wave_delays(params, angles=np.array([0.0, np.pi + 0.1]))
 
         with pytest.raises(ValueError, match="Width"):
-            compute_circular_wave_delays(params, tilt_rad=0.0, width_rad=-0.1)
+            compute_circular_wave_delays(params, angles=np.array([0.0, -0.1]))
 
     def test_mismatched_vector_lengths(self):
-        """x0 and z0 must have same length."""
+        """Focus dimensions must be valid."""
         from jaxtyping import TypeCheckError
 
         from fast_simus.tx_delay import compute_focused_delays
 
         params = P4_2v()
-        x0 = np.array([0.0, 0.01])
-        z0 = np.array([0.05])  # Different length
+        # Invalid shape (should be (n, 2) or (2,))
+        focus = np.array([0.0, 0.01, 0.05])  # Shape (3,) instead of (3, 2)
 
         # Jaxtyping catches this before our validation
         with pytest.raises((ValueError, TypeCheckError)):
-            compute_focused_delays(params, x0_m=x0, z0_m=z0)
+            compute_focused_delays(params, focus=focus)
