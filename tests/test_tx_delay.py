@@ -5,9 +5,11 @@ These tests validate that our tx_delay implementation matches PyMUST outputs.
 
 import numpy as np
 import pytest
+from array_api_compat import array_namespace
 from pymust import getparam, txdelayCircular, txdelayFocused, txdelayPlane
 
 from fast_simus.transducer_presets import C5_2v, P4_2v
+from fast_simus.utils.geometry import element_positions
 
 
 class TestFocusedDelays:
@@ -24,8 +26,13 @@ class TestFocusedDelays:
 
         # FastSIMUS implementation
         params = P4_2v()
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = compute_focused_delays(params, focus=focus)
+        fs_delays = compute_focused_delays(
+            elem_pos, params.speed_of_sound, params.radius, focus, apex
+        )
 
         # Should match within numerical tolerance
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
@@ -39,8 +46,13 @@ class TestFocusedDelays:
         pymust_delays = txdelayFocused(pymust_param, x0, z0)
 
         params = P4_2v()
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = compute_focused_delays(params, focus=focus)
+        fs_delays = compute_focused_delays(
+            elem_pos, params.speed_of_sound, params.radius, focus, apex
+        )
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -53,8 +65,13 @@ class TestFocusedDelays:
         pymust_delays = txdelayFocused(pymust_param, x0, z0)
 
         params = C5_2v()
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = compute_focused_delays(params, focus=focus)
+        fs_delays = compute_focused_delays(
+            elem_pos, params.speed_of_sound, params.radius, focus, apex
+        )
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -68,8 +85,13 @@ class TestFocusedDelays:
         pymust_delays = txdelayFocused(pymust_param, x0, z0)
 
         params = P4_2v()
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
         focus = np.stack([x0, z0], axis=-1)  # Shape (3, 2)
-        fs_delays = compute_focused_delays(params, focus=focus)
+        fs_delays = compute_focused_delays(
+            elem_pos, params.speed_of_sound, params.radius, focus, apex
+        )
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -79,54 +101,74 @@ class TestPlaneWaveDelays:
 
     def test_plane_wave_linear_matches_pymust(self):
         """Plane wave delays for linear array should match PyMUST."""
-        from fast_simus.tx_delay import compute_plane_wave_delays
+        from fast_simus.tx_delay import plane_wave
 
         pymust_param = getparam("P4-2v")
         tilt = np.pi / 18  # 10 degrees
         pymust_delays = txdelayPlane(pymust_param, tilt)
 
         params = P4_2v()
-        fs_delays = compute_plane_wave_delays(params, tilt_rad=tilt)
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
+        fs_delays = plane_wave(
+            elem_pos, params.speed_of_sound, params.radius, tilt, apex
+        )
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
     def test_plane_wave_zero_tilt_matches_pymust(self):
         """Zero tilt should give zero delays."""
-        from fast_simus.tx_delay import compute_plane_wave_delays
+        from fast_simus.tx_delay import plane_wave
 
         pymust_param = getparam("P4-2v")
         tilt = 0.0
         pymust_delays = txdelayPlane(pymust_param, tilt)
 
         params = P4_2v()
-        fs_delays = compute_plane_wave_delays(params, tilt_rad=tilt)
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
+        fs_delays = plane_wave(
+            elem_pos, params.speed_of_sound, params.radius, tilt, apex
+        )
 
         np.testing.assert_allclose(fs_delays, pymust_delays, atol=1e-12)
         np.testing.assert_allclose(fs_delays, 0.0, atol=1e-12)
 
     def test_plane_wave_convex_matches_pymust(self):
         """Plane wave delays for convex array should match PyMUST."""
-        from fast_simus.tx_delay import compute_plane_wave_delays
+        from fast_simus.tx_delay import plane_wave
 
         pymust_param = getparam("C5-2v")
         tilt = np.pi / 18  # 10 degrees
         pymust_delays = txdelayPlane(pymust_param, tilt)
 
         params = C5_2v()
-        fs_delays = compute_plane_wave_delays(params, tilt_rad=tilt)
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
+        fs_delays = plane_wave(
+            elem_pos, params.speed_of_sound, params.radius, tilt, apex
+        )
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
     def test_plane_wave_vectorized_matches_pymust(self):
         """Vectorized tilt angles should match PyMUST."""
-        from fast_simus.tx_delay import compute_plane_wave_delays
+        from fast_simus.tx_delay import plane_wave
 
         pymust_param = getparam("P4-2v")
         tilt = np.array([0.0, np.pi / 18, -np.pi / 18])
         pymust_delays = txdelayPlane(pymust_param, tilt)
 
         params = P4_2v()
-        fs_delays = compute_plane_wave_delays(params, tilt_rad=tilt)
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
+        fs_delays = plane_wave(
+            elem_pos, params.speed_of_sound, params.radius, tilt, apex
+        )
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -136,7 +178,7 @@ class TestCircularWaveDelays:
 
     def test_circular_wave_matches_pymust(self):
         """Circular wave delays should match PyMUST."""
-        from fast_simus.tx_delay import compute_circular_wave_delays
+        from fast_simus.tx_delay import diverging_wave
 
         pymust_param = getparam("P4-2v")
         tilt = np.pi / 18  # 10 degrees
@@ -144,14 +186,20 @@ class TestCircularWaveDelays:
         pymust_delays = txdelayCircular(pymust_param, tilt, width)
 
         params = P4_2v()
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
         angles = np.array([tilt, width])
-        fs_delays = compute_circular_wave_delays(params, angles=angles)
+        L = (params.n_elements - 1) * params.pitch
+        fs_delays = diverging_wave(
+            elem_pos, params.speed_of_sound, params.radius, angles, L
+        )
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
     def test_circular_wave_vectorized_matches_pymust(self):
         """Vectorized circular wave parameters should match PyMUST."""
-        from fast_simus.tx_delay import compute_circular_wave_delays
+        from fast_simus.tx_delay import diverging_wave
 
         pymust_param = getparam("P4-2v")
         tilt = np.array([0.0, np.pi / 18])
@@ -159,19 +207,29 @@ class TestCircularWaveDelays:
         pymust_delays = txdelayCircular(pymust_param, tilt, width)
 
         params = P4_2v()
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
         angles = np.stack([tilt, width], axis=-1)  # Shape (2, 2)
-        fs_delays = compute_circular_wave_delays(params, angles=angles)
+        L = (params.n_elements - 1) * params.pitch
+        fs_delays = diverging_wave(
+            elem_pos, params.speed_of_sound, params.radius, angles, L
+        )
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
     def test_circular_wave_convex_raises_error(self):
         """Circular waves not supported for convex arrays."""
-        from fast_simus.tx_delay import compute_circular_wave_delays
+        from fast_simus.tx_delay import diverging_wave
 
         params = C5_2v()
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
         angles = np.array([0.0, np.pi / 6])
-        with pytest.raises(ValueError, match=r"Circular.*convex"):
-            compute_circular_wave_delays(params, angles=angles)
+        L = (params.n_elements - 1) * params.pitch
+        with pytest.raises(ValueError, match=r"Diverging.*convex"):
+            diverging_wave(elem_pos, params.speed_of_sound, params.radius, angles, L)
 
 
 class TestArrayAPICompliance:
@@ -184,9 +242,14 @@ class TestArrayAPICompliance:
         from fast_simus.tx_delay import compute_focused_delays
 
         params = P4_2v()
+        xp_np = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp_np)
+        elem_pos = xp.asarray(np.stack([x, z], axis=-1))
         focus = xp.asarray([[0.02, 0.05]])
 
-        delays = compute_focused_delays(params, focus=focus)
+        delays = compute_focused_delays(
+            elem_pos, params.speed_of_sound, params.radius, focus, apex
+        )
 
         assert hasattr(delays, "__array_namespace__")
         assert xp.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
@@ -195,12 +258,17 @@ class TestArrayAPICompliance:
         """Output should preserve input array backend."""
         import array_api_strict as xp
 
-        from fast_simus.tx_delay import compute_plane_wave_delays
+        from fast_simus.tx_delay import plane_wave
 
         params = P4_2v()
+        xp_np = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp_np)
+        elem_pos = xp.asarray(np.stack([x, z], axis=-1))
         tilt = xp.asarray([0.0, np.pi / 18])
 
-        delays = compute_plane_wave_delays(params, tilt_rad=tilt)
+        delays = plane_wave(
+            elem_pos, params.speed_of_sound, params.radius, tilt, apex
+        )
 
         assert hasattr(delays, "__array_namespace__")
         assert xp.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
@@ -211,22 +279,35 @@ class TestEdgeCases:
 
     def test_tilt_angle_validation(self):
         """Tilt angles must satisfy |tilt| < pi/2."""
-        from fast_simus.tx_delay import compute_plane_wave_delays
+        from fast_simus.tx_delay import plane_wave
 
         params = P4_2v()
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
         with pytest.raises(ValueError, match="Tilt"):
-            compute_plane_wave_delays(params, tilt_rad=np.pi / 2 + 0.1)
+            plane_wave(elem_pos, params.speed_of_sound, params.radius, np.pi / 2 + 0.1, apex)
 
     def test_width_angle_validation(self):
         """Width angles must satisfy 0 < width < pi."""
-        from fast_simus.tx_delay import compute_circular_wave_delays
+        from fast_simus.tx_delay import diverging_wave
 
         params = P4_2v()
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
+        L = (params.n_elements - 1) * params.pitch
         with pytest.raises(ValueError, match="Width"):
-            compute_circular_wave_delays(params, angles=np.array([0.0, np.pi + 0.1]))
+            diverging_wave(
+                elem_pos, params.speed_of_sound, params.radius,
+                np.array([0.0, np.pi + 0.1]), L
+            )
 
         with pytest.raises(ValueError, match="Width"):
-            compute_circular_wave_delays(params, angles=np.array([0.0, -0.1]))
+            diverging_wave(
+                elem_pos, params.speed_of_sound, params.radius,
+                np.array([0.0, -0.1]), L
+            )
 
     def test_mismatched_vector_lengths(self):
         """Focus dimensions must be valid."""
@@ -235,9 +316,14 @@ class TestEdgeCases:
         from fast_simus.tx_delay import compute_focused_delays
 
         params = P4_2v()
+        xp = array_namespace(np.array([1.0]))
+        x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        elem_pos = np.stack([x, z], axis=-1)
         # Invalid shape (should be (n, 2) or (2,))
         focus = np.array([0.0, 0.01, 0.05])  # Shape (3,) instead of (3, 2)
 
         # Jaxtyping catches this before our validation
         with pytest.raises((ValueError, TypeCheckError)):
-            compute_focused_delays(params, focus=focus)
+            compute_focused_delays(
+                elem_pos, params.speed_of_sound, params.radius, focus, apex
+            )

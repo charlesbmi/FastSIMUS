@@ -2,15 +2,17 @@
 
 from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.tx_delay import (
-    compute_circular_wave_delays,
     compute_focused_delays,
-    compute_plane_wave_delays,
+    diverging_wave,
+    plane_wave,
 )
+from fast_simus.utils.geometry import element_positions
 
 __all__ = [
     "BaffleType",
     "TransducerParams",
-    "compute_circular_wave_delays",
     "compute_focused_delays",
-    "compute_plane_wave_delays",
+    "diverging_wave",
+    "element_positions",
+    "plane_wave",
 ]
