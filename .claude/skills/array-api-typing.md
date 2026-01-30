@@ -172,6 +172,10 @@ test = [
 ]
 ```
 
+## Missing function signatures
+If missing from Protocol, grab the exact function signature from:
+https://data-apis.org/array-api/latest/API_specification/index.html
+
 ## Key Rules
 
 1. **Always use `xp = array_namespace(input)`** - never hardcode numpy
