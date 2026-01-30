@@ -32,6 +32,7 @@ classifiers = [
 ]
 dependencies = [
     "array-api-compat>=1.13",
+    "array-api-extra==0.9.2",  # no backwards compatibility, so pin to specific version
     "beartype>=0.19.0",
     "jaxtyping>=0.2.37",
     "pydantic>=2.0,<3.0",

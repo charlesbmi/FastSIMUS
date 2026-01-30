@@ -22,6 +22,7 @@ from __future__ import annotations
 from math import inf, pi
 from typing import TYPE_CHECKING, Any
 
+import array_api_extra as xpx
 import numpy as np
 from array_api_compat import array_namespace
 from beartype import beartype as typechecker
@@ -136,12 +137,10 @@ def compute_focused_delays(
             (Equation 5, extended to support virtual sources)
     """
     # Convert to array and get namespace
-    focus_arr = np.atleast_1d(np.asarray(focus, dtype=np.float64))
-    xp = array_namespace(focus_arr)
+    xp = array_namespace(focus)
 
     # Ensure focus has shape (*batch, 2)
-    if focus_arr.ndim == 1:
-        focus_arr = focus_arr[np.newaxis, :]
+    focus_arr: Float[ArrayAPIObj, "batch xz=2"] = xpx.atleast_nd(focus, ndim=2, xp=xp)
 
     x0_arr = focus_arr[..., :1]
     z0_arr = focus_arr[..., 1:2]
@@ -320,12 +319,10 @@ def compute_circular_wave_delays(
         raise ValueError(msg)
 
     # Convert to array and get namespace
-    angles_arr = np.atleast_1d(np.asarray(angles, dtype=np.float64))
-    xp = array_namespace(angles_arr)
+    xp = array_namespace(angles)
 
     # Ensure angles has shape (*batch, 2)
-    if angles_arr.ndim == 1:
-        angles_arr = angles_arr[np.newaxis, :]
+    angles_arr: Float[ArrayAPIObj, "batch angles=2"] = xpx.atleast_nd(angles, ndim=2, xp=xp)
 
     tilt_arr = angles_arr[..., :1]
     width_arr = angles_arr[..., 1:2]
