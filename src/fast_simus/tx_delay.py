@@ -124,10 +124,11 @@ def compute_focused_delays(
             (Equation 5, extended to support virtual sources)
     """
     # Convert to array and get namespace
-    xp = array_namespace(focus, element_positions)
+    xp = array_namespace(element_positions)
 
-    # Ensure focus has shape (*batch, 2)
-    focus_arr: Float[ArrayAPIObj, "batch xz=2"] = xpx.atleast_nd(focus, ndim=2, xp=xp)
+    # Convert focus to array and ensure shape (*batch, 2)
+    focus_as_array = xp.asarray(focus)
+    focus_arr: Float[ArrayAPIObj, "batch xz=2"] = xpx.atleast_nd(focus_as_array, ndim=2, xp=xp)
 
     x0_arr = focus_arr[..., :1]
     z0_arr = focus_arr[..., 1:2]
@@ -362,10 +363,11 @@ def diverging_wave(
         raise ValueError(msg)
 
     # Convert to array and get namespace
-    xp = array_namespace(angles, element_positions)
+    xp = array_namespace(element_positions)
 
-    # Ensure angles has shape (*batch, 2)
-    angles_arr: Float[ArrayAPIObj, "batch angles=2"] = xpx.atleast_nd(angles, ndim=2, xp=xp)
+    # Convert angles to array and ensure shape (*batch, 2)
+    angles_as_array = xp.asarray(angles)
+    angles_arr: Float[ArrayAPIObj, "batch angles=2"] = xpx.atleast_nd(angles_as_array, ndim=2, xp=xp)
 
     tilt_arr = angles_arr[..., :1]
     width_arr = angles_arr[..., 1:2]

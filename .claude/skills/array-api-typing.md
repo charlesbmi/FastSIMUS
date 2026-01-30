@@ -41,10 +41,10 @@ ArrayAPIObj = Any
 
 @jaxtyped(typechecker=typechecker)
 def simus(
-    x: Float[ArrayAPIObj, "n_scatterers"],
-    z: Float[ArrayAPIObj, "n_scatterers"],
-    rc: Float[ArrayAPIObj, "n_scatterers"],
-    delays: Float[ArrayAPIObj, "n_elements"],
+    x: Float[ArrayAPIObj, " n_scatterers"],
+    z: Float[ArrayAPIObj, " n_scatterers"],
+    rc: Float[ArrayAPIObj, " n_scatterers"],
+    delays: Float[ArrayAPIObj, " n_elements"],
     params: "TransducerParams",
 ) -> Float[ArrayAPIObj, "n_samples n_elements"]:
     """Simulate RF signals with runtime shape checking."""
@@ -64,8 +64,9 @@ Float[ArrayAPIObj, "*batch n_freq"]          # Any batch dims + frequency
 Num[ArrayAPIObj, "..."]                      # Any shape
 
 # Named dimensions (self-documenting)
-Float[ArrayAPIObj, "n_scatterers"]           # 1D array of scatterer coords
+Float[ArrayAPIObj, " n_scatterers"]           # 1D array of scatterer coords
 ```
+For jaxtyping/ruff compatibility, 1-D annotations should have a leading space, e.g. " x"
 
 ## Backend-Specific Optimizations
 

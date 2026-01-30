@@ -1,11 +1,18 @@
 """Geometry calculation utilities."""
 
+from __future__ import annotations
+
 from math import inf
+from typing import TYPE_CHECKING, Any
 
 from beartype import beartype as typechecker
 from jaxtyping import Float, jaxtyped
 
-from fast_simus.utils._array_api import _ArrayNamespace
+if TYPE_CHECKING:
+    from fast_simus.utils._array_api import _ArrayNamespace
+
+# Type alias for Array API objects (until protocol is standardized)
+ArrayAPIObj = Any
 
 
 @jaxtyped(typechecker=typechecker)
@@ -15,9 +22,9 @@ def element_positions(
     radius: float,
     xp: _ArrayNamespace,
 ) -> tuple[
-    Float[ArrayAPIObj, "n_elements"],
-    Float[ArrayAPIObj, "n_elements"],
-    Float[ArrayAPIObj, "n_elements"] | None,
+    Float[ArrayAPIObj, " n_elements"],
+    Float[ArrayAPIObj, " n_elements"],
+    Float[ArrayAPIObj, " n_elements"] | None,
     float,
 ]:
     """Calculate transducer element positions.

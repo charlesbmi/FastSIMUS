@@ -30,9 +30,7 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = compute_focused_delays(
-            elem_pos, params.speed_of_sound, params.radius, focus, apex
-        )
+        fs_delays = compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
 
         # Should match within numerical tolerance
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
@@ -50,9 +48,7 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = compute_focused_delays(
-            elem_pos, params.speed_of_sound, params.radius, focus, apex
-        )
+        fs_delays = compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -69,9 +65,7 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = compute_focused_delays(
-            elem_pos, params.speed_of_sound, params.radius, focus, apex
-        )
+        fs_delays = compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -89,9 +83,7 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
         focus = np.stack([x0, z0], axis=-1)  # Shape (3, 2)
-        fs_delays = compute_focused_delays(
-            elem_pos, params.speed_of_sound, params.radius, focus, apex
-        )
+        fs_delays = compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -111,9 +103,7 @@ class TestPlaneWaveDelays:
         xp = array_namespace(np.array([1.0]))
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
-        fs_delays = plane_wave(
-            elem_pos, params.speed_of_sound, params.radius, tilt, apex
-        )
+        fs_delays = plane_wave(elem_pos, params.speed_of_sound, params.radius, tilt, apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -129,9 +119,7 @@ class TestPlaneWaveDelays:
         xp = array_namespace(np.array([1.0]))
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
-        fs_delays = plane_wave(
-            elem_pos, params.speed_of_sound, params.radius, tilt, apex
-        )
+        fs_delays = plane_wave(elem_pos, params.speed_of_sound, params.radius, tilt, apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, atol=1e-12)
         np.testing.assert_allclose(fs_delays, 0.0, atol=1e-12)
@@ -148,9 +136,7 @@ class TestPlaneWaveDelays:
         xp = array_namespace(np.array([1.0]))
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
-        fs_delays = plane_wave(
-            elem_pos, params.speed_of_sound, params.radius, tilt, apex
-        )
+        fs_delays = plane_wave(elem_pos, params.speed_of_sound, params.radius, tilt, apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -166,9 +152,7 @@ class TestPlaneWaveDelays:
         xp = array_namespace(np.array([1.0]))
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
-        fs_delays = plane_wave(
-            elem_pos, params.speed_of_sound, params.radius, tilt, apex
-        )
+        fs_delays = plane_wave(elem_pos, params.speed_of_sound, params.radius, tilt, apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -191,9 +175,7 @@ class TestCircularWaveDelays:
         elem_pos = np.stack([x, z], axis=-1)
         angles = np.array([tilt, width])
         L = (params.n_elements - 1) * params.pitch
-        fs_delays = diverging_wave(
-            elem_pos, params.speed_of_sound, params.radius, angles, L
-        )
+        fs_delays = diverging_wave(elem_pos, params.speed_of_sound, params.radius, angles, L)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -212,9 +194,7 @@ class TestCircularWaveDelays:
         elem_pos = np.stack([x, z], axis=-1)
         angles = np.stack([tilt, width], axis=-1)  # Shape (2, 2)
         L = (params.n_elements - 1) * params.pitch
-        fs_delays = diverging_wave(
-            elem_pos, params.speed_of_sound, params.radius, angles, L
-        )
+        fs_delays = diverging_wave(elem_pos, params.speed_of_sound, params.radius, angles, L)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -247,9 +227,7 @@ class TestArrayAPICompliance:
         elem_pos = xp.asarray(np.stack([x, z], axis=-1))
         focus = xp.asarray([[0.02, 0.05]])
 
-        delays = compute_focused_delays(
-            elem_pos, params.speed_of_sound, params.radius, focus, apex
-        )
+        delays = compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
 
         assert hasattr(delays, "__array_namespace__")
         assert xp.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
@@ -266,9 +244,7 @@ class TestArrayAPICompliance:
         elem_pos = xp.asarray(np.stack([x, z], axis=-1))
         tilt = xp.asarray([0.0, np.pi / 18])
 
-        delays = plane_wave(
-            elem_pos, params.speed_of_sound, params.radius, tilt, apex
-        )
+        delays = plane_wave(elem_pos, params.speed_of_sound, params.radius, tilt, apex)
 
         assert hasattr(delays, "__array_namespace__")
         assert xp.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
@@ -298,16 +274,10 @@ class TestEdgeCases:
         elem_pos = np.stack([x, z], axis=-1)
         L = (params.n_elements - 1) * params.pitch
         with pytest.raises(ValueError, match="Width"):
-            diverging_wave(
-                elem_pos, params.speed_of_sound, params.radius,
-                np.array([0.0, np.pi + 0.1]), L
-            )
+            diverging_wave(elem_pos, params.speed_of_sound, params.radius, np.array([0.0, np.pi + 0.1]), L)
 
         with pytest.raises(ValueError, match="Width"):
-            diverging_wave(
-                elem_pos, params.speed_of_sound, params.radius,
-                np.array([0.0, -0.1]), L
-            )
+            diverging_wave(elem_pos, params.speed_of_sound, params.radius, np.array([0.0, -0.1]), L)
 
     def test_mismatched_vector_lengths(self):
         """Focus dimensions must be valid."""
@@ -324,6 +294,4 @@ class TestEdgeCases:
 
         # Jaxtyping catches this before our validation
         with pytest.raises((ValueError, TypeCheckError)):
-            compute_focused_delays(
-                elem_pos, params.speed_of_sound, params.radius, focus, apex
-            )
+            compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
