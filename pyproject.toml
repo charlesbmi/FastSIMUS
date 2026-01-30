@@ -79,6 +79,7 @@ test = [
     "array-api-strict>=2.0",
     "numpy>=2.3",
     "jax>=0.9",
+    "pymust>=0.1.9",
 ]
 test-parallel = [
     { include-group = "test" },
