@@ -76,7 +76,7 @@ class TestFocusedDelays:
         pymust_param = getparam("P4-2v")
         x0 = np.array([0.0, 0.01, 0.02])
         z0 = np.array([0.04, 0.05, 0.06])
-        pymust_delays = txdelayFocused(pymust_param, x0, z0)
+        pymust_delays = txdelayFocused(pymust_param, x0, z0)  # type: ignore[invalid-argument-type]  # PyMUST also accepts arrays
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -146,7 +146,7 @@ class TestPlaneWaveDelays:
 
         pymust_param = getparam("P4-2v")
         tilt = np.array([0.0, np.pi / 18, -np.pi / 18])
-        pymust_delays = txdelayPlane(pymust_param, tilt)
+        pymust_delays = txdelayPlane(pymust_param, tilt)  # type: ignore[invalid-argument-type]  # PyMUST also accepts arrays
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -186,7 +186,7 @@ class TestCircularWaveDelays:
         pymust_param = getparam("P4-2v")
         tilt = np.array([0.0, np.pi / 18])
         width = np.array([np.pi / 6, np.pi / 4])
-        pymust_delays = txdelayCircular(pymust_param, tilt, width)
+        pymust_delays = txdelayCircular(pymust_param, tilt, width)  # type: ignore[]
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
