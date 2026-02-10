@@ -45,9 +45,7 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = focused(
-            elem_pos, focus, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex
-        )
+        fs_delays = focused(elem_pos, focus, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -62,9 +60,7 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = focused(
-            elem_pos, focus, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex
-        )
+        fs_delays = focused(elem_pos, focus, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -79,9 +75,7 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = focused(
-            elem_pos, focus, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex
-        )
+        fs_delays = focused(elem_pos, focus, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
