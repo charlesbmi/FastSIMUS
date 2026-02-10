@@ -93,12 +93,6 @@ class TransducerParams(BaseModel):
     Defaults to "soft".
     """
 
-    speed_of_sound: float = Field(default=1540.0, gt=0)
-    """Speed of sound in m/s. Defaults to 1540 m/s (soft tissue)."""
-
-    attenuation: float = Field(default=0.0, ge=0)
-    """Attenuation coefficient in dB/cm/MHz. Must be non-negative. Defaults to 0."""
-
     # === Computed properties ===
     @property
     def element_width(self) -> float:
