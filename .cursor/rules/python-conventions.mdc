@@ -30,12 +30,6 @@ def compute_delay(focus_z, element_positions, c=1540.0):
     ...
 ```
 
-## Imports
-
-- Import at the top of files, never within functions
-- Group imports: stdlib, third-party, local
-- Use absolute imports from `fast_simus`
-
 ## Code Quality
 
 - Keep functions focused and modular

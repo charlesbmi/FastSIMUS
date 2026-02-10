@@ -163,6 +163,7 @@ select = [
     "E",     # pycodestyle errors
     "F",     # pyflakes
     "I",     # isort
+    "PLC0415", # https://docs.astral.sh/ruff/rules/import-outside-top-level/
     "RUF",   # ruff
     "S",     # flake8-bandit
     "SIM",   # flake8-simplify

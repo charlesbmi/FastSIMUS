@@ -3,12 +3,15 @@
 These tests validate that our tx_delay implementation matches PyMUST outputs.
 """
 
+import array_api_strict as xp_strict
 import numpy as np
 import pytest
 from array_api_compat import array_namespace
+from jaxtyping import TypeCheckError
 from pymust import getparam, txdelayCircular, txdelayFocused, txdelayPlane
 
 from fast_simus.transducer_presets import C5_2v, P4_2v
+from fast_simus.tx_delay import diverging_wave, focused, plane_wave
 from fast_simus.utils.geometry import element_positions
 
 
@@ -17,8 +20,6 @@ class TestFocusedDelays:
 
     def test_focused_linear_array_matches_pymust(self):
         """Focused delays for linear array should match PyMUST txdelay."""
-        from fast_simus.tx_delay import focused
-
         # Get PyMUST reference (squeeze: PyMUST always returns (1, n) for scalars)
         pymust_param = getparam("P4-2v")
         x0, z0 = 0.02, 0.05  # 2cm lateral, 5cm depth
@@ -39,8 +40,6 @@ class TestFocusedDelays:
 
     def test_focused_virtual_source_matches_pymust(self):
         """Virtual source (negative z0) should match PyMUST."""
-        from fast_simus.tx_delay import focused
-
         pymust_param = getparam("P4-2v")
         x0, z0 = 0.01, -0.03  # Virtual source above transducer
         pymust_delays = np.squeeze(txdelayFocused(pymust_param, x0, z0))
@@ -58,8 +57,6 @@ class TestFocusedDelays:
 
     def test_focused_convex_array_matches_pymust(self):
         """Focused delays for convex array should match PyMUST."""
-        from fast_simus.tx_delay import focused
-
         pymust_param = getparam("C5-2v")
         x0, z0 = 0.0, 0.06  # On-axis focus
         pymust_delays = np.squeeze(txdelayFocused(pymust_param, x0, z0))
@@ -77,8 +74,6 @@ class TestFocusedDelays:
 
     def test_focused_vectorized_matches_pymust(self):
         """Vectorized focal points should match PyMUST."""
-        from fast_simus.tx_delay import focused
-
         pymust_param = getparam("P4-2v")
         x0 = np.array([0.0, 0.01, 0.02])
         z0 = np.array([0.04, 0.05, 0.06])
@@ -111,8 +106,6 @@ class TestPlaneWaveDelays:
 
     def test_plane_wave_linear_matches_pymust(self):
         """Plane wave delays for linear array should match PyMUST."""
-        from fast_simus.tx_delay import plane_wave
-
         pymust_param = getparam("P4-2v")
         tilt = np.pi / 18  # 10 degrees
         pymust_delays = np.squeeze(txdelayPlane(pymust_param, tilt))
@@ -129,8 +122,6 @@ class TestPlaneWaveDelays:
 
     def test_plane_wave_zero_tilt_matches_pymust(self):
         """Zero tilt should give zero delays."""
-        from fast_simus.tx_delay import plane_wave
-
         pymust_param = getparam("P4-2v")
         tilt = 0.0
         pymust_delays = np.squeeze(txdelayPlane(pymust_param, tilt))
@@ -148,8 +139,6 @@ class TestPlaneWaveDelays:
 
     def test_plane_wave_convex_matches_pymust(self):
         """Plane wave delays for convex array should match PyMUST."""
-        from fast_simus.tx_delay import plane_wave
-
         pymust_param = getparam("C5-2v")
         tilt = np.pi / 18  # 10 degrees
         pymust_delays = np.squeeze(txdelayPlane(pymust_param, tilt))
@@ -166,8 +155,6 @@ class TestPlaneWaveDelays:
 
     def test_plane_wave_vectorized_matches_pymust(self):
         """Vectorized tilt angles should match PyMUST."""
-        from fast_simus.tx_delay import plane_wave
-
         pymust_param = getparam("P4-2v")
         tilt = np.array([0.0, np.pi / 18, -np.pi / 18])
         pymust_delays = txdelayPlane(pymust_param, tilt)  # type: ignore[invalid-argument-type]  # PyMUST also accepts arrays
@@ -193,8 +180,6 @@ class TestCircularWaveDelays:
 
     def test_circular_wave_matches_pymust(self):
         """Circular wave delays should match PyMUST."""
-        from fast_simus.tx_delay import diverging_wave
-
         pymust_param = getparam("P4-2v")
         tilt = np.pi / 18  # 10 degrees
         width = np.pi / 6  # 30 degrees
@@ -211,8 +196,6 @@ class TestCircularWaveDelays:
 
     def test_circular_wave_vectorized_matches_pymust(self):
         """Vectorized circular wave parameters should match PyMUST."""
-        from fast_simus.tx_delay import diverging_wave
-
         pymust_param = getparam("P4-2v")
         tilt = np.array([0.0, np.pi / 18])
         width = np.array([np.pi / 6, np.pi / 4])
@@ -240,31 +223,23 @@ class TestArrayAPICompliance:
 
     def test_focused_delays_preserves_backend(self):
         """Output should preserve input array backend."""
-        import array_api_strict as xp
-
-        from fast_simus.tx_delay import focused
-
         params = P4_2v()
         xp_np = array_namespace(np.array([1.0]))
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp_np)
-        elem_pos = xp.asarray(np.stack([x, z], axis=-1))
-        focus = xp.asarray([0.02, 0.05])
+        elem_pos = xp_strict.asarray(np.stack([x, z], axis=-1))
+        focus = xp_strict.asarray([0.02, 0.05])
 
         delays = focused(elem_pos, focus, speed_of_sound=params.speed_of_sound, radius=params.radius, apex_offset=apex)
 
         assert hasattr(delays, "__array_namespace__")
-        assert xp.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
+        assert xp_strict.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
 
     def test_plane_wave_delays_preserves_backend(self):
         """Output should preserve input array backend."""
-        import array_api_strict as xp
-
-        from fast_simus.tx_delay import plane_wave
-
         params = P4_2v()
         xp_np = array_namespace(np.array([1.0]))
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp_np)
-        elem_pos = xp.asarray(np.stack([x, z], axis=-1))
+        elem_pos = xp_strict.asarray(np.stack([x, z], axis=-1))
         tilt = 0.0
 
         delays = plane_wave(
@@ -272,7 +247,7 @@ class TestArrayAPICompliance:
         )
 
         assert hasattr(delays, "__array_namespace__")
-        assert xp.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
+        assert xp_strict.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
 
 
 class TestEdgeCases:
@@ -280,8 +255,6 @@ class TestEdgeCases:
 
     def test_tilt_angle_validation(self):
         """Tilt angles must satisfy |tilt| < pi/2."""
-        from fast_simus.tx_delay import plane_wave
-
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
@@ -297,8 +270,6 @@ class TestEdgeCases:
 
     def test_width_angle_validation(self):
         """Width angles must satisfy 0 < width < pi."""
-        from fast_simus.tx_delay import diverging_wave
-
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
         x, z, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
@@ -313,10 +284,6 @@ class TestEdgeCases:
 
     def test_mismatched_vector_lengths(self):
         """Focus dimensions must be valid."""
-        from jaxtyping import TypeCheckError
-
-        from fast_simus.tx_delay import focused
-
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
