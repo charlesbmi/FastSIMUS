@@ -35,7 +35,6 @@ class TestFocusedDelays:
             elem_pos, focus, speed_of_sound=params.speed_of_sound, radius=params.radius, apex_offset=apex
         )
 
-        # Should match within numerical tolerance
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
     def test_focused_virtual_source_matches_pymust(self):
@@ -84,7 +83,6 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
 
-        # Loop over focal points instead of batching
         fs_delays = np.stack(
             [
                 focused(
@@ -107,7 +105,7 @@ class TestPlaneWaveDelays:
     def test_plane_wave_linear_matches_pymust(self):
         """Plane wave delays for linear array should match PyMUST."""
         pymust_param = getparam("P4-2v")
-        tilt = np.pi / 18  # 10 degrees
+        tilt = np.deg2rad(10)
         pymust_delays = np.squeeze(txdelayPlane(pymust_param, tilt))
 
         params = P4_2v()
@@ -140,7 +138,7 @@ class TestPlaneWaveDelays:
     def test_plane_wave_convex_matches_pymust(self):
         """Plane wave delays for convex array should match PyMUST."""
         pymust_param = getparam("C5-2v")
-        tilt = np.pi / 18  # 10 degrees
+        tilt = np.deg2rad(10)
         pymust_delays = np.squeeze(txdelayPlane(pymust_param, tilt))
 
         params = C5_2v()
@@ -164,7 +162,6 @@ class TestPlaneWaveDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
 
-        # Loop over tilt angles instead of batching
         fs_delays = np.stack(
             [
                 plane_wave(elem_pos, t, speed_of_sound=params.speed_of_sound, radius=params.radius, apex_offset=apex)
@@ -181,8 +178,8 @@ class TestCircularWaveDelays:
     def test_circular_wave_matches_pymust(self):
         """Circular wave delays should match PyMUST."""
         pymust_param = getparam("P4-2v")
-        tilt = np.pi / 18  # 10 degrees
-        width = np.pi / 6  # 30 degrees
+        tilt = np.deg2rad(10)
+        width = np.deg2rad(30)
         pymust_delays = np.squeeze(txdelayCircular(pymust_param, tilt, width))
 
         params = P4_2v()
@@ -207,7 +204,6 @@ class TestCircularWaveDelays:
         elem_pos = np.stack([x, z], axis=-1)
         L = (params.n_elements - 1) * params.pitch
 
-        # Loop over angle pairs instead of batching
         fs_delays = np.stack(
             [
                 diverging_wave(elem_pos, t, w, aperture_length=L, speed_of_sound=params.speed_of_sound)
@@ -232,7 +228,7 @@ class TestArrayAPICompliance:
         delays = focused(elem_pos, focus, speed_of_sound=params.speed_of_sound, radius=params.radius, apex_offset=apex)
 
         assert hasattr(delays, "__array_namespace__")
-        assert xp_strict.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
+        assert delays.__array_namespace__().__name__ == "array_api_strict"
 
     def test_plane_wave_delays_preserves_backend(self):
         """Output should preserve input array backend."""
@@ -247,7 +243,7 @@ class TestArrayAPICompliance:
         )
 
         assert hasattr(delays, "__array_namespace__")
-        assert xp_strict.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
+        assert delays.__array_namespace__().__name__ == "array_api_strict"
 
 
 class TestEdgeCases:
@@ -291,6 +287,5 @@ class TestEdgeCases:
         # Invalid shape (should be (dim,) matching element_positions)
         focus = np.array([0.0, 0.01, 0.05])  # Shape (3,) instead of (2,)
 
-        # Jaxtyping catches this before our validation
         with pytest.raises((ValueError, TypeCheckError)):
             focused(elem_pos, focus, speed_of_sound=params.speed_of_sound, radius=params.radius, apex_offset=apex)

@@ -45,3 +45,5 @@ def compute_delay(focus_z, element_positions, c=1540.0):
 
 - Google-style docstrings for all public functions
 - Include physical units in Args/Returns sections
+- Don't repeat yourself
+- Explain why or provide/link to context
