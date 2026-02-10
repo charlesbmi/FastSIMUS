@@ -31,7 +31,7 @@ from fast_simus.utils._array_api import Array
 
 
 @jaxtyped(typechecker=typechecker)
-def compute_focused_delays(
+def focused(
     element_positions: Float[Array, "n_elements xz=2"],
     speed_of_sound: float,
     radius: float,

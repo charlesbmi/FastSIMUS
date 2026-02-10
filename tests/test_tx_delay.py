@@ -17,7 +17,7 @@ class TestFocusedDelays:
 
     def test_focused_linear_array_matches_pymust(self):
         """Focused delays for linear array should match PyMUST txdelay."""
-        from fast_simus.tx_delay import compute_focused_delays
+        from fast_simus.tx_delay import focused
 
         # Get PyMUST reference (squeeze: PyMUST always returns (1, n) for scalars)
         pymust_param = getparam("P4-2v")
@@ -30,14 +30,14 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
+        fs_delays = focused(elem_pos, params.speed_of_sound, params.radius, focus, apex)
 
         # Should match within numerical tolerance
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
     def test_focused_virtual_source_matches_pymust(self):
         """Virtual source (negative z0) should match PyMUST."""
-        from fast_simus.tx_delay import compute_focused_delays
+        from fast_simus.tx_delay import focused
 
         pymust_param = getparam("P4-2v")
         x0, z0 = 0.01, -0.03  # Virtual source above transducer
@@ -48,13 +48,13 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
+        fs_delays = focused(elem_pos, params.speed_of_sound, params.radius, focus, apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
     def test_focused_convex_array_matches_pymust(self):
         """Focused delays for convex array should match PyMUST."""
-        from fast_simus.tx_delay import compute_focused_delays
+        from fast_simus.tx_delay import focused
 
         pymust_param = getparam("C5-2v")
         x0, z0 = 0.0, 0.06  # On-axis focus
@@ -65,13 +65,13 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
         focus = np.array([x0, z0])
-        fs_delays = compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
+        fs_delays = focused(elem_pos, params.speed_of_sound, params.radius, focus, apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
     def test_focused_vectorized_matches_pymust(self):
         """Vectorized focal points should match PyMUST."""
-        from fast_simus.tx_delay import compute_focused_delays
+        from fast_simus.tx_delay import focused
 
         pymust_param = getparam("P4-2v")
         x0 = np.array([0.0, 0.01, 0.02])
@@ -83,7 +83,7 @@ class TestFocusedDelays:
         x, z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         elem_pos = np.stack([x, z], axis=-1)
         focus = np.stack([x0, z0], axis=-1)  # Shape (3, 2)
-        fs_delays = compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
+        fs_delays = focused(elem_pos, params.speed_of_sound, params.radius, focus, apex)
 
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
@@ -219,7 +219,7 @@ class TestArrayAPICompliance:
         """Output should preserve input array backend."""
         import array_api_strict as xp
 
-        from fast_simus.tx_delay import compute_focused_delays
+        from fast_simus.tx_delay import focused
 
         params = P4_2v()
         xp_np = array_namespace(np.array([1.0]))
@@ -227,7 +227,7 @@ class TestArrayAPICompliance:
         elem_pos = xp.asarray(np.stack([x, z], axis=-1))
         focus = xp.asarray([[0.02, 0.05]])
 
-        delays = compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
+        delays = focused(elem_pos, params.speed_of_sound, params.radius, focus, apex)
 
         assert hasattr(delays, "__array_namespace__")
         assert xp.asarray(delays).__array_namespace__().__name__ == "array_api_strict"
@@ -283,7 +283,7 @@ class TestEdgeCases:
         """Focus dimensions must be valid."""
         from jaxtyping import TypeCheckError
 
-        from fast_simus.tx_delay import compute_focused_delays
+        from fast_simus.tx_delay import focused
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -294,4 +294,4 @@ class TestEdgeCases:
 
         # Jaxtyping catches this before our validation
         with pytest.raises((ValueError, TypeCheckError)):
-            compute_focused_delays(elem_pos, params.speed_of_sound, params.radius, focus, apex)
+            focused(elem_pos, params.speed_of_sound, params.radius, focus, apex)
