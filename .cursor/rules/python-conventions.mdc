@@ -1,0 +1,53 @@
+---
+globs: *.py
+alwaysApply: false
+---
+# Python Conventions
+
+## Linting and Type Checking
+
+- Follow ruff linter rules defined in `pyproject.toml`
+- Use `ty check` for type checking
+- Run `poe lint` before committing
+
+## Type Hints
+
+- Type-hint all function arguments
+- Type-hint return values
+- Use jaxtyping for array shapes (e.g., `Float[Array, "n 3"]`)
+
+```python
+# Good
+def compute_delay(
+    focus_z: float,
+    element_positions: Float[Array, "n 3"],
+    c: float = 1540.0,
+) -> Float[Array, "n"]:
+    ...
+
+# Bad - missing type hints
+def compute_delay(focus_z, element_positions, c=1540.0):
+    ...
+```
+
+## Imports
+
+- Import at the top of files, never within functions
+- Group imports: stdlib, third-party, local
+- Use absolute imports from `fast_simus`
+
+## Code Quality
+
+- Keep functions focused and modular
+- Write readable, self-documenting code
+
+## Array API
+
+- Use `xp` namespace for all array operations
+- Preserve input array backend in outputs
+- Avoid mutating input arrays (breaks JAX compatibility)
+
+## Documentation
+
+- Google-style docstrings for all public functions
+- Include physical units in Args/Returns sections
