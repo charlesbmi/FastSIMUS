@@ -66,6 +66,7 @@ Num[ArrayAPIObj, "..."]                      # Any shape
 # Named dimensions (self-documenting)
 Float[ArrayAPIObj, " n_scatterers"]           # 1D array of scatterer coords
 ```
+
 For jaxtyping/ruff compatibility, 1-D annotations should have a leading space, e.g. " x"
 
 ## Backend-Specific Optimizations
@@ -173,6 +174,7 @@ test = [
 ```
 
 ## Missing function signatures
+
 If missing from Protocol, grab the exact function signature from:
 https://data-apis.org/array-api/latest/API_specification/index.html
 
