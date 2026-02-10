@@ -8,13 +8,24 @@ import numpy as np
 import pytest
 from array_api_compat import array_namespace
 from jaxtyping import TypeCheckError
-from pymust import getparam, txdelayCircular, txdelayFocused, txdelayPlane
 
 from fast_simus.transducer_presets import C5_2v, P4_2v
 from fast_simus.tx_delay import diverging_wave, focused, plane_wave
 from fast_simus.utils.geometry import element_positions
 
+# PyMUST has syntax errors in Python 3.14 due to invalid escape sequences
+# Skip pymust-dependent tests if import fails
+try:
+    from pymust import getparam, txdelayCircular, txdelayFocused, txdelayPlane
 
+    PYMUST_AVAILABLE = True
+except SyntaxError:
+    PYMUST_AVAILABLE = False
+
+requires_pymust = pytest.mark.skipif(not PYMUST_AVAILABLE, reason="PyMUST not available (Python 3.14 incompatibility)")
+
+
+@requires_pymust
 class TestFocusedDelays:
     """Test focused beam delay calculations."""
 
@@ -99,6 +110,7 @@ class TestFocusedDelays:
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
 
+@requires_pymust
 class TestPlaneWaveDelays:
     """Test plane wave delay calculations."""
 
@@ -172,6 +184,7 @@ class TestPlaneWaveDelays:
         np.testing.assert_allclose(fs_delays, pymust_delays, rtol=1e-4)
 
 
+@requires_pymust
 class TestCircularWaveDelays:
     """Test circular wave delay calculations."""
 
