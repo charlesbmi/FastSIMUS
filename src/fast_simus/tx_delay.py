@@ -70,43 +70,6 @@ def compute_focused_delays(
         Delays are relative to minimum (all non-negative).
         Each row corresponds to one beam configuration.
 
-    Examples:
-        >>> from fast_simus import compute_focused_delays
-        >>> from fast_simus.utils.geometry import element_positions
-        >>> from fast_simus.transducer_presets import P4_2v
-        >>> from array_api_compat import array_namespace
-        >>> import numpy as np
-        >>> from math import inf
-        >>>
-        >>> # Single focused beam at 5cm depth, centered laterally
-        >>> params = P4_2v()
-        >>> xp = array_namespace(np.array([1.0]))
-        >>> x, z, _, apex = element_positions(
-        ...     params.n_elements, params.pitch, params.radius, xp
-        ... )
-        >>> elem_pos = np.stack([x, z], axis=-1)
-        >>> focus = np.array([0.0, 0.05])  # [x, z]
-        >>> delays = compute_focused_delays(
-        ...     elem_pos, params.speed_of_sound, params.radius, focus, apex
-        ... )
-        >>> delays.shape
-        (64,)  # One delay per element
-        >>>
-        >>> # Vectorized: multiple focal points
-        >>> focus = np.array([[0.0, 0.04], [0.01, 0.05], [0.02, 0.06]])
-        >>> delays = compute_focused_delays(
-        ...     elem_pos, params.speed_of_sound, params.radius, focus, apex
-        ... )
-        >>> delays.shape
-        (3, 64)  # 3 beams x 64 elements
-        >>>
-        >>> # Diverging wave (virtual source behind array)
-        >>> focus = np.array([0.0, -0.03])
-        >>> delays = compute_focused_delays(
-        ...     elem_pos, params.speed_of_sound, params.radius, focus, apex
-        ... )
-        >>> # Creates expanding wavefront
-
     Notes:
         Implementation matches PyMUST reference with identical sign conventions.
 
@@ -200,43 +163,6 @@ def plane_wave(
     Raises:
         ValueError: If any |tilt_rad| >= π/2 (non-physical angle).
 
-    Examples:
-        >>> from fast_simus import plane_wave
-        >>> from fast_simus.utils.geometry import element_positions
-        >>> from fast_simus.transducer_presets import P4_2v
-        >>> from array_api_compat import array_namespace
-        >>> import numpy as np
-        >>> from math import inf
-        >>>
-        >>> # Single plane wave at 10 degrees
-        >>> params = P4_2v()
-        >>> xp = array_namespace(np.array([1.0]))
-        >>> x, z, _, apex = element_positions(
-        ...     params.n_elements, params.pitch, params.radius, xp
-        ... )
-        >>> elem_pos = np.stack([x, z], axis=-1)
-        >>> delays = plane_wave(
-        ...     elem_pos, params.speed_of_sound, params.radius,
-        ...     np.radians(10), apex
-        ... )
-        >>> delays.shape
-        (64,)
-        >>>
-        >>> # Compound angle imaging: -20°, -10°, 0°, 10°, 20°
-        >>> angles = np.radians([-20, -10, 0, 10, 20])
-        >>> delays = plane_wave(
-        ...     elem_pos, params.speed_of_sound, params.radius, angles, apex
-        ... )
-        >>> delays.shape
-        (5, 64)  # 5 angles x 64 elements
-        >>>
-        >>> # Zero angle gives zero delays
-        >>> delays_zero = plane_wave(
-        ...     elem_pos, params.speed_of_sound, params.radius, 0.0, apex
-        ... )
-        >>> np.allclose(delays_zero, 0.0)
-        True
-
     Notes:
         For linear arrays, delays follow simple sinusoidal pattern based on
         lateral element position.
@@ -325,40 +251,6 @@ def diverging_wave(
     Raises:
         ValueError: If radius is not inf (convex arrays not supported).
         ValueError: If any width is outside (0, π).
-
-    Examples:
-        >>> from fast_simus import diverging_wave
-        >>> from fast_simus.utils.geometry import element_positions
-        >>> from fast_simus.transducer_presets import P4_2v
-        >>> from array_api_compat import array_namespace
-        >>> import numpy as np
-        >>> from math import inf
-        >>>
-        >>> # Single circular wave: 30° width, 10° tilt
-        >>> params = P4_2v()
-        >>> xp = array_namespace(np.array([1.0]))
-        >>> x, z, _, _ = element_positions(
-        ...     params.n_elements, params.pitch, params.radius, xp
-        ... )
-        >>> elem_pos = np.stack([x, z], axis=-1)
-        >>> angles = np.array([np.radians(10), np.radians(30)])  # [tilt, width]
-        >>> L = (params.n_elements - 1) * params.pitch
-        >>> delays = diverging_wave(
-        ...     elem_pos, params.speed_of_sound, params.radius, angles, L
-        ... )
-        >>> delays.shape
-        (64,)
-        >>>
-        >>> # Multiple configurations
-        >>> angles = np.array([
-        ...     [0.0, np.radians(30)],
-        ...     [np.radians(10), np.radians(45)]
-        ... ])
-        >>> delays = diverging_wave(
-        ...     elem_pos, params.speed_of_sound, params.radius, angles, L
-        ... )
-        >>> delays.shape
-        (2, 64)
 
     Notes:
         The virtual source position is computed from the tilt and width angles
