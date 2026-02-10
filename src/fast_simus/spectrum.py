@@ -3,6 +3,8 @@
 Provides factory functions that return callables computing frequency-domain
 representations of the transmitted pulse and probe frequency response.
 
+All functions are Array API compliant and work with NumPy, JAX, CuPy backends.
+
 References:
     Garcia D. SIMUS: an open-source simulator for medical ultrasound imaging.
     Part I: theory & examples. CMPB, 2022;218:106726.
@@ -13,13 +15,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from math import log, pi
 
-import numpy as np
+from array_api_compat import array_namespace
+
+from fast_simus.utils._array_api import Array
 
 # Epsilon to avoid division by zero in sinc computation
 _EPS: float = 1e-16
 
 
-def mysinc(x: np.ndarray) -> np.ndarray:
+def mysinc(x: Array) -> Array:
     """Compute the unnormalized sinc function: sin(x)/x.
 
     Uses |x| + eps to avoid division by zero, matching the MUST convention.
@@ -31,14 +35,15 @@ def mysinc(x: np.ndarray) -> np.ndarray:
     Returns:
         sin(|x|+eps) / (|x|+eps), element-wise.
     """
-    abs_x = np.abs(x) + _EPS
-    return np.sin(abs_x) / abs_x
+    xp = array_namespace(x)
+    abs_x = xp.abs(x) + _EPS
+    return xp.sin(abs_x) / abs_x
 
 
 def pulse_spectrum_fn(
     freq_center: float,
     tx_n_wavelengths: float = 1.0,
-) -> Callable[[np.ndarray], np.ndarray]:
+) -> Callable[[Array], Array]:
     """Create a pulse spectrum function for a windowed sine pulse.
 
     Returns a callable that computes the frequency-domain representation
@@ -57,7 +62,7 @@ def pulse_spectrum_fn(
     t_pulse = tx_n_wavelengths / freq_center  # pulse duration (s)
     wc = 2.0 * pi * freq_center  # center angular frequency (rad/s)
 
-    def _pulse_spectrum(w: np.ndarray) -> np.ndarray:
+    def _pulse_spectrum(w: Array) -> Array:
         return 1j * (mysinc(t_pulse * (w - wc) / 2.0) - mysinc(t_pulse * (w + wc) / 2.0))
 
     return _pulse_spectrum
@@ -66,7 +71,7 @@ def pulse_spectrum_fn(
 def probe_spectrum_fn(
     freq_center: float,
     bandwidth: float = 0.75,
-) -> Callable[[np.ndarray], np.ndarray]:
+) -> Callable[[Array], Array]:
     """Create a probe frequency response function.
 
     Returns a callable that computes the one-way probe frequency response
@@ -91,21 +96,17 @@ def probe_spectrum_fn(
     """
     wc = 2.0 * pi * freq_center
     # Convert fractional bandwidth to angular bandwidth
-    # PyMUST uses bandwidth in % and divides by 100; we use fraction directly
     w_bw = bandwidth * wc
     # Shape parameter for the generalized normal window
-    # 126 = 10^(6dB * 2 / (20/log10(e))) = 10^(12/20*log10(e))
-    # Actually: 6dB pulse-echo -> 3dB one-way -> ratio = 10^(6/20) per side
-    # PyMUST uses log(126) which is log(2) * 6dB * 20/log(10) related
     p = log(126) / log(2.0 * wc / w_bw)
-
-    # Denominator of the exponent in the generalized normal window
+    # Denominator of the exponent
     sigma = w_bw / 2.0 / (log(2) ** (1.0 / p))
 
-    def _probe_spectrum(w: np.ndarray) -> np.ndarray:
+    def _probe_spectrum(w: Array) -> Array:
+        xp = array_namespace(w)
         # Pulse-echo (squared) response
-        spectrum_sqr = np.exp(-(np.abs(w - wc) / sigma) ** p)
+        spectrum_sqr = xp.exp(-((xp.abs(w - wc) / sigma) ** p))
         # One-way response (square root)
-        return np.sqrt(spectrum_sqr)
+        return xp.sqrt(spectrum_sqr)
 
     return _probe_spectrum

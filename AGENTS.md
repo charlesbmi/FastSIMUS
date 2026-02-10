@@ -28,7 +28,7 @@ src/fast_simus/
   tx_delay.py             # Transmit delay computation
   utils/
     __init__.py
-    _array_api.py         # Array API helpers and types
+    _array_api.py         # "Array" type for Array API
     geometry.py           # Geometry utilities
 tests/
   conftest.py

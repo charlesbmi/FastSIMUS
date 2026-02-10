@@ -42,7 +42,7 @@ class TestMysinc:
         np.testing.assert_allclose(result, expected, rtol=1e-12)
 
     def test_negative_values(self):
-        """sinc is an even function: sinc(-x) == sinc(x)."""
+        """Sinc is an even function: sinc(-x) == sinc(x)."""
         x = np.array([0.5, 1.0, 2.0])
         np.testing.assert_allclose(mysinc(-x), mysinc(x), rtol=1e-14)
 
