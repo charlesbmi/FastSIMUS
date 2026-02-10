@@ -32,6 +32,8 @@ classifiers = [
 ]
 dependencies = [
     "array-api-compat>=1.13",
+    "beartype>=0.19.0",
+    "jaxtyping>=0.2.37",
     "pydantic>=2.0,<3.0",
 ]
 
@@ -79,6 +81,7 @@ test = [
     "array-api-strict>=2.0",
     "numpy>=2.3",
     "jax>=0.9",
+    "pymust>=0.1.9",
 ]
 test-parallel = [
     { include-group = "test" },
@@ -160,6 +163,7 @@ select = [
     "E",     # pycodestyle errors
     "F",     # pyflakes
     "I",     # isort
+    "PLC0415", # https://docs.astral.sh/ruff/rules/import-outside-top-level/
     "RUF",   # ruff
     "S",     # flake8-bandit
     "SIM",   # flake8-simplify
@@ -170,6 +174,7 @@ select = [
 ignore = [
     # Disable some rules that are overly pedantic:
     "SIM108", # https://docs.astral.sh/ruff/rules/if-else-block-instead-of-if-exp/
+    "F722", # forward annotations: jaxtyping compatibility
     # We use both ruff formatter and linter so some rules should always be disabled.
     # See: https://docs.astral.sh/ruff/formatter/#conflicting-lint-rules
     "W191",   # https://docs.astral.sh/ruff/rules/tab-indentation/
@@ -189,6 +194,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+"src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -198,6 +204,7 @@ convention = "google"
 [tool.pytest.ini_options]
 filterwarnings = [
     "error",  # make warnings errors
+    "ignore::SyntaxWarning:pymust",  # PyMUST uses deprecated syntax
 ]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
