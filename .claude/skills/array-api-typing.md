@@ -37,16 +37,16 @@ from beartype import beartype as typechecker
 from jaxtyping import Float, Num, jaxtyped
 
 # Type alias until Array Protocol is standardized
-ArrayAPIObj = Any
+Array = Any
 
 @jaxtyped(typechecker=typechecker)
 def simus(
-    x: Float[ArrayAPIObj, " n_scatterers"],
-    z: Float[ArrayAPIObj, " n_scatterers"],
-    rc: Float[ArrayAPIObj, " n_scatterers"],
-    delays: Float[ArrayAPIObj, " n_elements"],
+    x: Float[Array, " n_scatterers"],
+    z: Float[Array, " n_scatterers"],
+    rc: Float[Array, " n_scatterers"],
+    delays: Float[Array, " n_elements"],
     params: "TransducerParams",
-) -> Float[ArrayAPIObj, "n_samples n_elements"]:
+) -> Float[Array, "n_samples n_elements"]:
     """Simulate RF signals with runtime shape checking."""
     xp = array_namespace(x)
     # ... implementation
@@ -56,15 +56,15 @@ def simus(
 
 ```python
 # Fixed dimensions
-Float[ArrayAPIObj, "height width"]           # 2D image
-Float[ArrayAPIObj, "n_samples n_elements"]   # RF signals
+Float[Array, "height width"]           # 2D image
+Float[Array, "n_samples n_elements"]   # RF signals
 
 # Variable/batch dimensions
-Float[ArrayAPIObj, "*batch n_freq"]          # Any batch dims + frequency
-Num[ArrayAPIObj, "..."]                      # Any shape
+Float[Array, "*batch n_freq"]          # Any batch dims + frequency
+Num[Array, "..."]                      # Any shape
 
 # Named dimensions (self-documenting)
-Float[ArrayAPIObj, " n_scatterers"]           # 1D array of scatterer coords
+Float[Array, " n_scatterers"]           # 1D array of scatterer coords
 ```
 
 For jaxtyping/ruff compatibility, 1-D annotations should have a leading space, e.g. " x"

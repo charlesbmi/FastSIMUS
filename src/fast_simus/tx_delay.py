@@ -20,28 +20,24 @@ Sign Convention:
 from __future__ import annotations
 
 from math import inf, pi
-from typing import TYPE_CHECKING, Any
+from typing import cast
 
 import array_api_extra as xpx
 from array_api_compat import array_namespace
 from beartype import beartype as typechecker
 from jaxtyping import Float, jaxtyped
 
-if TYPE_CHECKING:
-    pass
-
-# Type alias for Array API objects (until protocol is standardized)
-ArrayAPIObj = Any
+from fast_simus.utils._array_api import Array
 
 
 @jaxtyped(typechecker=typechecker)
 def compute_focused_delays(
-    element_positions: Float[ArrayAPIObj, "n_elements xz=2"],
+    element_positions: Float[Array, "n_elements xz=2"],
     speed_of_sound: float,
     radius: float,
-    focus: Float[ArrayAPIObj, "*batch xz=2"] | float,
+    focus: Float[Array, "*batch xz=2"] | float,
     apex_offset: float = 0.0,
-) -> Float[ArrayAPIObj, "*batch n_elements"]:
+) -> Float[Array, "*batch n_elements"]:
     """Compute transmit time delays for focused or diverging spherical waves.
 
     Spherical waves propagate like a collapsing sphere focusing onto a point
@@ -129,7 +125,7 @@ def compute_focused_delays(
     # Convert focus to array and ensure shape (*batch, 2)
     focus_as_array = xp.asarray(focus)
     was_unbatched = focus_as_array.ndim < 2
-    focus_arr: Float[ArrayAPIObj, "batch xz=2"] = xpx.atleast_nd(focus_as_array, ndim=2, xp=xp)
+    focus_arr: Float[Array, "batch xz=2"] = cast(Array, xpx.atleast_nd(focus_as_array, ndim=2, xp=xp))
 
     x0_arr = focus_arr[..., :1]  # Shape (*batch, 1)
     z0_arr = focus_arr[..., 1:2]  # Shape (*batch, 1)
@@ -166,12 +162,12 @@ def compute_focused_delays(
 
 @jaxtyped(typechecker=typechecker)
 def plane_wave(
-    element_positions: Float[ArrayAPIObj, "n_elements xz=2"],
+    element_positions: Float[Array, "n_elements xz=2"],
     speed_of_sound: float,
     radius: float,
-    tilt_rad: Float[ArrayAPIObj, "*batch"] | float,
+    tilt_rad: Float[Array, "*batch"] | float,
     apex_offset: float = 0.0,
-) -> Float[ArrayAPIObj, "*batch n_elements"]:
+) -> Float[Array, "*batch n_elements"]:
     """Compute transmit time delays for plane wave transmission.
 
     Plane waves have a flat wavefront propagating in a specified direction,
@@ -293,12 +289,12 @@ def plane_wave(
 
 @jaxtyped(typechecker=typechecker)
 def diverging_wave(
-    element_positions: Float[ArrayAPIObj, "n_elements xz=2"],
+    element_positions: Float[Array, "n_elements xz=2"],
     speed_of_sound: float,
     radius: float,
-    angles: Float[ArrayAPIObj, "*batch angles=2"] | float,
+    angles: Float[Array, "*batch angles=2"] | float,
     aperture_length: float,
-) -> Float[ArrayAPIObj, "*batch n_elements"]:
+) -> Float[Array, "*batch n_elements"]:
     """Compute transmit time delays for diverging circular wave transmission.
 
     Circular waves originate from a virtual point source positioned such that
@@ -379,7 +375,7 @@ def diverging_wave(
     # Convert angles to array and ensure shape (*batch, 2)
     angles_as_array = xp.asarray(angles)
     was_unbatched = angles_as_array.ndim < 2
-    angles_arr: Float[ArrayAPIObj, "batch angles=2"] = xpx.atleast_nd(angles_as_array, ndim=2, xp=xp)
+    angles_arr: Float[Array, "batch angles=2"] = cast(Array, xpx.atleast_nd(angles_as_array, ndim=2, xp=xp))
 
     tilt_arr = angles_arr[..., :1]  # Shape (*batch, 1)
     width_arr = angles_arr[..., 1:2]  # Shape (*batch, 1)
@@ -408,9 +404,9 @@ def diverging_wave(
 
 def _angles_to_origin(
     L: float,
-    tilt_rad: Float[ArrayAPIObj, "*batch 1"],
-    width_rad: Float[ArrayAPIObj, "*batch 1"],
-) -> tuple[Float[ArrayAPIObj, "*batch 1"], Float[ArrayAPIObj, "*batch 1"]]:
+    tilt_rad: Float[Array, "*batch 1"],
+    width_rad: Float[Array, "*batch 1"],
+) -> tuple[Float[Array, "*batch 1"], Float[Array, "*batch 1"]]:
     """Convert tilt and width angles to virtual source position.
 
     Args:

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from fast_simus.utils._array_api import _ArrayNamespace
 
 # Type alias for Array API objects (until protocol is standardized)
-ArrayAPIObj = Any
+Array = Any
 
 
 @jaxtyped(typechecker=typechecker)
@@ -22,9 +22,9 @@ def element_positions(
     radius: float,
     xp: _ArrayNamespace,
 ) -> tuple[
-    Float[ArrayAPIObj, " n_elements"],
-    Float[ArrayAPIObj, " n_elements"],
-    Float[ArrayAPIObj, " n_elements"] | None,
+    Float[Array, " n_elements"],
+    Float[Array, " n_elements"],
+    Float[Array, " n_elements"] | None,
     float,
 ]:
     """Calculate transducer element positions.
