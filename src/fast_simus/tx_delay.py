@@ -19,10 +19,8 @@ Sign Convention:
 
 from __future__ import annotations
 
-from math import inf, pi
-from typing import cast
+from math import cos, fmod, inf, pi, sin, sqrt, tan
 
-import array_api_extra as xpx
 from array_api_compat import array_namespace
 from beartype import beartype as typechecker
 from jaxtyping import Float, jaxtyped
@@ -32,12 +30,13 @@ from fast_simus.utils._array_api import Array
 
 @jaxtyped(typechecker=typechecker)
 def focused(
-    element_positions: Float[Array, "n_elements xz=2"],
+    element_positions: Float[Array, "n_elements dim"],
+    focus: Float[Array, " dim"],
+    *,
     speed_of_sound: float,
-    radius: float,
-    focus: Float[Array, "*batch xz=2"] | float,
+    radius: float = inf,
     apex_offset: float = 0.0,
-) -> Float[Array, "*batch n_elements"]:
+) -> Float[Array, " n_elements"]:
     """Compute transmit time delays for focused or diverging spherical waves.
 
     Spherical waves propagate like a collapsing sphere focusing onto a point
@@ -46,29 +45,28 @@ def focused(
 
     Args:
         element_positions:
-            Element (x, z) positions in meters. Shape (n_elements, 2).
-            - element_positions[:, 0]: Lateral positions (x)
-            - element_positions[:, 1]: Axial positions (z)
+            Element positions in meters. Shape (n_elements, dim).
+            For 2D: (x, z) where x is lateral, z is axial.
+            For 3D: (x, y, z) where z is axial (depth).
+        focus:
+            Focal position in meters. Shape (dim,).
+            Coordinates match element_positions dimensions.
+            - Last coordinate (z): Axial position
+              - Positive z: Focused wave (focus in front of transducer)
+              - Negative z: Diverging wave (virtual source behind transducer)
+              - z=0: Treated as focusing just in front (negative delays)
         speed_of_sound:
             Speed of sound in m/s.
         radius:
             Curvature radius in meters. Use inf for linear arrays.
-        focus:
-            Focal position(s) in meters as [..., (x, z)] coordinates.
-            Shape (*batch, 2) or (2,) for single focus.
-            - focus[..., 0]: Lateral position (x), center of array at 0
-            - focus[..., 1]: Axial position (z)
-              - Positive z: Focused wave (focus in front of transducer)
-              - Negative z: Diverging wave (virtual source behind transducer)
-              - z=0: Treated as focusing just in front (negative delays)
+            Convex arrays require dim=2 (runtime check).
         apex_offset:
             Distance from array center to arc apex in meters. Zero for linear arrays.
             Defaults to 0.0.
 
     Returns:
-        Transmit time delays in seconds. Shape (*batch, n_elements).
+        Transmit time delays in seconds. Shape (n_elements,).
         Delays are relative to minimum (all non-negative).
-        Each row corresponds to one beam configuration.
 
     Notes:
         Implementation matches PyMUST reference with identical sign conventions.
@@ -82,43 +80,35 @@ def focused(
             https://www.biomecardio.com/publis/ultrasonics21.pdf
             (Equation 5, extended to support virtual sources)
     """
-    # Convert to array and get namespace
-    xp = array_namespace(element_positions)
+    xp = array_namespace(element_positions, focus)
 
-    # Convert focus to array and ensure shape (*batch, 2)
-    focus_as_array = xp.asarray(focus)
-    was_unbatched = focus_as_array.ndim < 2
-    focus_arr: Float[Array, "batch xz=2"] = cast(Array, xpx.atleast_nd(focus_as_array, ndim=2, xp=xp))
-
-    x0_arr = focus_arr[..., :1]  # Shape (*batch, 1)
-    z0_arr = focus_arr[..., 1:2]  # Shape (*batch, 1)
-
-    # Extract element positions -- shape (n_elements,) for correct broadcasting
-    elem_pos_arr = xp.asarray(element_positions)
-    x_elem = elem_pos_arr[:, 0]  # Shape (n_elements,)
-    z_elem = elem_pos_arr[:, 1]  # Shape (n_elements,)
-
-    c = speed_of_sound
-
-    # Euclidean distance: (*batch, 1) vs (n_elements,) -> (*batch, n_elements)
-    distances = xp.sqrt((x_elem - x0_arr) ** 2 + (z_elem - z0_arr) ** 2)
+    # Compute distance from each element to focus
+    # element_positions: (n_elements, dim), focus: (dim,)
+    # Broadcasting: (n_elements, dim) - (dim,) -> (n_elements, dim)
+    diff = element_positions - focus
+    distances = xp.sqrt(xp.sum(diff**2, axis=-1))  # (n_elements,)
 
     if radius == inf:
-        # Linear array: sign based on axial position
-        sgn = xp.sign(z0_arr)
+        # Linear array: sign based on axial position (last coordinate)
+        z_focus = focus[-1]
+        sgn = xp.sign(z_focus)
         sgn = xp.where(sgn == 0, -1, sgn)
-        delays = -distances * sgn / c
+        delays = -distances * sgn / speed_of_sound
     else:
-        # Convex array: sign based on inside/outside arc
-        sgn = xp.sign(x0_arr**2 + (z0_arr + apex_offset) ** 2 - radius**2)
+        # Convex array: requires 2D coordinates
+        if focus.shape[0] != 2:
+            msg = f"Convex arrays require 2D coordinates, got dim={focus.shape[0]}"
+            raise ValueError(msg)
+
+        # Sign based on inside/outside arc
+        x_focus = focus[0]
+        z_focus = focus[-1]
+        sgn = xp.sign(x_focus**2 + (z_focus + apex_offset) ** 2 - radius**2)
         sgn = xp.where(sgn == 0, -1, sgn)
-        delays = -distances * sgn / c
+        delays = -distances * sgn / speed_of_sound
 
     # Make all delays non-negative by subtracting minimum
-    delays = delays - xp.min(delays, axis=-1, keepdims=True)
-
-    if was_unbatched:
-        delays = xp.squeeze(delays, axis=0)
+    delays = delays - xp.min(delays)
 
     return delays
 
@@ -126,11 +116,12 @@ def focused(
 @jaxtyped(typechecker=typechecker)
 def plane_wave(
     element_positions: Float[Array, "n_elements xz=2"],
+    tilt_rad: float,
+    *,
     speed_of_sound: float,
-    radius: float,
-    tilt_rad: Float[Array, "*batch"] | float,
+    radius: float = inf,
     apex_offset: float = 0.0,
-) -> Float[Array, "*batch n_elements"]:
+) -> Float[Array, " n_elements"]:
     """Compute transmit time delays for plane wave transmission.
 
     Plane waves have a flat wavefront propagating in a specified direction,
@@ -141,27 +132,26 @@ def plane_wave(
             Element (x, z) positions in meters. Shape (n_elements, 2).
             - element_positions[:, 0]: Lateral positions (x)
             - element_positions[:, 1]: Axial positions (z)
-        speed_of_sound:
-            Speed of sound in m/s.
-        radius:
-            Curvature radius in meters. Use inf for linear arrays.
         tilt_rad:
-            Tilt angle(s) in radians. Shape (*batch,).
+            Tilt angle in radians.
             - tilt_rad=0: Straight ahead (perpendicular to array)
             - Positive tilt_rad: Beam steers right (positive x direction)
             - Negative tilt_rad: Beam steers left (negative x direction)
             Must satisfy |tilt_rad| < π/2.
+        speed_of_sound:
+            Speed of sound in m/s.
+        radius:
+            Curvature radius in meters. Use inf for linear arrays.
         apex_offset:
             Distance from array center to arc apex in meters. Zero for linear arrays.
             Defaults to 0.0.
 
     Returns:
-        Transmit time delays in seconds. Shape (*batch, n_elements).
+        Transmit time delays in seconds. Shape (n_elements,).
         Delays are relative to minimum (all non-negative).
-        Each row corresponds to one beam angle.
 
     Raises:
-        ValueError: If any |tilt_rad| >= π/2 (non-physical angle).
+        ValueError: If |tilt_rad| >= π/2 (non-physical angle).
 
     Notes:
         For linear arrays, delays follow simple sinusoidal pattern based on
@@ -170,45 +160,31 @@ def plane_wave(
         For convex arrays, the computation accounts for the curved geometry
         by computing distance to the plane perpendicular to the tilt direction.
     """
-    # Convert to array and get namespace
-    xp = array_namespace(tilt_rad, element_positions)
-
-    # Ensure tilt_rad has shape (*batch, 1) for broadcasting
-    tilt_arr = xp.asarray(tilt_rad)
-    was_scalar = tilt_arr.ndim == 0
-    if tilt_arr.ndim == 0:
-        tilt_arr = xp.reshape(tilt_arr, (1,))
-    tilt_arr = xp.reshape(tilt_arr, (-1, 1))  # Shape (*batch, 1)
-
-    if xp.any(xp.abs(tilt_arr) >= pi / 2):
+    # Validate tilt angle
+    if abs(tilt_rad) >= pi / 2:
         msg = "Tilt angles must satisfy |tilt_rad| < π/2"
         raise ValueError(msg)
 
-    # Extract element positions -- shape (n_elements,) for correct broadcasting
-    elem_pos_arr = xp.asarray(element_positions)
-    x_elem = elem_pos_arr[:, 0]  # Shape (n_elements,)
-    z_elem = elem_pos_arr[:, 1]  # Shape (n_elements,)
+    xp = array_namespace(element_positions)
 
-    c = speed_of_sound
+    # Extract element positions
+    x_elem = element_positions[:, 0]  # Shape (n_elements,)
+    z_elem = element_positions[:, 1]  # Shape (n_elements,)
 
     if radius == inf:
         # Linear array: delay proportional to lateral position
-        # (*batch, 1) * (n_elements,) -> (*batch, n_elements)
-        delays = x_elem * xp.sin(tilt_arr) / c
+        delays = x_elem * sin(tilt_rad) / speed_of_sound
     else:
         # Convex array: geometric calculation
-        xn = radius * xp.sin(tilt_arr)
-        zn = radius * xp.cos(tilt_arr) - apex_offset
+        xn = radius * sin(tilt_rad)
+        zn = radius * cos(tilt_rad) - apex_offset
         numerator = xp.abs(z_elem + xn / (zn + apex_offset) * x_elem - xn**2 / (zn + apex_offset) - zn)
-        denominator = xp.sqrt(1 + xn**2 / (zn + apex_offset) ** 2)
+        denominator = sqrt(1 + xn**2 / (zn + apex_offset) ** 2)
         d = numerator / denominator
-        delays = -d / c
+        delays = -d / speed_of_sound
 
     # Make all delays non-negative
-    delays = delays - xp.min(delays, axis=-1, keepdims=True)
-
-    if was_scalar:
-        delays = xp.squeeze(delays, axis=0)
+    delays = delays - xp.min(delays)
 
     return delays
 
@@ -216,11 +192,12 @@ def plane_wave(
 @jaxtyped(typechecker=typechecker)
 def diverging_wave(
     element_positions: Float[Array, "n_elements xz=2"],
-    speed_of_sound: float,
-    radius: float,
-    angles: Float[Array, "*batch angles=2"] | float,
+    tilt_rad: float,
+    width_rad: float,
+    *,
     aperture_length: float,
-) -> Float[Array, "*batch n_elements"]:
+    speed_of_sound: float,
+) -> Float[Array, " n_elements"]:
     """Compute transmit time delays for diverging circular wave transmission.
 
     Circular waves originate from a virtual point source positioned such that
@@ -232,94 +209,68 @@ def diverging_wave(
             Element (x, z) positions in meters. Shape (n_elements, 2).
             - element_positions[:, 0]: Lateral positions (x)
             - element_positions[:, 1]: Axial positions (z)
-        speed_of_sound:
-            Speed of sound in m/s.
-        radius:
-            Curvature radius in meters. Must be inf for linear arrays.
-        angles:
-            Wave angles as [..., (tilt, width)] in radians. Shape (*batch, 2) or (2,).
-            - angles[..., 0]: Tilt angle of the wave center
-            - angles[..., 1]: Angular width of the wave
-              Must satisfy 0 < width < π.
+        tilt_rad:
+            Tilt angle of the wave center in radians.
+        width_rad:
+            Angular width of the wave in radians.
+            Must satisfy 0 < width_rad < π.
         aperture_length:
             Array aperture length in meters (typically (n_elements - 1) * pitch).
+        speed_of_sound:
+            Speed of sound in m/s.
 
     Returns:
-        Transmit time delays in seconds. Shape (*batch, n_elements).
+        Transmit time delays in seconds. Shape (n_elements,).
         Delays are relative to minimum (all non-negative).
 
     Raises:
-        ValueError: If radius is not inf (convex arrays not supported).
-        ValueError: If any width is outside (0, π).
+        ValueError: If width_rad is outside (0, π).
 
     Notes:
         The virtual source position is computed from the tilt and width angles
         using geometric constraints. This creates a diverging spherical wave
         that appears to originate from behind the transducer.
+
+        Only supported for linear arrays (not convex arrays).
     """
-    if radius != inf:
-        msg = "Diverging wave delays are not supported for convex arrays"
-        raise ValueError(msg)
-
-    # Convert to array and get namespace
-    xp = array_namespace(element_positions)
-
-    # Convert angles to array and ensure shape (*batch, 2)
-    angles_as_array = xp.asarray(angles)
-    was_unbatched = angles_as_array.ndim < 2
-    angles_arr: Float[Array, "batch angles=2"] = cast(Array, xpx.atleast_nd(angles_as_array, ndim=2, xp=xp))
-
-    tilt_arr = angles_arr[..., :1]  # Shape (*batch, 1)
-    width_arr = angles_arr[..., 1:2]  # Shape (*batch, 1)
-
-    if xp.any(width_arr <= 0) or xp.any(width_arr >= pi):
+    if width_rad <= 0 or width_rad >= pi:
         msg = "Width angles must satisfy 0 < width_rad < π"
         raise ValueError(msg)
 
-    # Extract element positions -- shape (n_elements,) for correct broadcasting
-    elem_pos_arr = xp.asarray(element_positions)
-    x_elem = elem_pos_arr[:, 0]  # Shape (n_elements,)
+    x0, z0 = _angles_to_virtual_source(aperture_length, tilt_rad, width_rad)
 
-    x0, z0 = _angles_to_origin(aperture_length, tilt_arr, width_arr)
-    c = speed_of_sound
+    xp = array_namespace(element_positions)
+    focus = xp.asarray([x0, z0])
 
-    # (*batch, 1) vs (n_elements,) -> (*batch, n_elements)
-    distances = xp.sqrt((x_elem - x0) ** 2 + z0**2)
-    delays = -distances * xp.sign(z0) / c
-    delays = delays - xp.min(delays, axis=-1, keepdims=True)
-
-    if was_unbatched:
-        delays = xp.squeeze(delays, axis=0)
-
-    return delays
+    # Delegate to focused() for delay computation
+    return focused(element_positions, focus, speed_of_sound=speed_of_sound)
 
 
-def _angles_to_origin(
-    L: float,
-    tilt_rad: Float[Array, "*batch 1"],
-    width_rad: Float[Array, "*batch 1"],
-) -> tuple[Float[Array, "*batch 1"], Float[Array, "*batch 1"]]:
+def _angles_to_virtual_source(
+    aperture_length: float,
+    tilt_rad: float,
+    width_rad: float,
+) -> tuple[float, float]:
     """Convert tilt and width angles to virtual source position.
 
     Args:
-        L: Array aperture length in meters.
-        tilt_rad: Tilt angles in radians. Shape (*batch, 1).
-        width_rad: Angular width in radians. Shape (*batch, 1).
+        aperture_length: Array aperture length in meters.
+        tilt_rad: Tilt angle in radians.
+        width_rad: Angular width in radians.
 
     Returns:
-        Tuple of (x0_m, z0_m) virtual source positions. Each has shape (*batch, 1).
+        Tuple of (x0_m, z0_m) virtual source position in meters.
     """
-    xp = array_namespace(tilt_rad, width_rad)
-
     # Normalize tilt to [-π/2, π/2]
-    tilt_norm = xp.fmod(-tilt_rad + pi / 2, 2 * pi) - pi / 2
-    sign_correction = xp.ones_like(tilt_norm)
-    idx = xp.abs(tilt_norm) > pi / 2
-    tilt_norm = xp.where(idx, pi - tilt_norm, tilt_norm)
-    sign_correction = xp.where(idx, -1, sign_correction)
+    tilt_norm = fmod(-tilt_rad + pi / 2, 2 * pi) - pi / 2
+    sign_correction = 1.0
 
-    denominator = xp.tan(tilt_norm - width_rad / 2) - xp.tan(tilt_norm + width_rad / 2)
-    z0 = sign_correction * L / denominator
-    x0 = sign_correction * z0 * xp.tan(width_rad / 2 - tilt_norm) + L / 2
+    if abs(tilt_norm) > pi / 2:
+        tilt_norm = pi - tilt_norm
+        sign_correction = -1.0
+
+    denominator = tan(tilt_norm - width_rad / 2) - tan(tilt_norm + width_rad / 2)
+    z0 = sign_correction * aperture_length / denominator
+    x0 = sign_correction * z0 * tan(width_rad / 2 - tilt_norm) + aperture_length / 2
 
     return x0, z0
