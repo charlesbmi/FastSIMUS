@@ -26,6 +26,8 @@ src/fast_simus/
   transducer_presets.py   # Preset transducer configs (P4-2v, L11-5v, etc.)
   medium_params.py        # Medium/tissue parameters
   tx_delay.py             # Transmit delay computation
+  spectrum.py             # Pulse & probe spectrum functions
+  pfield.py              # RMS pressure field computation
   utils/
     __init__.py
     _array_api.py         # "Array" type for Array API
@@ -34,6 +36,8 @@ tests/
   conftest.py
   test_transducers.py
   test_tx_delay.py
+  test_spectrum.py
+  test_pfield.py
   utils/
     test_array_api.py
 ```
