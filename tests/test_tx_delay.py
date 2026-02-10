@@ -19,10 +19,10 @@ class TestFocusedDelays:
         """Focused delays for linear array should match PyMUST txdelay."""
         from fast_simus.tx_delay import compute_focused_delays
 
-        # Get PyMUST reference
+        # Get PyMUST reference (squeeze: PyMUST always returns (1, n) for scalars)
         pymust_param = getparam("P4-2v")
         x0, z0 = 0.02, 0.05  # 2cm lateral, 5cm depth
-        pymust_delays = txdelayFocused(pymust_param, x0, z0)
+        pymust_delays = np.squeeze(txdelayFocused(pymust_param, x0, z0))
 
         # FastSIMUS implementation
         params = P4_2v()
@@ -41,7 +41,7 @@ class TestFocusedDelays:
 
         pymust_param = getparam("P4-2v")
         x0, z0 = 0.01, -0.03  # Virtual source above transducer
-        pymust_delays = txdelayFocused(pymust_param, x0, z0)
+        pymust_delays = np.squeeze(txdelayFocused(pymust_param, x0, z0))
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -58,7 +58,7 @@ class TestFocusedDelays:
 
         pymust_param = getparam("C5-2v")
         x0, z0 = 0.0, 0.06  # On-axis focus
-        pymust_delays = txdelayFocused(pymust_param, x0, z0)
+        pymust_delays = np.squeeze(txdelayFocused(pymust_param, x0, z0))
 
         params = C5_2v()
         xp = array_namespace(np.array([1.0]))
@@ -97,7 +97,7 @@ class TestPlaneWaveDelays:
 
         pymust_param = getparam("P4-2v")
         tilt = np.pi / 18  # 10 degrees
-        pymust_delays = txdelayPlane(pymust_param, tilt)
+        pymust_delays = np.squeeze(txdelayPlane(pymust_param, tilt))
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -113,7 +113,7 @@ class TestPlaneWaveDelays:
 
         pymust_param = getparam("P4-2v")
         tilt = 0.0
-        pymust_delays = txdelayPlane(pymust_param, tilt)
+        pymust_delays = np.squeeze(txdelayPlane(pymust_param, tilt))
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -130,7 +130,7 @@ class TestPlaneWaveDelays:
 
         pymust_param = getparam("C5-2v")
         tilt = np.pi / 18  # 10 degrees
-        pymust_delays = txdelayPlane(pymust_param, tilt)
+        pymust_delays = np.squeeze(txdelayPlane(pymust_param, tilt))
 
         params = C5_2v()
         xp = array_namespace(np.array([1.0]))
@@ -167,7 +167,7 @@ class TestCircularWaveDelays:
         pymust_param = getparam("P4-2v")
         tilt = np.pi / 18  # 10 degrees
         width = np.pi / 6  # 30 degrees
-        pymust_delays = txdelayCircular(pymust_param, tilt, width)
+        pymust_delays = np.squeeze(txdelayCircular(pymust_param, tilt, width))
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))

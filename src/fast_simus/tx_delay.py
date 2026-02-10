@@ -128,19 +128,20 @@ def compute_focused_delays(
 
     # Convert focus to array and ensure shape (*batch, 2)
     focus_as_array = xp.asarray(focus)
+    was_unbatched = focus_as_array.ndim < 2
     focus_arr: Float[ArrayAPIObj, "batch xz=2"] = xpx.atleast_nd(focus_as_array, ndim=2, xp=xp)
 
-    x0_arr = focus_arr[..., :1]
-    z0_arr = focus_arr[..., 1:2]
+    x0_arr = focus_arr[..., :1]  # Shape (*batch, 1)
+    z0_arr = focus_arr[..., 1:2]  # Shape (*batch, 1)
 
-    # Extract element positions
+    # Extract element positions -- shape (n_elements,) for correct broadcasting
     elem_pos_arr = xp.asarray(element_positions)
-    x_elem = elem_pos_arr[:, 0:1]  # Shape (n_elements, 1)
-    z_elem = elem_pos_arr[:, 1:2]  # Shape (n_elements, 1)
+    x_elem = elem_pos_arr[:, 0]  # Shape (n_elements,)
+    z_elem = elem_pos_arr[:, 1]  # Shape (n_elements,)
 
     c = speed_of_sound
 
-    # Euclidean distance from each element to each focal point
+    # Euclidean distance: (*batch, 1) vs (n_elements,) -> (*batch, n_elements)
     distances = xp.sqrt((x_elem - x0_arr) ** 2 + (z_elem - z0_arr) ** 2)
 
     if radius == inf:
@@ -156,6 +157,10 @@ def compute_focused_delays(
 
     # Make all delays non-negative by subtracting minimum
     delays = delays - xp.min(delays, axis=-1, keepdims=True)
+
+    if was_unbatched:
+        delays = xp.squeeze(delays, axis=0)
+
     return delays
 
 
@@ -248,23 +253,25 @@ def plane_wave(
 
     # Ensure tilt_rad has shape (*batch, 1) for broadcasting
     tilt_arr = xp.asarray(tilt_rad)
+    was_scalar = tilt_arr.ndim == 0
     if tilt_arr.ndim == 0:
         tilt_arr = xp.reshape(tilt_arr, (1,))
-    tilt_arr = xp.reshape(tilt_arr, (-1, 1))
+    tilt_arr = xp.reshape(tilt_arr, (-1, 1))  # Shape (*batch, 1)
 
     if xp.any(xp.abs(tilt_arr) >= pi / 2):
         msg = "Tilt angles must satisfy |tilt_rad| < π/2"
         raise ValueError(msg)
 
-    # Extract element positions
+    # Extract element positions -- shape (n_elements,) for correct broadcasting
     elem_pos_arr = xp.asarray(element_positions)
-    x_elem = elem_pos_arr[:, 0:1]  # Shape (n_elements, 1)
-    z_elem = elem_pos_arr[:, 1:2]  # Shape (n_elements, 1)
+    x_elem = elem_pos_arr[:, 0]  # Shape (n_elements,)
+    z_elem = elem_pos_arr[:, 1]  # Shape (n_elements,)
 
     c = speed_of_sound
 
     if radius == inf:
         # Linear array: delay proportional to lateral position
+        # (*batch, 1) * (n_elements,) -> (*batch, n_elements)
         delays = x_elem * xp.sin(tilt_arr) / c
     else:
         # Convex array: geometric calculation
@@ -277,6 +284,10 @@ def plane_wave(
 
     # Make all delays non-negative
     delays = delays - xp.min(delays, axis=-1, keepdims=True)
+
+    if was_scalar:
+        delays = xp.squeeze(delays, axis=0)
+
     return delays
 
 
@@ -367,25 +378,31 @@ def diverging_wave(
 
     # Convert angles to array and ensure shape (*batch, 2)
     angles_as_array = xp.asarray(angles)
+    was_unbatched = angles_as_array.ndim < 2
     angles_arr: Float[ArrayAPIObj, "batch angles=2"] = xpx.atleast_nd(angles_as_array, ndim=2, xp=xp)
 
-    tilt_arr = angles_arr[..., :1]
-    width_arr = angles_arr[..., 1:2]
+    tilt_arr = angles_arr[..., :1]  # Shape (*batch, 1)
+    width_arr = angles_arr[..., 1:2]  # Shape (*batch, 1)
 
     if xp.any(width_arr <= 0) or xp.any(width_arr >= pi):
         msg = "Width angles must satisfy 0 < width_rad < π"
         raise ValueError(msg)
 
-    # Extract element positions
+    # Extract element positions -- shape (n_elements,) for correct broadcasting
     elem_pos_arr = xp.asarray(element_positions)
-    x_elem = elem_pos_arr[:, 0:1]  # Shape (n_elements, 1)
+    x_elem = elem_pos_arr[:, 0]  # Shape (n_elements,)
 
     x0, z0 = _angles_to_origin(aperture_length, tilt_arr, width_arr)
     c = speed_of_sound
 
+    # (*batch, 1) vs (n_elements,) -> (*batch, n_elements)
     distances = xp.sqrt((x_elem - x0) ** 2 + z0**2)
     delays = -distances * xp.sign(z0) / c
     delays = delays - xp.min(delays, axis=-1, keepdims=True)
+
+    if was_unbatched:
+        delays = xp.squeeze(delays, axis=0)
+
     return delays
 
 
