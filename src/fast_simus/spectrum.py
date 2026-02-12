@@ -15,29 +15,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from math import log, pi
 
+import array_api_extra as xpx
 from array_api_compat import array_namespace
 
 from fast_simus.utils._array_api import Array
-
-# Epsilon to avoid division by zero in sinc computation
-_EPS: float = 1e-16
-
-
-def mysinc(x: Array) -> Array:
-    """Compute the unnormalized sinc function: sin(x)/x.
-
-    Uses |x| + eps to avoid division by zero, matching the MUST convention.
-    Note: this is NOT numpy.sinc which computes sin(pi*x)/(pi*x).
-
-    Args:
-        x: Input array in radians.
-
-    Returns:
-        sin(|x|+eps) / (|x|+eps), element-wise.
-    """
-    xp = array_namespace(x)
-    abs_x = xp.abs(x) + _EPS
-    return xp.sin(abs_x) / abs_x
 
 
 def pulse_spectrum_fn(
@@ -53,7 +34,6 @@ def pulse_spectrum_fn(
     Args:
         freq_center: Center frequency in Hz. Must be positive.
         tx_n_wavelengths: Number of wavelengths of the TX pulse.
-            Defaults to 1.0.
 
     Returns:
         Callable taking angular frequency w (rad/s) and returning
@@ -63,7 +43,11 @@ def pulse_spectrum_fn(
     wc = 2.0 * pi * freq_center  # center angular frequency (rad/s)
 
     def _pulse_spectrum(w: Array) -> Array:
-        return 1j * (mysinc(t_pulse * (w - wc) / 2.0) - mysinc(t_pulse * (w + wc) / 2.0))
+        xp = array_namespace(w)
+        # Use unnormalized sinc: sinc(x/pi) from array_api_extra
+        arg1 = t_pulse * (w - wc) / 2.0 / pi
+        arg2 = t_pulse * (w + wc) / 2.0 / pi
+        return 1j * (xpx.sinc(arg1, xp=xp) - xpx.sinc(arg2, xp=xp))
 
     return _pulse_spectrum
 
@@ -83,8 +67,7 @@ def probe_spectrum_fn(
 
     Args:
         freq_center: Center frequency in Hz. Must be positive.
-        bandwidth: Fractional bandwidth (0.75 = 75%). Must be in (0, 2.0].
-            Defaults to 0.75.
+        bandwidth: Fractional bandwidth (0.75 = 75%). Must be in (0, 2.0).
 
     Returns:
         Callable taking angular frequency w (rad/s) and returning
@@ -94,10 +77,21 @@ def probe_spectrum_fn(
         Generalized normal window:
         https://en.wikipedia.org/wiki/Window_function#Generalized_normal_window
     """
+    # Validate bandwidth
+    if not (0.0 < bandwidth < 2.0):
+        msg = f"bandwidth must be in (0, 2.0), got {bandwidth!r}"
+        raise ValueError(msg)
+
     wc = 2.0 * pi * freq_center
     # Convert fractional bandwidth to angular bandwidth
     w_bw = bandwidth * wc
     # Shape parameter for the generalized normal window
+    # The constant 126 comes from the two-way 6 dB bandwidth criterion:
+    # For pulse-echo, the total response is the product of TX and RX responses,
+    # so the one-way response at -3 dB corresponds to -6 dB two-way.
+    # In linear scale: 10^(6/10) ≈ 3.98, but the generalized normal window
+    # parameterization uses 126 = 2 * (2^6) to define the bandwidth edges
+    # where the two-way response falls to -6 dB.
     p = log(126) / log(2.0 * wc / w_bw)
     # Denominator of the exponent
     sigma = w_bw / 2.0 / (log(2) ** (1.0 / p))

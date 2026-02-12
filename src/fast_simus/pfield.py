@@ -20,11 +20,12 @@ import math
 from math import ceil, inf, pi
 from typing import TYPE_CHECKING
 
+import array_api_extra as xpx
 import numpy as np
 from array_api_compat import array_namespace
 
 from fast_simus.medium_params import MediumParams
-from fast_simus.spectrum import mysinc, probe_spectrum_fn, pulse_spectrum_fn
+from fast_simus.spectrum import probe_spectrum_fn, pulse_spectrum_fn
 from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.utils._array_api import Array
 from fast_simus.utils.geometry import element_positions
@@ -34,13 +35,9 @@ if TYPE_CHECKING:
 
 _DEFAULT_MEDIUM = MediumParams()
 
-# Single-precision machine epsilon
-_EPS_SINGLE: float = 1.1920928955078125e-07
-
 
 def pfield(
-    x: Array,
-    z: Array,
+    positions: Array,
     delays: Array,
     params: TransducerParams,
     medium: MediumParams = _DEFAULT_MEDIUM,
@@ -59,40 +56,52 @@ def pfield(
     different time delays. 2-D computation only (no elevation focusing).
 
     Args:
-        x: Lateral positions in meters. Shape ``(*grid_shape,)``.
-        z: Axial positions in meters. Shape ``(*grid_shape,)``.
-            Must have the same shape as ``x``. Positive z = into tissue.
+        positions: Grid positions in meters. Shape ``(*grid_shape, 2)`` where
+            ``positions[..., 0]`` is lateral (x) and ``positions[..., 1]`` is
+            axial (z, into tissue).
         delays: Transmit time delays in seconds. Shape ``(n_elements,)``.
-            Must be non-negative.
         params: Transducer parameters (geometry, frequency, bandwidth, baffle).
         medium: Medium parameters (speed of sound, attenuation).
-            Defaults to soft tissue (1540 m/s, 0 attenuation).
         tx_apodization: Transmit apodization weights. Shape ``(n_elements,)``.
-            Defaults to uniform (all ones). Elements with NaN delays are
-            automatically zeroed.
+            Elements with NaN delays are automatically zeroed.
         tx_n_wavelengths: Number of wavelengths in the TX pulse.
-            Defaults to 1.0.
         db_thresh: Threshold in dB for frequency component selection.
             Only components above this threshold (relative to peak) are used.
-            Lower values are more accurate but slower. Defaults to -60.
         full_frequency_directivity: If True, compute element directivity at
-            every frequency. If False (default), use center-frequency-only
-            directivity (faster, accurate except very near the array).
+            every frequency. If False, use center-frequency-only directivity.
         element_splitting: Number of sub-elements per transducer element.
-            If None (default), computed automatically as
-            ceil(element_width / smallest_wavelength).
+            If None, computed automatically as ceil(element_width / smallest_wavelength).
         frequency_step: Scaling factor for the frequency step.
             Values > 1 speed up computation; values < 1 give smoother results.
-            Defaults to 1.0.
 
     Returns:
-        RMS pressure field with same shape as input ``x`` and ``z``.
+        RMS pressure field with shape ``(*grid_shape,)``.
     """
+    xp = array_namespace(positions, delays)
+
+    # Extract x and z from positions
+    x = positions[..., 0]
+    z = positions[..., 1]
+
+    # Compute element positions
+    xe, ze, theta_e, apex_offset = element_positions(
+        params.n_elements, params.pitch, params.radius, xp
+    )
+
     return _pfield_core(
         x=x,
         z=z,
         delays=delays,
-        params=params,
+        xe=xe,
+        ze=ze,
+        theta_e=theta_e,
+        apex_offset=apex_offset,
+        fc=params.freq_center,
+        element_width=params.element_width,
+        bandwidth=params.bandwidth,
+        baffle=params.baffle,
+        n_elements=params.n_elements,
+        radius_of_curvature=params.radius,
         medium=medium,
         tx_apodization=tx_apodization,
         tx_n_wavelengths=tx_n_wavelengths,
@@ -111,7 +120,16 @@ def _pfield_core(
     x: Array,
     z: Array,
     delays: Array,
-    params: TransducerParams,
+    xe: Array,
+    ze: Array,
+    theta_e: Array | None,
+    apex_offset: float,
+    fc: float,
+    element_width: float,
+    bandwidth: float,
+    baffle: BaffleType | float,
+    n_elements: int,
+    radius_of_curvature: float,
     medium: MediumParams,
     *,
     tx_apodization: Array | None,
@@ -128,11 +146,7 @@ def _pfield_core(
     """Core pfield implementation shared by standalone pfield and simus."""
     xp = array_namespace(x, z, delays)
 
-    # --- Extract parameters ---
-    fc = params.freq_center
-    n_elements = params.n_elements
-    element_width = params.element_width
-    radius_of_curvature = params.radius
+    # --- Extract medium parameters ---
     c = medium.speed_of_sound
     alpha_db = medium.attenuation
 
@@ -141,89 +155,77 @@ def _pfield_core(
         msg = "x and z must have the same shape"
         raise ValueError(msg)
 
+    # --- Validate inputs ---
+    if delays.ndim != 1:
+        msg = f"delays must be 1-D, got shape {delays.shape}"
+        raise ValueError(msg)
+
+    if delays.shape[0] != n_elements:
+        msg = f"delays has {delays.shape[0]} elements, expected {n_elements}"
+        raise ValueError(msg)
+
     # Store original shape for output reshaping
     siz0 = x.shape if x.ndim > 1 else (x.shape[0], 1)
     nx = 1
     for s in x.shape:
         nx *= s
 
-    # Flatten to 1D, cast to float32 (matching PyMUST precision)
-    x_flat = _flatten_f32(xp, x)
-    z_flat = _flatten_f32(xp, z)
+    # Early return for empty grid
+    if nx == 0:
+        if _is_simus:
+            empty = xp.zeros((0,), dtype=xp.float32)
+            return empty, empty, empty
+        return xp.zeros((0,), dtype=xp.float32)
 
-    # --- Delays: ensure 2D (1, n_elements), handle NaN ---
-    delays_f32 = xp.asarray(delays, dtype=xp.float32)
-    if delays_f32.ndim == 1:
-        delays_2d = xp.reshape(delays_f32, (1, -1))
-    else:
-        delays_2d = delays_f32
-
-    if delays_2d.shape[-1] != n_elements:
-        msg = f"delays has {delays_2d.shape[-1]} elements, expected {n_elements}"
-        raise ValueError(msg)
+    # Flatten to 1D
+    x_flat = xp.reshape(x, (-1,)) if x.ndim > 1 else x
+    z_flat = xp.reshape(z, (-1,)) if z.ndim > 1 else z
 
     # --- TX apodization ---
     if tx_apodization is None:
         apod = xp.ones(n_elements, dtype=xp.float32)
     else:
-        apod = xp.reshape(xp.asarray(tx_apodization, dtype=xp.float32), (-1,))
-        if apod.shape[0] != n_elements:
-            msg = f"tx_apodization has {apod.shape[0]} elements, expected {n_elements}"
+        apod = xp.asarray(tx_apodization, dtype=xp.float32)
+        if apod.ndim != 1 or apod.shape[0] != n_elements:
+            msg = f"tx_apodization must have shape ({n_elements},), got {apod.shape}"
             raise ValueError(msg)
 
     # Zero apodization where delays are NaN; replace NaN delays with 0
-    nan_mask = _isnan(xp, delays_2d)
-    nan_any = _any_axis0(xp, nan_mask)
-    apod = xp.where(nan_any, xp.asarray(0.0, dtype=xp.float32), apod)
-    delays_2d = xp.where(nan_mask, xp.asarray(0.0, dtype=xp.float32), delays_2d)
+    nan_mask = _isnan(xp, delays)
+    apod = xp.where(nan_mask, xp.asarray(0.0, dtype=xp.float32), apod)
+    delays_clean = xp.where(nan_mask, xp.asarray(0.0, dtype=xp.float32), delays)
 
     # --- Baffle type ---
-    baffle = params.baffle
-    if baffle == BaffleType.RIGID:
-        non_rigid_baffle = False
-    elif baffle == BaffleType.SOFT:
-        non_rigid_baffle = True
-    else:
-        non_rigid_baffle = True
+    non_rigid_baffle = baffle != BaffleType.RIGID
 
     # --- Element splitting ---
     if element_splitting is not None:
         n_sub = element_splitting
     else:
-        bandwidth_pct = params.bandwidth * 100.0
-        lambda_min = c / (fc * (1.0 + bandwidth_pct / 200.0))
+        lambda_min = c / (fc * (1.0 + bandwidth / 2.0))
         n_sub = ceil(element_width / lambda_min)
 
-    # --- simus early return ---
-    if _is_simus and nx == 0:
-        empty = xp.zeros((0,), dtype=xp.float32)
-        return empty, empty, empty
-
-    # --- Element positions ---
-    xe, ze, theta_e, apex_offset = element_positions(
-        n_elements, params.pitch, radius_of_curvature, xp
-    )
-    xe = xp.reshape(xp.asarray(xe, dtype=xp.float32), (1, -1))
-    ze = xp.reshape(xp.asarray(ze, dtype=xp.float32), (1, -1))
-
+    # --- Element positions (already computed, passed in) ---
+    # xe, ze, theta_e are 1-D arrays with shape (n_elements,)
     if theta_e is None:
-        the_2d = xp.zeros((1, n_elements), dtype=xp.float32)
+        the_1d = xp.zeros(n_elements, dtype=xp.float32)
     else:
-        the_2d = xp.reshape(xp.asarray(theta_e, dtype=xp.float32), (1, -1))
+        the_1d = xp.asarray(theta_e, dtype=xp.float32)
 
     h = float(apex_offset)
 
-    # --- Sub-element centroids (shape: 1, n_elements, n_sub) ---
+    # --- Sub-element centroids (shape: n_elements, n_sub) ---
     seg_length = element_width / n_sub
     seg_offsets = xp.asarray(
         [-element_width / 2.0 + seg_length / 2.0 + i * seg_length for i in range(n_sub)],
         dtype=xp.float32,
     )
-    seg_3d = xp.reshape(seg_offsets, (1, 1, n_sub))
-    cos_the = xp.cos(the_2d)[:, :, None]  # (1, N, 1)
-    sin_neg_the = xp.sin(-the_2d)[:, :, None]
-    xi = seg_3d * cos_the
-    zi = seg_3d * sin_neg_the
+    # Broadcasting: (n_sub,) -> (1, n_sub), (n_elements,) -> (n_elements, 1)
+    seg_2d = xp.reshape(seg_offsets, (1, n_sub))
+    cos_the = xp.cos(the_1d)[:, None]  # (n_elements, 1)
+    sin_neg_the = xp.sin(-the_1d)[:, None]
+    xi = seg_2d * cos_the  # (n_elements, n_sub)
+    zi = seg_2d * sin_neg_the
 
     # --- Out-of-field mask ---
     is_out = z_flat < 0
@@ -234,30 +236,34 @@ def _pfield_core(
         )
 
     # --- Distances and angles (shape: nx, n_elements, n_sub) ---
-    dxi = x_flat[:, None, None] - xi - xe[:, :, None]
-    dz_arr = z_flat[:, None, None] - zi - ze[:, :, None]
+    # Broadcasting: x_flat (nx,) -> (nx, 1, 1)
+    #               xe (n_elements,) -> (1, n_elements, 1)
+    #               xi (n_elements, n_sub) -> (1, n_elements, n_sub)
+    dxi = x_flat[:, None, None] - xi[None, :, :] - xe[None, :, None]
+    dz_arr = z_flat[:, None, None] - zi[None, :, :] - ze[None, :, None]
     d2 = dxi**2 + dz_arr**2
 
-    # r in float32 (matching PyMUST)
-    r = xp.sqrt(xp.asarray(d2, dtype=xp.float32))
-    small_d = xp.asarray(c / fc / 2.0, dtype=xp.float32)
+    # r with clipping
+    r = xp.sqrt(d2)
+    small_d = xp.asarray(c / fc / 2.0)
     r = xp.where(r < small_d, small_d, r)
 
     # Angle relative to element normal
-    eps_sp = xp.asarray(_EPS_SINGLE, dtype=xp.float32)
-    sqrt_d2 = xp.sqrt(xp.asarray(d2, dtype=xp.float32))
-    theta_arr = xp.asin((dxi + eps_sp) / (sqrt_d2 + eps_sp)) - the_2d[:, :, None]
+    eps_sp = xp.asarray(1e-16)  # Small epsilon to avoid division by zero
+    sqrt_d2 = xp.sqrt(d2)
+    # Broadcasting: the_1d (n_elements,) -> (1, n_elements, 1)
+    theta_arr = xp.asin((dxi + eps_sp) / (sqrt_d2 + eps_sp)) - the_1d[None, :, None]
     sin_theta = xp.sin(theta_arr)
 
     # --- Spectrum functions ---
     pulse_fn = pulse_spectrum_fn(fc, tx_n_wavelengths)
-    probe_fn = probe_spectrum_fn(fc, params.bandwidth)
+    probe_fn = probe_spectrum_fn(fc, bandwidth)
 
     # --- Frequency step ---
     if _is_simus and _simus_df is not None:
         df = _simus_df
     else:
-        df = 1.0 / (float(xp.max(r)) / c + float(xp.max(delays_2d)))
+        df = 1.0 / (float(xp.max(r)) / c + float(xp.max(delays_clean)))
         df = frequency_step * df
 
     # --- Frequency samples ---
@@ -285,9 +291,7 @@ def _pfield_core(
     # --- Initialization ---
     rp_accum = xp.asarray(0.0, dtype=xp.float64)
     if _is_simus:
-        spect = xp.zeros((n_sampling, n_elements), dtype=xp.complex64)
-    else:
-        spect = xp.zeros((n_sampling, nx), dtype=xp.complex64)
+        spect_rows = []  # Accumulate rows in a list, stack at end
 
     # --- Obliquity factor ---
     if non_rigid_baffle:
@@ -300,44 +304,38 @@ def _pfield_core(
         obli_fac = xp.ones(theta_arr.shape, dtype=xp.float32)
 
     obli_fac = xp.where(
-        xp.abs(theta_arr) >= xp.asarray(pi / 2, dtype=xp.float32),
+        xp.abs(theta_arr) >= xp.asarray(pi / 2),
         eps_sp,
         obli_fac,
     )
 
-    # --- Exponential arrays (complex64 matching PyMUST) ---
+    # --- Exponential arrays ---
     f0 = float(f_sel[0])
     kw0 = 2.0 * pi * f0 / c
     kwa0 = alpha_db / 8.69 * f0 / 1e6 * 1e2
 
-    # exp(-kwa*r + 1j*mod(kw*r, 2pi)) then cast to complex64
-    r_f64 = xp.asarray(r, dtype=xp.float64)
-    kw0_r = xp.asarray(kw0) * r_f64
+    # exp(-kwa*r + 1j*mod(kw*r, 2pi))
+    kw0_r = xp.asarray(kw0) * r
     two_pi = xp.asarray(2.0 * pi)
     phase_mod = kw0_r - two_pi * xp.floor(kw0_r / two_pi)
-    exp_arr = _to_complex64(
-        xp,
-        xp.exp(xp.asarray(-kwa0) * r_f64) * (xp.cos(phase_mod) + xp.asarray(1j) * xp.sin(phase_mod)),
-    )
+    exp_arr = xp.exp(xp.asarray(-kwa0) * r) * (xp.cos(phase_mod) + xp.asarray(1j) * xp.sin(phase_mod))
 
     dkw = 2.0 * pi * df / c
     dkwa = alpha_db / 8.69 * df / 1e6 * 1e2
-    exp_df = _to_complex64(
-        xp,
-        xp.exp(xp.asarray(-dkwa + 1j * dkw) * r_f64),
-    )
+    exp_df = xp.exp(xp.asarray(-dkwa + 1j * dkw) * r)
 
     # Incorporate obliquity / sqrt(r) (2D, no elevation)
-    exp_arr = exp_arr * xp.asarray(obli_fac, dtype=xp.complex64) / xp.asarray(xp.sqrt(r), dtype=xp.complex64)
+    exp_arr = exp_arr * obli_fac / xp.sqrt(r)
 
     # --- Simplified directivity (center-frequency only) ---
     if not full_frequency_directivity:
         kc = 2.0 * pi * fc / c
-        dir_arr = mysinc(xp.asarray(kc * seg_length / 2.0) * xp.asarray(sin_theta, dtype=xp.float64))
-        exp_arr = exp_arr * xp.asarray(dir_arr, dtype=xp.complex64)
+        # Use unnormalized sinc: sinc(x/pi) from array_api_extra
+        sinc_arg = xp.asarray(kc * seg_length / 2.0) * sin_theta / pi
+        dir_arr = xpx.sinc(sinc_arg, xp=xp)
+        exp_arr = exp_arr * dir_arr
 
     # --- Frequency loop ---
-    exp_arr = _to_complex64(xp, exp_arr)
 
     for k in range(n_sampling):
         fk = float(f_sel[k])
@@ -348,65 +346,62 @@ def _pfield_core(
 
         # Directivity (frequency-dependent path)
         if full_frequency_directivity:
-            dir_k = mysinc(xp.asarray(kw * seg_length / 2.0) * xp.asarray(sin_theta, dtype=xp.float64))
+            # Use unnormalized sinc: sinc(x/pi) from array_api_extra
+            sinc_arg_k = xp.asarray(kw * seg_length / 2.0) * sin_theta / pi
+            dir_k = xpx.sinc(sinc_arg_k, xp=xp)
 
         # Single-element radiation patterns: average over sub-elements
         if full_frequency_directivity:
-            rp_mono = _mean_last(xp, xp.asarray(dir_k, dtype=xp.complex64) * exp_arr)
+            rp_mono = _mean_last(xp, dir_k * exp_arr)
         elif n_sub > 1:
             rp_mono = _mean_last(xp, exp_arr)
         else:
-            rp_mono = exp_arr
-
-        # Remove trailing size-1 dim
-        if rp_mono.ndim == 3 and rp_mono.shape[2] == 1:
-            rp_mono = xp.reshape(rp_mono, (rp_mono.shape[0], rp_mono.shape[1]))
+            # n_sub == 1, squeeze last dimension
+            rp_mono = xp.reshape(exp_arr, (exp_arr.shape[0], exp_arr.shape[1]))
 
         # Transmit delays + apodization
-        delay_exp = xp.exp(
-            xp.asarray(1j * kw * c) * xp.asarray(delays_2d, dtype=xp.complex64)
-        )
-        delapod = xp.sum(delay_exp, axis=0) * xp.asarray(apod, dtype=xp.complex64)
+        # delays_clean is 1-D (n_elements,), apply phase shift
+        delay_exp = xp.exp(xp.asarray(1j * kw * c) * delays_clean)
+        delapod = delay_exp * apod  # Element-wise, shape (n_elements,)
 
-        # Sum across elements
+        # Sum across elements: rp_mono (nx, n_elements), delapod (n_elements,)
         rp_k = rp_mono @ xp.reshape(delapod, (-1, 1))
 
         # Apply spectrum
-        rp_k = xp.asarray(pulse_spect[k], dtype=xp.complex64) * rp_k * xp.asarray(probe_spect[k], dtype=xp.complex64)
+        rp_k = pulse_spect[k] * rp_k * probe_spect[k]
 
         # Zero out-of-field (no mutation)
-        rp_k = xp.where(is_out[:, None], xp.asarray(0.0 + 0j, dtype=xp.complex64), rp_k)
+        rp_k = xp.where(is_out[:, None], xp.asarray(0.0 + 0j), rp_k)
 
         # --- Accumulate ---
         if _is_simus:
             if _rc is None:
                 msg = "_rc must be provided when _is_simus=True"
                 raise ValueError(msg)
-            spect_k = xp.asarray(probe_spect[k], dtype=xp.complex64)
+            spect_k = probe_spect[k]
             rp_flat = xp.reshape(rp_k, (-1,))
-            rc_flat = xp.reshape(xp.asarray(_rc, dtype=xp.complex64), (-1,))
+            rc_flat = xp.reshape(_rc, (-1,))
             weighted = xp.reshape(rp_flat * rc_flat, (1, -1))
             row = spect_k * xp.reshape(weighted @ rp_mono, (-1,))
             if _rx_delay is not None:
-                rx_exp = xp.exp(xp.asarray(1j * kw * c) * xp.asarray(_rx_delay, dtype=xp.complex64))
+                rx_exp = xp.exp(xp.asarray(1j * kw * c) * _rx_delay)
                 row = row * rx_exp
-            spect = _set_row(xp, spect, k, n_sampling, row)
+            spect_rows.append(row)
         else:
             rp_accum = rp_accum + xp.abs(rp_k) ** 2
-            spect = _set_row(xp, spect, k, n_sampling, xp.reshape(rp_k, (-1,)))
 
     # --- Correcting factor ---
     cor_fac = 1.0 if tx_n_wavelengths == float("inf") else df
     cor_fac = cor_fac * element_width
 
-    spect = spect * cor_fac
-    rp_accum = rp_accum * cor_fac
-
     if _is_simus:
+        # Stack accumulated rows into spect array
+        spect = xp.stack(spect_rows, axis=0) * cor_fac
+        rp_accum = rp_accum * cor_fac
         return rp_accum, spect, idx_out
 
     # RMS pressure, reshape to original grid
-    rp = xp.sqrt(rp_accum)
+    rp = xp.sqrt(rp_accum * cor_fac)
     return xp.reshape(rp, siz0)
 
 
@@ -415,29 +410,12 @@ def _pfield_core(
 # ---------------------------------------------------------------------------
 
 
-def _flatten_f32(xp: _ArrayNamespace, arr: Array) -> Array:
-    """Flatten array to 1D float32."""
-    flat = xp.reshape(arr, (-1,)) if arr.ndim > 1 else arr
-    return xp.asarray(flat, dtype=xp.float32)
-
-
-def _to_complex64(xp: _ArrayNamespace, arr: Array) -> Array:
-    """Cast to complex64."""
-    return xp.asarray(arr, dtype=xp.complex64)
-
-
 def _isnan(xp: _ArrayNamespace, arr: Array) -> Array:
     """Element-wise NaN check."""
     if hasattr(xp, "isnan"):
         return xp.isnan(arr)
-    return arr != arr  # NaN != NaN
-
-
-def _any_axis0(xp: _ArrayNamespace, arr: Array) -> Array:
-    """Reduce boolean along axis 0 with 'any'."""
-    if hasattr(xp, "any"):
-        return xp.any(arr, axis=0)
-    return xp.sum(xp.asarray(arr, dtype=xp.int32), axis=0) > 0
+    # NaN != NaN is the standard fallback for NaN detection
+    return arr != arr
 
 
 def _log10(xp: _ArrayNamespace, arr: Array) -> Array:
@@ -468,11 +446,3 @@ def _mean_last(xp: _ArrayNamespace, arr: Array) -> Array:
     if hasattr(xp, "mean"):
         return xp.mean(arr, axis=-1)
     return xp.sum(arr, axis=-1) / arr.shape[-1]
-
-
-def _set_row(xp: _ArrayNamespace, arr: Array, idx: int, n_rows: int, row: Array) -> Array:
-    """Set row idx in 2D array without mutation."""
-    indices = xp.arange(n_rows)
-    mask = (indices == idx)[:, None]
-    row_2d = xp.reshape(xp.asarray(row, dtype=arr.dtype), (1, -1))
-    return xp.where(mask, xp.broadcast_to(row_2d, arr.shape), arr)

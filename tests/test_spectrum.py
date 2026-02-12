@@ -3,54 +3,27 @@
 Compares FastSIMUS spectrum functions against PyMUST reference implementations.
 """
 
+import sys
+
 import numpy as np
 import pytest
 
-from fast_simus.spectrum import mysinc, probe_spectrum_fn, pulse_spectrum_fn
+from fast_simus.spectrum import probe_spectrum_fn, pulse_spectrum_fn
 
-# PyMUST may not be available
-try:
-    from pymust import getparam
-
-    PYMUST_AVAILABLE = True
-except (SyntaxError, ImportError):
+# PyMUST may not be available (Python 3.14+ has syntax errors)
+if sys.version_info >= (3, 14):
     PYMUST_AVAILABLE = False
+else:
+    try:
+        from pymust import getparam
+
+        PYMUST_AVAILABLE = True
+    except ImportError:
+        PYMUST_AVAILABLE = False
 
 requires_pymust = pytest.mark.skipif(
     not PYMUST_AVAILABLE, reason="PyMUST not available"
 )
-
-
-class TestMysinc:
-    """Test the unnormalized sinc function."""
-
-    def test_zero_returns_one(self):
-        """sinc(0) should be approximately 1."""
-        result = mysinc(np.array([0.0]))
-        np.testing.assert_allclose(result, 1.0, atol=1e-10)
-
-    def test_pi_returns_zero(self):
-        """sinc(pi) = sin(pi)/pi should be approximately 0."""
-        result = mysinc(np.array([np.pi]))
-        np.testing.assert_allclose(result, np.sin(np.pi) / np.pi, atol=1e-10)
-
-    def test_known_values(self):
-        """Test against known values of sin(x)/x."""
-        x = np.array([0.5, 1.0, 2.0, 3.0])
-        expected = np.sin(x) / x
-        result = mysinc(x)
-        np.testing.assert_allclose(result, expected, rtol=1e-12)
-
-    def test_negative_values(self):
-        """Sinc is an even function: sinc(-x) == sinc(x)."""
-        x = np.array([0.5, 1.0, 2.0])
-        np.testing.assert_allclose(mysinc(-x), mysinc(x), rtol=1e-14)
-
-    def test_array_input(self):
-        """Should handle multi-dimensional arrays."""
-        x = np.array([[0.0, 1.0], [2.0, 3.0]])
-        result = mysinc(x)
-        assert result.shape == (2, 2)
 
 
 @requires_pymust
