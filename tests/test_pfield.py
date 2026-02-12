@@ -25,9 +25,7 @@ else:
     except ImportError:
         PYMUST_AVAILABLE = False
 
-requires_pymust = pytest.mark.skipif(
-    not PYMUST_AVAILABLE, reason="PyMUST not available"
-)
+requires_pymust = pytest.mark.skipif(not PYMUST_AVAILABLE, reason="PyMUST not available")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -84,7 +82,7 @@ def _pymust_reference(
     param = getparam(probe_name)
     x_grid, z_grid = _make_grid(x_range, z_range, n)
     positions = np.stack([x_grid, z_grid], axis=-1)
-    rp, _spect, _idx = pymust_pfield(x_grid, [], z_grid, delays, param)
+    rp, _spect, _idx = pymust_pfield(x_grid, [], z_grid, delays, param)  # type: ignore[arg-type]
     return {"rp": rp, "x_grid": x_grid, "z_grid": z_grid, "positions": positions}
 
 
@@ -99,7 +97,7 @@ def p4_2v_focused_reference() -> dict[str, Any]:
     param = getparam("P4-2v")
     x0, z0 = 0.02, 0.05
     delays = txdelayFocused(param, x0, z0)
-    ref = _pymust_reference("P4-2v", delays, (-4e-2, 4e-2), (param.pitch, 10e-2))
+    ref = _pymust_reference("P4-2v", delays, (-4e-2, 4e-2), (param.pitch, 10e-2))  # type: ignore[arg-type]
     ref["delays"] = delays
     ref["focus"] = (x0, z0)
     ref["probe"] = "P4-2v"
@@ -112,7 +110,7 @@ def l11_5v_plane_reference() -> dict[str, Any]:
     param = getparam("L11-5v")
     tilt_rad = np.deg2rad(10.0)
     delays = txdelayPlane(param, tilt_rad)
-    ref = _pymust_reference("L11-5v", delays, (-2e-2, 2e-2), (param.pitch, 4e-2))
+    ref = _pymust_reference("L11-5v", delays, (-2e-2, 2e-2), (param.pitch, 4e-2))  # type: ignore[arg-type]
     ref["delays"] = delays
     ref["tilt_rad"] = tilt_rad
     ref["probe"] = "L11-5v"
@@ -125,7 +123,7 @@ def c5_2v_focused_reference() -> dict[str, Any]:
     param = getparam("C5-2v")
     x0, z0 = 0.0, 0.06
     delays = txdelayFocused(param, x0, z0)
-    ref = _pymust_reference("C5-2v", delays, (-4e-2, 4e-2), (param.pitch, 10e-2))
+    ref = _pymust_reference("C5-2v", delays, (-4e-2, 4e-2), (param.pitch, 10e-2))  # type: ignore[arg-type]
     ref["delays"] = delays
     ref["focus"] = (x0, z0)
     ref["probe"] = "C5-2v"
@@ -215,7 +213,7 @@ def _fastsimus_pfield(
     """
     params = preset_fn()
     delays_1d = np.squeeze(delays)
-    return pfield(positions, delays_1d, params)
+    return pfield(positions, delays_1d, params)  # type: ignore[arg-type, return-value]
 
 
 # Tolerance for PyMUST comparison.

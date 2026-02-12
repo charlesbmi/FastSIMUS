@@ -21,9 +21,7 @@ else:
     except ImportError:
         PYMUST_AVAILABLE = False
 
-requires_pymust = pytest.mark.skipif(
-    not PYMUST_AVAILABLE, reason="PyMUST not available"
-)
+requires_pymust = pytest.mark.skipif(not PYMUST_AVAILABLE, reason="PyMUST not available")
 
 
 @requires_pymust
@@ -41,16 +39,16 @@ class TestPulseSpectrumMatchesPyMUST:
         # FastSIMUS implementation
         # PyMUST bandwidth is in %, FastSIMUS uses fraction - but pulse spectrum
         # only depends on fc and TXnow, not bandwidth
-        our_fn = pulse_spectrum_fn(param.fc, tx_n_wavelengths=1.0)
+        our_fn = pulse_spectrum_fn(param.fc, tx_n_wavelengths=1.0)  # type: ignore[arg-type]
 
         # Evaluate at a range of angular frequencies
-        f = np.linspace(0, 2 * param.fc, 500)
+        f = np.linspace(0, 2 * param.fc, 500)  # type: ignore[operator]
         w = 2 * np.pi * f
 
         pymust_result = pymust_fn(w)
         our_result = our_fn(w)
 
-        np.testing.assert_allclose(our_result, pymust_result, rtol=1e-10, atol=1e-14)
+        np.testing.assert_allclose(our_result, pymust_result, rtol=1e-10, atol=1e-14)  # type: ignore[arg-type]
 
     def test_pulse_spectrum_txnow_2(self):
         """Pulse spectrum with TXnow=2 should match PyMUST."""
@@ -58,11 +56,11 @@ class TestPulseSpectrumMatchesPyMUST:
         param.TXnow = 2
 
         pymust_fn = param.getPulseSpectrumFunction(None)
-        our_fn = pulse_spectrum_fn(param.fc, tx_n_wavelengths=2.0)
+        our_fn = pulse_spectrum_fn(param.fc, tx_n_wavelengths=2.0)  # type: ignore[arg-type]
 
-        w = 2 * np.pi * np.linspace(0, 2 * param.fc, 500)
+        w = 2 * np.pi * np.linspace(0, 2 * param.fc, 500)  # type: ignore[operator]
 
-        np.testing.assert_allclose(our_fn(w), pymust_fn(w), rtol=1e-10)
+        np.testing.assert_allclose(our_fn(w), pymust_fn(w), rtol=1e-10)  # type: ignore[arg-type]
 
 
 @requires_pymust
@@ -78,13 +76,13 @@ class TestProbeSpectrumMatchesPyMUST:
         pymust_fn = param.getProbeFunction()
 
         # FastSIMUS: convert bandwidth from % to fraction
-        our_fn = probe_spectrum_fn(param.fc, bandwidth=param.bandwidth / 100.0)
+        our_fn = probe_spectrum_fn(param.fc, bandwidth=param.bandwidth / 100.0)  # type: ignore[arg-type, operator]
 
         # Evaluate at a range of angular frequencies
-        f = np.linspace(0, 2 * param.fc, 500)
+        f = np.linspace(0, 2 * param.fc, 500)  # type: ignore[operator]
         w = 2 * np.pi * f
 
         pymust_result = pymust_fn(w)
         our_result = our_fn(w)
 
-        np.testing.assert_allclose(our_result, pymust_result, rtol=1e-10)
+        np.testing.assert_allclose(our_result, pymust_result, rtol=1e-10)  # type: ignore[arg-type]

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from math import log, pi
+from typing import Any
 
 import array_api_extra as xpx
 from array_api_compat import array_namespace
@@ -42,7 +43,7 @@ def pulse_spectrum_fn(
     t_pulse = tx_n_wavelengths / freq_center  # pulse duration (s)
     wc = 2.0 * pi * freq_center  # center angular frequency (rad/s)
 
-    def _pulse_spectrum(w: Array) -> Array:
+    def _pulse_spectrum(w: Any) -> Any:  # Use Any to avoid array_api_extra type conflicts
         xp = array_namespace(w)
         # Use unnormalized sinc: sinc(x/pi) from array_api_extra
         arg1 = t_pulse * (w - wc) / 2.0 / pi
@@ -96,7 +97,7 @@ def probe_spectrum_fn(
     # Denominator of the exponent
     sigma = w_bw / 2.0 / (log(2) ** (1.0 / p))
 
-    def _probe_spectrum(w: Array) -> Array:
+    def _probe_spectrum(w: Any) -> Any:  # Use Any to avoid type conflicts
         xp = array_namespace(w)
         # Pulse-echo (squared) response
         spectrum_sqr = xp.exp(-((xp.abs(w - wc) / sigma) ** p))

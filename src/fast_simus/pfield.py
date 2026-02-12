@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import math
 from math import ceil, inf, pi
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import array_api_extra as xpx
 from array_api_compat import array_namespace
@@ -83,11 +83,10 @@ def pfield(
     z = positions[..., 1]
 
     # Compute element positions
-    xe, ze, theta_e, apex_offset = element_positions(
-        params.n_elements, params.pitch, params.radius, xp
-    )
+    xe, ze, theta_e, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
 
-    return _pfield_core(
+    # _pfield_core returns Array when _is_simus=False
+    result = _pfield_core(
         x=x,
         z=z,
         delays=delays,
@@ -113,6 +112,7 @@ def pfield(
         _rx_delay=None,
         _simus_df=None,
     )
+    return cast(Array, result)
 
 
 def _pfield_core(
@@ -143,7 +143,7 @@ def _pfield_core(
     _simus_df: float | None,
 ) -> Array | tuple[Array, Array, Array]:
     """Core pfield implementation shared by standalone pfield and simus."""
-    xp = array_namespace(x, z, delays)
+    xp: _ArrayNamespace = array_namespace(x, z, delays)  # type: ignore[assignment]
 
     # --- Extract medium parameters ---
     c = medium.speed_of_sound
@@ -228,9 +228,7 @@ def _pfield_core(
     # --- Out-of-field mask ---
     is_out = z_flat < 0
     if radius_of_curvature != inf:
-        is_out = is_out | (
-            (x_flat**2 + (z_flat + h) ** 2) <= radius_of_curvature**2
-        )
+        is_out = is_out | ((x_flat**2 + (z_flat + h) ** 2) <= radius_of_curvature**2)
 
     # --- Distances and angles (shape: nx, n_elements, n_sub) ---
     # Broadcasting: x_flat (nx,) -> (nx, 1, 1)
@@ -329,8 +327,8 @@ def _pfield_core(
         kc = 2.0 * pi * fc / c
         # Use unnormalized sinc: sinc(x/pi) from array_api_extra
         sinc_arg = xp.asarray(kc * seg_length / 2.0) * sin_theta / pi
-        dir_arr = xpx.sinc(sinc_arg, xp=xp)
-        exp_arr = exp_arr * dir_arr
+        dir_arr = xpx.sinc(sinc_arg, xp=xp)  # type: ignore[arg-type]
+        exp_arr = exp_arr * dir_arr  # type: ignore[operator]
 
     # --- Frequency loop ---
 
@@ -345,11 +343,11 @@ def _pfield_core(
         if full_frequency_directivity:
             # Use unnormalized sinc: sinc(x/pi) from array_api_extra
             sinc_arg_k = xp.asarray(kw * seg_length / 2.0) * sin_theta / pi
-            dir_k = xpx.sinc(sinc_arg_k, xp=xp)
+            dir_k = xpx.sinc(sinc_arg_k, xp=xp)  # type: ignore[arg-type]
 
         # Single-element radiation patterns: average over sub-elements
         if full_frequency_directivity:
-            rp_mono = _mean_last(xp, dir_k * exp_arr)
+            rp_mono = _mean_last(xp, dir_k * exp_arr)  # type: ignore[operator]
         elif n_sub > 1:
             rp_mono = _mean_last(xp, exp_arr)
         else:
