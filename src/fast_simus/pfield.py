@@ -21,7 +21,6 @@ from math import ceil, inf, pi
 from typing import TYPE_CHECKING
 
 import array_api_extra as xpx
-import numpy as np
 from array_api_compat import array_namespace
 
 from fast_simus.medium_params import MediumParams
@@ -155,7 +154,6 @@ def _pfield_core(
         msg = "x and z must have the same shape"
         raise ValueError(msg)
 
-    # --- Validate inputs ---
     if delays.ndim != 1:
         msg = f"delays must be 1-D, got shape {delays.shape}"
         raise ValueError(msg)
@@ -165,7 +163,7 @@ def _pfield_core(
         raise ValueError(msg)
 
     # Store original shape for output reshaping
-    siz0 = x.shape if x.ndim > 1 else (x.shape[0], 1)
+    original_shape = x.shape
     nx = 1
     for s in x.shape:
         nx *= s
@@ -173,9 +171,9 @@ def _pfield_core(
     # Early return for empty grid
     if nx == 0:
         if _is_simus:
-            empty = xp.zeros((0,), dtype=xp.float32)
+            empty = xp.zeros((0,), dtype=xp.float64)
             return empty, empty, empty
-        return xp.zeros((0,), dtype=xp.float32)
+        return xp.zeros((0,), dtype=xp.float64)
 
     # Flatten to 1D
     x_flat = xp.reshape(x, (-1,)) if x.ndim > 1 else x
@@ -183,17 +181,17 @@ def _pfield_core(
 
     # --- TX apodization ---
     if tx_apodization is None:
-        apod = xp.ones(n_elements, dtype=xp.float32)
+        apod = xp.ones(n_elements, dtype=xp.float64)
     else:
-        apod = xp.asarray(tx_apodization, dtype=xp.float32)
+        apod = xp.asarray(tx_apodization, dtype=xp.float64)
         if apod.ndim != 1 or apod.shape[0] != n_elements:
             msg = f"tx_apodization must have shape ({n_elements},), got {apod.shape}"
             raise ValueError(msg)
 
     # Zero apodization where delays are NaN; replace NaN delays with 0
     nan_mask = _isnan(xp, delays)
-    apod = xp.where(nan_mask, xp.asarray(0.0, dtype=xp.float32), apod)
-    delays_clean = xp.where(nan_mask, xp.asarray(0.0, dtype=xp.float32), delays)
+    apod = xp.where(nan_mask, xp.asarray(0.0), apod)
+    delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
 
     # --- Baffle type ---
     non_rigid_baffle = baffle != BaffleType.RIGID
@@ -208,9 +206,9 @@ def _pfield_core(
     # --- Element positions (already computed, passed in) ---
     # xe, ze, theta_e are 1-D arrays with shape (n_elements,)
     if theta_e is None:
-        the_1d = xp.zeros(n_elements, dtype=xp.float32)
+        the_1d = xp.zeros(n_elements, dtype=xp.float64)
     else:
-        the_1d = xp.asarray(theta_e, dtype=xp.float32)
+        the_1d = theta_e
 
     h = float(apex_offset)
 
@@ -218,7 +216,7 @@ def _pfield_core(
     seg_length = element_width / n_sub
     seg_offsets = xp.asarray(
         [-element_width / 2.0 + seg_length / 2.0 + i * seg_length for i in range(n_sub)],
-        dtype=xp.float32,
+        dtype=xp.float64,
     )
     # Broadcasting: (n_sub,) -> (1, n_sub), (n_elements,) -> (n_elements, 1)
     seg_2d = xp.reshape(seg_offsets, (1, n_sub))
@@ -231,8 +229,7 @@ def _pfield_core(
     is_out = z_flat < 0
     if radius_of_curvature != inf:
         is_out = is_out | (
-            (x_flat**2 + (z_flat + xp.asarray(h, dtype=xp.float32)) ** 2)
-            <= xp.asarray(radius_of_curvature**2, dtype=xp.float32)
+            (x_flat**2 + (z_flat + h) ** 2) <= radius_of_curvature**2
         )
 
     # --- Distances and angles (shape: nx, n_elements, n_sub) ---
@@ -301,7 +298,7 @@ def _pfield_core(
             cos_th = xp.cos(theta_arr)
             obli_fac = cos_th / (cos_th + float(baffle))
     else:
-        obli_fac = xp.ones(theta_arr.shape, dtype=xp.float32)
+        obli_fac = xp.ones(theta_arr.shape, dtype=xp.float64)
 
     obli_fac = xp.where(
         xp.abs(theta_arr) >= xp.asarray(pi / 2),
@@ -400,9 +397,9 @@ def _pfield_core(
         rp_accum = rp_accum * cor_fac
         return rp_accum, spect, idx_out
 
-    # RMS pressure, reshape to original grid
+    # RMS pressure, reshape to original grid shape
     rp = xp.sqrt(rp_accum * cor_fac)
-    return xp.reshape(rp, siz0)
+    return xp.reshape(rp, original_shape)
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +411,7 @@ def _isnan(xp: _ArrayNamespace, arr: Array) -> Array:
     """Element-wise NaN check."""
     if hasattr(xp, "isnan"):
         return xp.isnan(arr)
-    # NaN != NaN is the standard fallback for NaN detection
+    # NaN != NaN is the standard IEEE 754 fallback for NaN detection
     return arr != arr
 
 
@@ -427,18 +424,16 @@ def _log10(xp: _ArrayNamespace, arr: Array) -> Array:
 
 def _first_last_true(xp: _ArrayNamespace, mask: Array) -> tuple[int, int]:
     """Find first and last True index in 1D boolean array."""
-    m = np.asarray(mask) if hasattr(mask, "__array__") else np.array(mask)
-    indices = np.where(m)[0]
-    if len(indices) == 0:
+    indices = xp.nonzero(mask)[0]
+    if indices.shape[0] == 0:
         return 0, 0
     return int(indices[0]), int(indices[-1])
 
 
 def _masked_select(xp: _ArrayNamespace, arr: Array, mask: Array) -> Array:
     """Select elements where mask is True."""
-    a = np.asarray(arr) if hasattr(arr, "__array__") else np.array(arr)
-    m = np.asarray(mask) if hasattr(mask, "__array__") else np.array(mask)
-    return xp.asarray(a[m], dtype=arr.dtype)
+    indices = xp.nonzero(mask)[0]
+    return xp.take(arr, indices, axis=0)
 
 
 def _mean_last(xp: _ArrayNamespace, arr: Array) -> Array:
