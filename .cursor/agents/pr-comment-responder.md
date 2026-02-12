@@ -20,32 +20,125 @@ the feedback.
 
 ### Step 2: Fetch and Parse PR Comments
 
-Use the GitHub API to retrieve and parse comments. Run this command from the repository root:
+Use this Python script to fetch and parse PR comments. It automatically filters out outdated and resolved comments using
+GitHub's GraphQL API.
 
-```bash
-gh api \
-  -H "Accept: application/vnd.github+json" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
-  /repos/OWNER/REPO/pulls/PR_NUMBER/comments | python3 -c "
-import json, sys
+**Save as `fetch_pr_comments.py` and customize the parameters at the top:**
+
+```python
+import json
+import subprocess
+import sys
 from datetime import datetime
 
-comments = json.load(sys.stdin)
+# Configuration - CUSTOMIZE THESE
+OWNER = "charlesbmi"
+REPO = "FastSIMUS"
+PR_NUMBER = 16
+FILTER_OUTDATED = True  # Set to False to include outdated comments
+FILTER_RESOLVED = True  # Set to False to include resolved threads
 
-# Group by thread (in_reply_to_id)
+# Get PR head commit
+pr_result = subprocess.run(
+    ['gh', 'api', '-H', 'Accept: application/vnd.github+json',
+     '-H', 'X-GitHub-Api-Version: 2022-11-28',
+     f'/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}'],
+    capture_output=True, text=True
+)
+pr_data = json.loads(pr_result.stdout)
+head_commit = pr_data['head']['sha']
+
+# Get comments via REST API
+comments_result = subprocess.run(
+    ['gh', 'api', '-H', 'Accept: application/vnd.github+json',
+     '-H', 'X-GitHub-Api-Version: 2022-11-28',
+     f'/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments'],
+    capture_output=True, text=True
+)
+comments = json.loads(comments_result.stdout)
+
+# Get resolution status via GraphQL API
+graphql_query = f'''
+query {{
+  repository(owner: "{OWNER}", name: "{REPO}") {{
+    pullRequest(number: {PR_NUMBER}) {{
+      reviewThreads(first: 100) {{
+        nodes {{
+          id
+          isResolved
+          isOutdated
+          comments(first: 1) {{
+            nodes {{
+              databaseId
+            }}
+          }}
+        }}
+      }}
+    }}
+  }}
+}}
+'''
+
+try:
+    graphql_result = subprocess.run(
+        ['gh', 'api', 'graphql', '-f', f'query={graphql_query}'],
+        capture_output=True, text=True
+    )
+    graphql_data = json.loads(graphql_result.stdout)
+    threads_data = graphql_data['data']['repository']['pullRequest']['reviewThreads']['nodes']
+
+    # Build lookup: comment_id -> (isResolved, isOutdated)
+    thread_status = {}
+    for thread in threads_data:
+        if thread['comments']['nodes']:
+            comment_id = thread['comments']['nodes'][0]['databaseId']
+            thread_status[comment_id] = {
+                'resolved': thread['isResolved'],
+                'outdated': thread['isOutdated']
+            }
+except Exception as e:
+    print(f"Warning: GraphQL query failed, using commit-based fallback: {e}\n", file=sys.stderr)
+    thread_status = {}
+
+# Parse and filter comments
 threads = {}
+filtered_count = 0
+
 for c in comments:
-    tid = c.get('in_reply_to_id') or c['id']
+    comment_id = c['id']
+    tid = c.get('in_reply_to_id') or comment_id
+
+    # Check status
+    is_outdated = False
+    is_resolved = False
+
+    if comment_id in thread_status:
+        is_outdated = thread_status[comment_id]['outdated']
+        is_resolved = thread_status[comment_id]['resolved']
+    else:
+        # Fallback: check if commit has changed
+        is_outdated = c.get('commit_id') != head_commit
+
+    # Filter
+    if FILTER_OUTDATED and is_outdated:
+        filtered_count += 1
+        continue
+    if FILTER_RESOLVED and is_resolved:
+        filtered_count += 1
+        continue
+
     threads.setdefault(tid, []).append(c)
 
-# Sort threads by file path and line number for better organization
+# Display results
+print(f"Filtered out {filtered_count} outdated/resolved comments")
+print(f"Found {len(threads)} active comment threads\n")
+print('=' * 80)
+
+# Sort by file and line
 sorted_threads = sorted(
     threads.items(),
     key=lambda x: (x[1][0].get('path', 'ZZZ'), x[1][0].get('line') or x[1][0].get('original_line', 0))
 )
-
-print(f'Found {len(sorted_threads)} comment threads\n')
-print('=' * 80)
 
 for tid, thread in sorted_threads:
     root = thread[0]
@@ -55,56 +148,45 @@ for tid, thread in sorted_threads:
     created = datetime.fromisoformat(root['created_at'].replace('Z', '+00:00'))
 
     print(f'\nFile: {path}:{line}')
-    print(f'Started by: @{user} on {created.strftime(\"%Y-%m-%d %H:%M\")}')
+    print(f'Started by: @{user} on {created.strftime("%Y-%m-%d %H:%M")}')
     print('-' * 80)
 
     for c in thread:
         u = c['user']['login']
         body = c['body'].strip()
 
-        # Truncate very long comments and format multiline
         lines = body.split('\n')
         if len(lines) > 10:
             body_preview = '\n'.join(lines[:10]) + f'\n... ({len(lines)-10} more lines)'
         else:
             body_preview = body
 
-        # Indent the comment body
         indented = '\n  '.join(body_preview.split('\n'))
         print(f'  [@{u}]: {indented}')
 
     print()
 
 print('=' * 80)
-"
 ```
 
-**Example for FastSIMUS:**
+**How to run:**
 
 ```bash
-cd /home/ubuntu/FastSIMUS && gh api \
-  -H "Accept: application/vnd.github+json" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
-  /repos/charlesbmi/FastSIMUS/pulls/16/comments | python3 -c "..."
+cd /home/ubuntu/FastSIMUS && python3 fetch_pr_comments.py
 ```
 
-This parser:
+Or run inline by piping to `python3 << 'EOF'` and pasting the script.
 
-- Groups comments into threads (based on `in_reply_to_id`)
-- Sorts by file path and line number
-- Shows timestamps to identify recent feedback
-- Truncates very long comments
-- Displays threaded conversations clearly
+**What it does:**
 
-### Step 3: Filter for Open Comments
+- Uses GitHub GraphQL API to get `isResolved` and `isOutdated` status
+- Filters out outdated comments (code has changed since comment was made)
+- Filters out resolved threads (marked as resolved in PR review)
+- Falls back to commit ID comparison if GraphQL fails
+- Groups comments into threads and sorts by file/line
+- Shows clear summary of active comments requiring action
 
-Focus on comments that are:
-
-- Not part of resolved threads
-- Not marked as resolved in the comment body
-- Active feedback requiring action
-
-### Step 4: Analyze Comment Intent
+### Step 3: Analyze Comment Intent
 
 For each open comment, determine:
 
@@ -119,7 +201,7 @@ Group related comments by:
 - Same function or module
 - Similar type of feedback
 
-### Step 5: Implement Changes
+### Step 4: Implement Changes
 
 For each comment or group of comments:
 
@@ -129,7 +211,7 @@ For each comment or group of comments:
 1. **Verify** the change addresses the comment's intent
 1. **Check for side effects** on related code
 
-### Step 6: Document What Was Addressed
+### Step 5: Document What Was Addressed
 
 After implementing changes, report:
 
