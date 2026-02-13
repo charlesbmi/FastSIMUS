@@ -1,7 +1,7 @@
 """Spectrum computation for ultrasound pulse and probe response.
 
-Provides factory functions that return callables computing frequency-domain
-representations of the transmitted pulse and probe frequency response.
+Provides functions to compute frequency-domain representations of the
+transmitted pulse and probe frequency response.
 
 All functions are Array API compliant and work with NumPy, JAX, CuPy backends.
 
@@ -12,9 +12,7 @@ References:
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from math import log, pi
-from typing import Any
 
 import array_api_extra as xpx
 from array_api_compat import array_namespace
@@ -22,70 +20,70 @@ from array_api_compat import array_namespace
 from fast_simus.utils._array_api import Array
 
 
-def pulse_spectrum_fn(
+def pulse_spectrum(
+    angular_freq: Array,
     freq_center: float,
     tx_n_wavelengths: float = 1.0,
-) -> Callable[[Array], Array]:
-    """Create a pulse spectrum function for a windowed sine pulse.
+) -> Array:
+    """Compute the pulse spectrum for a windowed sine pulse.
 
-    Returns a callable that computes the frequency-domain representation
-    of a windowed sine pulse with the given center frequency and number
-    of wavelengths.
+    Computes the frequency-domain representation of a windowed sine pulse
+    with the given center frequency and number of wavelengths.
 
     Args:
+        angular_freq: Angular frequency in rad/s.
         freq_center: Center frequency in Hz. Must be positive.
         tx_n_wavelengths: Number of wavelengths of the TX pulse.
 
     Returns:
-        Callable taking angular frequency w (rad/s) and returning
-        the complex spectrum.
+        Complex spectrum at the given angular frequencies.
     """
-    t_pulse = tx_n_wavelengths / freq_center  # pulse duration (s)
-    wc = 2.0 * pi * freq_center  # center angular frequency (rad/s)
+    pulse_duration_s = tx_n_wavelengths / freq_center
+    angular_freq_center = 2.0 * pi * freq_center
 
-    def _pulse_spectrum(w: Any) -> Any:  # Use Any to avoid array_api_extra type conflicts
-        xp = array_namespace(w)
-        # Use unnormalized sinc: sinc(x/pi) from array_api_extra
-        arg1 = t_pulse * (w - wc) / 2.0 / pi
-        arg2 = t_pulse * (w + wc) / 2.0 / pi
-        return 1j * (xpx.sinc(arg1, xp=xp) - xpx.sinc(arg2, xp=xp))
-
-    return _pulse_spectrum
+    xp = array_namespace(angular_freq)
+    arg1 = pulse_duration_s * (angular_freq - angular_freq_center) / 2.0 / pi
+    arg2 = pulse_duration_s * (angular_freq + angular_freq_center) / 2.0 / pi
+    return 1j * (xpx.sinc(arg1, xp=xp) - xpx.sinc(arg2, xp=xp))
 
 
-def probe_spectrum_fn(
+def probe_spectrum(
+    angular_freq: Array,
     freq_center: float,
     bandwidth: float = 0.75,
-) -> Callable[[Array], Array]:
-    """Create a probe frequency response function.
+) -> Array:
+    """Compute the probe frequency response.
 
-    Returns a callable that computes the one-way probe frequency response
-    using a generalized normal window. The bandwidth parameter defines the
-    pulse-echo 6 dB fractional bandwidth.
+    Computes the one-way probe frequency response using a generalized normal
+    window. The bandwidth parameter defines the pulse-echo 6 dB fractional
+    bandwidth.
 
-    The returned function is the square root of the pulse-echo response,
+    The returned spectrum is the square root of the pulse-echo response,
     appropriate for one-way (transmit-only or receive-only) use.
 
     Args:
+        angular_freq: Angular frequency in rad/s.
         freq_center: Center frequency in Hz. Must be positive.
         bandwidth: Fractional bandwidth (0.75 = 75%). Must be in (0, 2.0).
 
     Returns:
-        Callable taking angular frequency w (rad/s) and returning
-        the real-valued probe response (one-way).
+        Real-valued probe response (one-way) at the given angular frequencies.
 
     References:
         Generalized normal window:
         https://en.wikipedia.org/wiki/Window_function#Generalized_normal_window
+
+        Reference implementation (log(126) constant verified against):
+        https://github.com/creatis-ULTIM/PyMUST/blob/df02b42/src/pymust/utils.py#L141
     """
     # Validate bandwidth
     if not (0.0 < bandwidth < 2.0):
         msg = f"bandwidth must be in (0, 2.0), got {bandwidth!r}"
         raise ValueError(msg)
 
-    wc = 2.0 * pi * freq_center
+    angular_freq_center = 2.0 * pi * freq_center
     # Convert fractional bandwidth to angular bandwidth
-    w_bw = bandwidth * wc
+    w_bw = bandwidth * angular_freq_center
     # Shape parameter for the generalized normal window
     # The constant 126 comes from the two-way 6 dB bandwidth criterion:
     # For pulse-echo, the total response is the product of TX and RX responses,
@@ -93,15 +91,12 @@ def probe_spectrum_fn(
     # In linear scale: 10^(6/10) ≈ 3.98, but the generalized normal window
     # parameterization uses 126 = 2 * (2^6) to define the bandwidth edges
     # where the two-way response falls to -6 dB.
-    p = log(126) / log(2.0 * wc / w_bw)
+    p = log(126) / log(2.0 * angular_freq_center / w_bw)
     # Denominator of the exponent
     sigma = w_bw / 2.0 / (log(2) ** (1.0 / p))
 
-    def _probe_spectrum(w: Any) -> Any:  # Use Any to avoid type conflicts
-        xp = array_namespace(w)
-        # Pulse-echo (squared) response
-        spectrum_sqr = xp.exp(-((xp.abs(w - wc) / sigma) ** p))
-        # One-way response (square root)
-        return xp.sqrt(spectrum_sqr)
-
-    return _probe_spectrum
+    xp = array_namespace(angular_freq)
+    # Pulse-echo (squared) response
+    spectrum_sqr = xp.exp(-((xp.abs(angular_freq - angular_freq_center) / sigma) ** p))
+    # One-way response (square root)
+    return xp.sqrt(spectrum_sqr)

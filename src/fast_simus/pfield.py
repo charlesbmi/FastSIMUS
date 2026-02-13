@@ -24,7 +24,7 @@ import array_api_extra as xpx
 from array_api_compat import array_namespace
 
 from fast_simus.medium_params import MediumParams
-from fast_simus.spectrum import probe_spectrum_fn, pulse_spectrum_fn
+from fast_simus.spectrum import probe_spectrum, pulse_spectrum
 from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.utils._array_api import Array
 from fast_simus.utils.geometry import element_positions
@@ -250,10 +250,6 @@ def _pfield_core(
     theta_arr = xp.asin((dxi + eps_sp) / (sqrt_d2 + eps_sp)) - the_1d[None, :, None]
     sin_theta = xp.sin(theta_arr)
 
-    # --- Spectrum functions ---
-    pulse_fn = pulse_spectrum_fn(fc, tx_n_wavelengths)
-    probe_fn = probe_spectrum_fn(fc, bandwidth)
-
     # --- Frequency step ---
     if _is_simus and _simus_df is not None:
         df = _simus_df
@@ -268,7 +264,7 @@ def _pfield_core(
 
     # Keep only significant components (dB threshold)
     w_all = xp.asarray(2.0 * pi) * f
-    s_mag = xp.abs(pulse_fn(w_all) * probe_fn(w_all))
+    s_mag = xp.abs(pulse_spectrum(w_all, fc, tx_n_wavelengths) * probe_spectrum(w_all, fc, bandwidth))
     g_db = 20.0 * _log10(xp, xp.asarray(1e-200) + s_mag / xp.max(s_mag))
     above = g_db > db_thresh
     idx_first, idx_last = _first_last_true(xp, above)
@@ -280,8 +276,8 @@ def _pfield_core(
     n_sampling = f_sel.shape[0]
 
     w_f = xp.asarray(2.0 * pi) * f_sel
-    pulse_spect = pulse_fn(w_f)
-    probe_spect = probe_fn(w_f)
+    pulse_spect = pulse_spectrum(w_f, fc, tx_n_wavelengths)
+    probe_spect = probe_spectrum(w_f, fc, bandwidth)
 
     # --- Initialization ---
     rp_accum = xp.asarray(0.0, dtype=xp.float64)
