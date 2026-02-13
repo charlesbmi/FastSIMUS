@@ -214,6 +214,7 @@ testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "requires_pymust: requires PyMUST reference implementation (Python <3.14 only)",
 ]
 
 [tool.coverage.report]

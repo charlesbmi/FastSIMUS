@@ -3,6 +3,8 @@
 These tests validate that our tx_delay implementation matches PyMUST outputs.
 """
 
+import contextlib
+
 import array_api_strict as xp_strict
 import numpy as np
 import pytest
@@ -16,19 +18,12 @@ from fast_simus.utils.geometry import element_positions
 
 SPEED_OF_SOUND = MediumParams().speed_of_sound
 
-# PyMUST has syntax errors in Python 3.14 due to invalid escape sequences
-# Skip pymust-dependent tests if import fails
-try:
+# PyMUST imports (guarded by @pytest.mark.requires_pymust via conftest.py)
+with contextlib.suppress(ImportError, SyntaxError):
     from pymust import getparam, txdelayCircular, txdelayFocused, txdelayPlane
 
-    PYMUST_AVAILABLE = True
-except SyntaxError:
-    PYMUST_AVAILABLE = False
 
-requires_pymust = pytest.mark.skipif(not PYMUST_AVAILABLE, reason="PyMUST not available (Python 3.14 incompatibility)")
-
-
-@requires_pymust
+@pytest.mark.requires_pymust
 class TestFocusedDelays:
     """Test focused beam delay calculations."""
 
@@ -113,7 +108,7 @@ class TestFocusedDelays:
         np.testing.assert_allclose(fastsimus_delays, pymust_delays, rtol=1e-4)
 
 
-@requires_pymust
+@pytest.mark.requires_pymust
 class TestPlaneWaveDelays:
     """Test plane wave delay calculations."""
 
@@ -187,7 +182,7 @@ class TestPlaneWaveDelays:
         np.testing.assert_allclose(fastsimus_delays, pymust_delays, rtol=1e-4)
 
 
-@requires_pymust
+@pytest.mark.requires_pymust
 class TestCircularWaveDelays:
     """Test circular wave delay calculations."""
 

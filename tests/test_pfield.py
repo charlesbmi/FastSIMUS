@@ -4,7 +4,7 @@ Reference tests compare FastSIMUS pfield against PyMUST's pfield output.
 Tests are structured as invariants that must hold at every refactoring step.
 """
 
-import sys
+import contextlib
 from typing import Any
 
 import numpy as np
@@ -13,19 +13,10 @@ import pytest
 from fast_simus.pfield import pfield
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
 
-# PyMUST may not be available (Python 3.14+ has syntax errors)
-if sys.version_info >= (3, 14):
-    PYMUST_AVAILABLE = False
-else:
-    try:
-        from pymust import getparam, txdelayFocused, txdelayPlane
-        from pymust import pfield as pymust_pfield
-
-        PYMUST_AVAILABLE = True
-    except ImportError:
-        PYMUST_AVAILABLE = False
-
-requires_pymust = pytest.mark.skipif(not PYMUST_AVAILABLE, reason="PyMUST not available")
+# PyMUST imports (guarded by @pytest.mark.requires_pymust via conftest.py)
+with contextlib.suppress(ImportError, SyntaxError):
+    from pymust import getparam, txdelayFocused, txdelayPlane
+    from pymust import pfield as pymust_pfield
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -135,7 +126,7 @@ def c5_2v_focused_reference() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@requires_pymust
+@pytest.mark.requires_pymust
 class TestPyMUSTReference:
     """Validate that PyMUST reference data is sane."""
 
@@ -295,7 +286,7 @@ def _assert_pfield_close(actual: np.ndarray, expected: np.ndarray, atol_peak: fl
     )
 
 
-@requires_pymust
+@pytest.mark.requires_pymust
 class TestPfieldMatchesPyMUST:
     """Compare FastSIMUS pfield output against PyMUST reference."""
 

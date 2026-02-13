@@ -3,28 +3,19 @@
 Compares FastSIMUS spectrum functions against PyMUST reference implementations.
 """
 
-import sys
+import contextlib
 
 import numpy as np
 import pytest
 
 from fast_simus.spectrum import probe_spectrum, pulse_spectrum
 
-# PyMUST may not be available (Python 3.14+ has syntax errors)
-if sys.version_info >= (3, 14):
-    PYMUST_AVAILABLE = False
-else:
-    try:
-        from pymust import getparam
-
-        PYMUST_AVAILABLE = True
-    except ImportError:
-        PYMUST_AVAILABLE = False
-
-requires_pymust = pytest.mark.skipif(not PYMUST_AVAILABLE, reason="PyMUST not available")
+# PyMUST imports (guarded by @pytest.mark.requires_pymust via conftest.py)
+with contextlib.suppress(ImportError, SyntaxError):
+    from pymust import getparam
 
 
-@requires_pymust
+@pytest.mark.requires_pymust
 class TestPulseSpectrumMatchesPyMUST:
     """Compare pulse_spectrum against PyMUST Param.getPulseSpectrumFunction."""
 
@@ -62,7 +53,7 @@ class TestPulseSpectrumMatchesPyMUST:
         )
 
 
-@requires_pymust
+@pytest.mark.requires_pymust
 class TestProbeSpectrumMatchesPyMUST:
     """Compare probe_spectrum against PyMUST Param.getProbeFunction."""
 

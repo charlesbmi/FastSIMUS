@@ -1,6 +1,7 @@
 """Pytest configuration for FastSIMUS tests."""
 
 import contextlib
+import sys
 
 import pytest
 
@@ -25,6 +26,23 @@ with contextlib.suppress(ImportError):
     import array_api_strict
 
     HAS_ARRAY_API_STRICT = True
+
+# PyMUST has SyntaxError on Python 3.14+ due to invalid escape sequences
+PYMUST_AVAILABLE = False
+if sys.version_info < (3, 14):
+    import pymust  # noqa: F401
+
+    PYMUST_AVAILABLE = True
+
+
+def pytest_collection_modifyitems(config, items):
+    """Modify pytest collection to skip PyMUST tests on Python 3.14+."""
+    if PYMUST_AVAILABLE:
+        return
+    skip_pymust = pytest.mark.skip(reason="PyMUST not available")
+    for item in items:
+        if "requires_pymust" in item.keywords:
+            item.add_marker(skip_pymust)
 
 
 @pytest.fixture(
