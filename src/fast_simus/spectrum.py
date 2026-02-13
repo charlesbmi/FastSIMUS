@@ -44,10 +44,10 @@ def pulse_spectrum(
     angular_freq_center = 2.0 * pi * freq_center
 
     xp = array_namespace(angular_freq)
-    arg1 = pulse_duration_s * (angular_freq - angular_freq_center) / 2.0 / pi
-    arg2 = pulse_duration_s * (angular_freq + angular_freq_center) / 2.0 / pi
+    sinc_arg_lower = pulse_duration_s * (angular_freq - angular_freq_center) / 2.0 / pi
+    sinc_arg_upper = pulse_duration_s * (angular_freq + angular_freq_center) / 2.0 / pi
     # array-api-extra does not have type interoperability
-    return 1j * (xpx.sinc(arg1, xp=xp) - xpx.sinc(arg2, xp=xp))  # ty: ignore[invalid-argument-type, invalid-return-type]
+    return 1j * (xpx.sinc(sinc_arg_lower, xp=xp) - xpx.sinc(sinc_arg_upper, xp=xp))  # ty: ignore[invalid-argument-type, invalid-return-type]
 
 
 @jaxtyped(typechecker=typechecker)
@@ -88,7 +88,7 @@ def probe_spectrum(
 
     angular_freq_center = 2.0 * pi * freq_center
     # Convert fractional bandwidth to angular bandwidth
-    w_bw = bandwidth * angular_freq_center
+    angular_bandwidth = bandwidth * angular_freq_center
     # Shape parameter for the generalized normal window
     # The constant 126 comes from the two-way 6 dB bandwidth criterion:
     # For pulse-echo, the total response is the product of TX and RX responses,
@@ -96,12 +96,12 @@ def probe_spectrum(
     # In linear scale: 10^(6/10) ≈ 3.98, but the generalized normal window
     # parameterization uses 126 = 2 * (2^6) to define the bandwidth edges
     # where the two-way response falls to -6 dB.
-    p = log(126) / log(2.0 * angular_freq_center / w_bw)
+    shape_param = log(126) / log(2.0 * angular_freq_center / angular_bandwidth)
     # Denominator of the exponent
-    sigma = w_bw / 2.0 / (log(2) ** (1.0 / p))
+    sigma = angular_bandwidth / 2.0 / (log(2) ** (1.0 / shape_param))
 
     xp = array_namespace(angular_freq)
     # Pulse-echo (squared) response
-    spectrum_sqr = xp.exp(-((xp.abs(angular_freq - angular_freq_center) / sigma) ** p))
+    spectrum_squared = xp.exp(-((xp.abs(angular_freq - angular_freq_center) / sigma) ** shape_param))
     # One-way response (square root)
-    return xp.sqrt(spectrum_sqr)
+    return xp.sqrt(spectrum_squared)

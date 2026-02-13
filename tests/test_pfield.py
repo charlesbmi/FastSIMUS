@@ -213,7 +213,7 @@ def _fastsimus_pfield(
     """
     params = preset_fn()
     delays_1d = np.squeeze(delays)
-    return pfield(positions, delays_1d, params)  # type: ignore[arg-type, return-value]
+    return pfield(positions, delays_1d, params)
 
 
 # Tolerance for PyMUST comparison.
