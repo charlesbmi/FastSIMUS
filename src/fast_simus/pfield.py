@@ -16,21 +16,16 @@ References:
 
 from __future__ import annotations
 
-import math
 from math import ceil, inf, pi
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import array_api_extra as xpx
-from array_api_compat import array_namespace
 
 from fast_simus.medium_params import MediumParams
 from fast_simus.spectrum import probe_spectrum, pulse_spectrum
 from fast_simus.transducer_params import BaffleType, TransducerParams
-from fast_simus.utils._array_api import Array
+from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace
 from fast_simus.utils.geometry import element_positions
-
-if TYPE_CHECKING:
-    from fast_simus.utils._array_api import _ArrayNamespace
 
 _DEFAULT_MEDIUM = MediumParams()
 
@@ -189,7 +184,7 @@ def _pfield_core(
             raise ValueError(msg)
 
     # Zero apodization where delays are NaN; replace NaN delays with 0
-    nan_mask = _isnan(xp, delays)
+    nan_mask = xp.isnan(delays)
     apod = xp.where(nan_mask, xp.asarray(0.0), apod)
     delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
 
@@ -265,14 +260,14 @@ def _pfield_core(
     # Keep only significant components (dB threshold)
     w_all = xp.asarray(2.0 * pi) * f
     s_mag = xp.abs(pulse_spectrum(w_all, fc, tx_n_wavelengths) * probe_spectrum(w_all, fc, bandwidth))
-    g_db = 20.0 * _log10(xp, xp.asarray(1e-200) + s_mag / xp.max(s_mag))
+    g_db = 20.0 * xp.log10(xp.asarray(1e-200) + s_mag / xp.max(s_mag))
     above = g_db > db_thresh
     idx_first, idx_last = _first_last_true(xp, above)
     all_indices = xp.arange(f.shape[0])
     freq_mask = (all_indices >= idx_first) & (all_indices <= idx_last)
     idx_out = freq_mask
 
-    f_sel = _masked_select(xp, f, freq_mask)
+    f_sel = f[freq_mask]
     n_sampling = f_sel.shape[0]
 
     w_f = xp.asarray(2.0 * pi) * f_sel
@@ -344,9 +339,9 @@ def _pfield_core(
 
         # Single-element radiation patterns: average over sub-elements
         if full_frequency_directivity:
-            rp_mono = _mean_last(xp, dir_k * exp_arr)  # ty: ignore[unsupported-operator]
+            rp_mono = xp.mean(dir_k * exp_arr, axis=-1)  # ty: ignore[unsupported-operator]
         elif n_sub > 1:
-            rp_mono = _mean_last(xp, exp_arr)
+            rp_mono = xp.mean(exp_arr, axis=-1)
         else:
             # n_sub == 1, squeeze last dimension
             rp_mono = xp.reshape(exp_arr, (exp_arr.shape[0], exp_arr.shape[1]))
@@ -397,42 +392,9 @@ def _pfield_core(
     return xp.reshape(rp, original_shape)
 
 
-# ---------------------------------------------------------------------------
-# Array API helper functions
-# ---------------------------------------------------------------------------
-
-
-def _isnan(xp: _ArrayNamespace, arr: Array) -> Array:
-    """Element-wise NaN check."""
-    if hasattr(xp, "isnan"):
-        return xp.isnan(arr)
-    # NaN != NaN is the standard IEEE 754 fallback for NaN detection
-    return arr != arr
-
-
-def _log10(xp: _ArrayNamespace, arr: Array) -> Array:
-    """Log base 10."""
-    if hasattr(xp, "log10"):
-        return xp.log10(arr)
-    return xp.log(arr) / math.log(10)
-
-
 def _first_last_true(xp: _ArrayNamespace, mask: Array) -> tuple[int, int]:
     """Find first and last True index in 1D boolean array."""
     indices = xp.nonzero(mask)[0]
     if indices.shape[0] == 0:
         return 0, 0
     return int(indices[0]), int(indices[-1])
-
-
-def _masked_select(xp: _ArrayNamespace, arr: Array, mask: Array) -> Array:
-    """Select elements where mask is True."""
-    indices = xp.nonzero(mask)[0]
-    return xp.take(arr, indices, axis=0)
-
-
-def _mean_last(xp: _ArrayNamespace, arr: Array) -> Array:
-    """Mean along last axis."""
-    if hasattr(xp, "mean"):
-        return xp.mean(arr, axis=-1)
-    return xp.sum(arr, axis=-1) / arr.shape[-1]
