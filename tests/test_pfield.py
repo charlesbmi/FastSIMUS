@@ -4,19 +4,14 @@ Reference tests compare FastSIMUS pfield against PyMUST's pfield output.
 Tests are structured as invariants that must hold at every refactoring step.
 """
 
-import contextlib
 from typing import Any
 
 import numpy as np
+import pymust
 import pytest
 
 from fast_simus.pfield import pfield
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
-
-# PyMUST imports (guarded by @pytest.mark.requires_pymust via conftest.py)
-with contextlib.suppress(ImportError, SyntaxError):
-    from pymust import getparam, txdelayFocused, txdelayPlane
-    from pymust import pfield as pymust_pfield
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -70,10 +65,10 @@ def _pymust_reference(
         - 'z_grid': z coordinates, shape (n, n)
         - 'positions': positions array, shape (n, n, 2)
     """
-    param = getparam(probe_name)
+    param = pymust.getparam(probe_name)
     x_grid, z_grid = _make_grid(x_range, z_range, n)
     positions = np.stack([x_grid, z_grid], axis=-1)
-    rp, _spect, _idx = pymust_pfield(x_grid, [], z_grid, delays, param)  # type: ignore[arg-type]
+    rp, _spect, _idx = pymust.pfield(x_grid, [], z_grid, delays, param)  # type: ignore[arg-type]
     return {"rp": rp, "x_grid": x_grid, "z_grid": z_grid, "positions": positions}
 
 
@@ -85,9 +80,9 @@ def _pymust_reference(
 @pytest.fixture()
 def p4_2v_focused_reference() -> dict[str, Any]:
     """P4-2v phased array, focused beam at (2cm, 5cm)."""
-    param = getparam("P4-2v")
+    param = pymust.getparam("P4-2v")
     x0, z0 = 0.02, 0.05
-    delays = txdelayFocused(param, x0, z0)
+    delays = pymust.txdelayFocused(param, x0, z0)
     ref = _pymust_reference("P4-2v", delays, (-4e-2, 4e-2), (param.pitch, 10e-2))  # type: ignore[arg-type]
     ref["delays"] = delays
     ref["focus"] = (x0, z0)
@@ -98,9 +93,9 @@ def p4_2v_focused_reference() -> dict[str, Any]:
 @pytest.fixture()
 def l11_5v_plane_reference() -> dict[str, Any]:
     """L11-5v linear array, plane wave at 10 degrees."""
-    param = getparam("L11-5v")
+    param = pymust.getparam("L11-5v")
     tilt_rad = np.deg2rad(10.0)
-    delays = txdelayPlane(param, tilt_rad)
+    delays = pymust.txdelayPlane(param, tilt_rad)
     ref = _pymust_reference("L11-5v", delays, (-2e-2, 2e-2), (param.pitch, 4e-2))  # type: ignore[arg-type]
     ref["delays"] = delays
     ref["tilt_rad"] = tilt_rad
@@ -111,9 +106,9 @@ def l11_5v_plane_reference() -> dict[str, Any]:
 @pytest.fixture()
 def c5_2v_focused_reference() -> dict[str, Any]:
     """C5-2v convex array, focused beam at (0, 6cm)."""
-    param = getparam("C5-2v")
+    param = pymust.getparam("C5-2v")
     x0, z0 = 0.0, 0.06
-    delays = txdelayFocused(param, x0, z0)
+    delays = pymust.txdelayFocused(param, x0, z0)
     ref = _pymust_reference("C5-2v", delays, (-4e-2, 4e-2), (param.pitch, 10e-2))  # type: ignore[arg-type]
     ref["delays"] = delays
     ref["focus"] = (x0, z0)
@@ -126,7 +121,6 @@ def c5_2v_focused_reference() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.requires_pymust
 class TestPyMUSTReference:
     """Validate that PyMUST reference data is sane."""
 
@@ -286,7 +280,6 @@ def _assert_pfield_close(actual: np.ndarray, expected: np.ndarray, atol_peak: fl
     )
 
 
-@pytest.mark.requires_pymust
 class TestPfieldMatchesPyMUST:
     """Compare FastSIMUS pfield output against PyMUST reference."""
 

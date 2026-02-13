@@ -208,13 +208,14 @@ pytest-benchmark = "pytest_benchmark"
 [tool.pytest.ini_options]
 filterwarnings = [
     "error",  # make warnings errors
-    "ignore::SyntaxWarning:pymust",  # PyMUST uses deprecated syntax
+    "default::SyntaxWarning",  # PyMUST has invalid escape sequences; module filter can't catch compile-time warnings
+    "ignore::SyntaxWarning:pymust*",
+    "ignore::DeprecationWarning:pymust*",
 ]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "requires_pymust: requires PyMUST reference implementation (Python <3.14 only)",
 ]
 
 [tool.coverage.report]

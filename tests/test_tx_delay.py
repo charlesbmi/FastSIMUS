@@ -3,10 +3,9 @@
 These tests validate that our tx_delay implementation matches PyMUST outputs.
 """
 
-import contextlib
-
 import array_api_strict as xp_strict
 import numpy as np
+import pymust
 import pytest
 from array_api_compat import array_namespace
 from jaxtyping import TypeCheckError
@@ -18,21 +17,16 @@ from fast_simus.utils.geometry import element_positions
 
 SPEED_OF_SOUND = MediumParams().speed_of_sound
 
-# PyMUST imports (guarded by @pytest.mark.requires_pymust via conftest.py)
-with contextlib.suppress(ImportError, SyntaxError):
-    from pymust import getparam, txdelayCircular, txdelayFocused, txdelayPlane
 
-
-@pytest.mark.requires_pymust
 class TestFocusedDelays:
     """Test focused beam delay calculations."""
 
     def test_focused_linear_array_matches_pymust(self):
         """Focused delays for linear array should match PyMUST txdelay."""
         # Get PyMUST reference (squeeze: PyMUST always returns (1, n) for scalars)
-        pymust_param = getparam("P4-2v")
+        pymust_param = pymust.getparam("P4-2v")
         x0, z0 = 0.02, 0.05  # 2cm lateral, 5cm depth
-        pymust_delays = np.squeeze(txdelayFocused(pymust_param, x0, z0))
+        pymust_delays = np.squeeze(pymust.txdelayFocused(pymust_param, x0, z0))
 
         # FastSIMUS implementation
         params = P4_2v()
@@ -48,9 +42,9 @@ class TestFocusedDelays:
 
     def test_focused_virtual_source_matches_pymust(self):
         """Virtual source (negative z0) should match PyMUST."""
-        pymust_param = getparam("P4-2v")
+        pymust_param = pymust.getparam("P4-2v")
         x0, z0 = 0.01, -0.03  # Virtual source above transducer
-        pymust_delays = np.squeeze(txdelayFocused(pymust_param, x0, z0))
+        pymust_delays = np.squeeze(pymust.txdelayFocused(pymust_param, x0, z0))
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -65,9 +59,9 @@ class TestFocusedDelays:
 
     def test_focused_convex_array_matches_pymust(self):
         """Focused delays for convex array should match PyMUST."""
-        pymust_param = getparam("C5-2v")
+        pymust_param = pymust.getparam("C5-2v")
         x0, z0 = 0.0, 0.06  # On-axis focus
-        pymust_delays = np.squeeze(txdelayFocused(pymust_param, x0, z0))
+        pymust_delays = np.squeeze(pymust.txdelayFocused(pymust_param, x0, z0))
 
         params = C5_2v()
         xp = array_namespace(np.array([1.0]))
@@ -82,10 +76,10 @@ class TestFocusedDelays:
 
     def test_focused_vectorized_matches_pymust(self):
         """Vectorized focal points should match PyMUST."""
-        pymust_param = getparam("P4-2v")
+        pymust_param = pymust.getparam("P4-2v")
         x0 = np.array([0.0, 0.01, 0.02])
         z0 = np.array([0.04, 0.05, 0.06])
-        pymust_delays = txdelayFocused(pymust_param, x0, z0)  # type: ignore[invalid-argument-type]  # PyMUST also accepts arrays
+        pymust_delays = pymust.txdelayFocused(pymust_param, x0, z0)  # type: ignore[invalid-argument-type]  # PyMUST also accepts arrays
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -108,15 +102,14 @@ class TestFocusedDelays:
         np.testing.assert_allclose(fastsimus_delays, pymust_delays, rtol=1e-4)
 
 
-@pytest.mark.requires_pymust
 class TestPlaneWaveDelays:
     """Test plane wave delay calculations."""
 
     def test_plane_wave_linear_matches_pymust(self):
         """Plane wave delays for linear array should match PyMUST."""
-        pymust_param = getparam("P4-2v")
+        pymust_param = pymust.getparam("P4-2v")
         tilt = np.deg2rad(10)
-        pymust_delays = np.squeeze(txdelayPlane(pymust_param, tilt))
+        pymust_delays = np.squeeze(pymust.txdelayPlane(pymust_param, tilt))
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -130,9 +123,9 @@ class TestPlaneWaveDelays:
 
     def test_plane_wave_zero_tilt_matches_pymust(self):
         """Zero tilt should give zero delays."""
-        pymust_param = getparam("P4-2v")
+        pymust_param = pymust.getparam("P4-2v")
         tilt = 0.0
-        pymust_delays = np.squeeze(txdelayPlane(pymust_param, tilt))
+        pymust_delays = np.squeeze(pymust.txdelayPlane(pymust_param, tilt))
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -147,9 +140,9 @@ class TestPlaneWaveDelays:
 
     def test_plane_wave_convex_matches_pymust(self):
         """Plane wave delays for convex array should match PyMUST."""
-        pymust_param = getparam("C5-2v")
+        pymust_param = pymust.getparam("C5-2v")
         tilt = np.deg2rad(10)
-        pymust_delays = np.squeeze(txdelayPlane(pymust_param, tilt))
+        pymust_delays = np.squeeze(pymust.txdelayPlane(pymust_param, tilt))
 
         params = C5_2v()
         xp = array_namespace(np.array([1.0]))
@@ -163,9 +156,9 @@ class TestPlaneWaveDelays:
 
     def test_plane_wave_vectorized_matches_pymust(self):
         """Vectorized tilt angles should match PyMUST."""
-        pymust_param = getparam("P4-2v")
+        pymust_param = pymust.getparam("P4-2v")
         tilt = np.array([0.0, np.pi / 18, -np.pi / 18])
-        pymust_delays = txdelayPlane(pymust_param, tilt)  # type: ignore[invalid-argument-type]  # PyMUST also accepts arrays
+        pymust_delays = pymust.txdelayPlane(pymust_param, tilt)  # type: ignore[invalid-argument-type]  # PyMUST also accepts arrays
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -182,16 +175,15 @@ class TestPlaneWaveDelays:
         np.testing.assert_allclose(fastsimus_delays, pymust_delays, rtol=1e-4)
 
 
-@pytest.mark.requires_pymust
 class TestCircularWaveDelays:
     """Test circular wave delay calculations."""
 
     def test_circular_wave_matches_pymust(self):
         """Circular wave delays should match PyMUST."""
-        pymust_param = getparam("P4-2v")
+        pymust_param = pymust.getparam("P4-2v")
         tilt = np.deg2rad(10)
         width = np.deg2rad(30)
-        pymust_delays = np.squeeze(txdelayCircular(pymust_param, tilt, width))
+        pymust_delays = np.squeeze(pymust.txdelayCircular(pymust_param, tilt, width))
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
@@ -206,10 +198,10 @@ class TestCircularWaveDelays:
 
     def test_circular_wave_vectorized_matches_pymust(self):
         """Vectorized circular wave parameters should match PyMUST."""
-        pymust_param = getparam("P4-2v")
+        pymust_param = pymust.getparam("P4-2v")
         tilt = np.array([0.0, np.pi / 18])
         width = np.array([np.pi / 6, np.pi / 4])
-        pymust_delays = txdelayCircular(pymust_param, tilt, width)  # type: ignore[]
+        pymust_delays = pymust.txdelayCircular(pymust_param, tilt, width)  # type: ignore[]
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))

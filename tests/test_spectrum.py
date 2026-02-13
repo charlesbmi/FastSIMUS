@@ -3,26 +3,20 @@
 Compares FastSIMUS spectrum functions against PyMUST reference implementations.
 """
 
-import contextlib
-
 import numpy as np
+import pymust
 import pytest
 
 from fast_simus.spectrum import probe_spectrum, pulse_spectrum
 
-# PyMUST imports (guarded by @pytest.mark.requires_pymust via conftest.py)
-with contextlib.suppress(ImportError, SyntaxError):
-    from pymust import getparam
 
-
-@pytest.mark.requires_pymust
 class TestPulseSpectrumMatchesPyMUST:
     """Compare pulse_spectrum against PyMUST Param.getPulseSpectrumFunction."""
 
     @pytest.mark.parametrize("probe_name", ["P4-2v", "L11-5v", "C5-2v"])
     def test_pulse_spectrum_matches(self, probe_name):
         """Pulse spectrum should match PyMUST for standard probes."""
-        pymust_param = getparam(probe_name)
+        pymust_param = pymust.getparam(probe_name)
 
         # PyMUST reference (no chirp)
         pymust_fn = pymust_param.getPulseSpectrumFunction(None)
@@ -41,7 +35,7 @@ class TestPulseSpectrumMatchesPyMUST:
 
     def test_pulse_spectrum_txnow_2(self):
         """Pulse spectrum with TXnow=2 should match PyMUST."""
-        pymust_param = getparam("P4-2v")
+        pymust_param = pymust.getparam("P4-2v")
         pymust_param.TXnow = 2
 
         pymust_fn = pymust_param.getPulseSpectrumFunction(None)
@@ -53,14 +47,13 @@ class TestPulseSpectrumMatchesPyMUST:
         )
 
 
-@pytest.mark.requires_pymust
 class TestProbeSpectrumMatchesPyMUST:
     """Compare probe_spectrum against PyMUST Param.getProbeFunction."""
 
     @pytest.mark.parametrize("probe_name", ["P4-2v", "L11-5v", "C5-2v"])
     def test_probe_spectrum_matches(self, probe_name):
         """Probe spectrum should match PyMUST for standard probes."""
-        pymust_param = getparam(probe_name)
+        pymust_param = pymust.getparam(probe_name)
 
         # PyMUST reference
         pymust_fn = pymust_param.getProbeFunction()
