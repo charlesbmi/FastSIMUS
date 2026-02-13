@@ -216,13 +216,28 @@ def _fastsimus_pfield(
     return pfield(positions, delays_1d, params)
 
 
-# Tolerance for PyMUST comparison.
-# PyMUST uses float32/complex64 precision throughout its computation.
-# FastSIMUS uses native backend precision (typically float64/complex128),
-# which produces different but more accurate results. The numerical differences
-# arise from float32 rounding in propagation exponentials. These are small in
-# absolute terms but large relative errors in sidelobe regions where pressure
-# is ~1/1000 of peak. We use a peak-normalized metric instead of rtol.
+# ---------------------------------------------------------------------------
+# Tolerance for PyMUST comparison
+# ---------------------------------------------------------------------------
+#
+# PyMUST uses float32/complex64 precision throughout its pfield computation
+# (coordinates, distances, propagation exponentials are all explicitly cast).
+# FastSIMUS uses float64/complex128, which is strictly more accurate.
+#
+# When PyMUST is monkey-patched to use float64, the two implementations agree
+# to -234 dB (machine epsilon) -- confirming zero algorithmic differences.
+# The entire error budget is therefore set by PyMUST's float32 quantization:
+#
+#   Probe       Error (dB)   Error (frac of peak)
+#   C5-2v       -53.9        2.0e-3       (convex geometry, largest kw*r)
+#   L11-5v      -68.9        3.6e-4
+#   P4-2v       -75.6        1.7e-4
+#
+# We use a peak-normalized absolute tolerance (atol_peak) instead of rtol
+# because rtol penalises sidelobe regions where pressure is << peak but
+# float32 noise is a fixed absolute floor. The tolerance of 2.5e-3 (-52 dB)
+# is the tightest achievable against a float32 reference.
+_PYMUST_ATOL_PEAK = 2.5e-3  # -52 dB re peak; limited by PyMUST's float32
 
 
 def _compute_peak_normalized_error(actual: np.ndarray, expected: np.ndarray) -> tuple[float, float]:
@@ -288,16 +303,16 @@ class TestPfieldMatchesPyMUST:
         """P4-2v focused beam must match PyMUST."""
         ref = p4_2v_focused_reference
         fastsimus_rp = _fastsimus_pfield(P4_2v, ref["delays"], ref["positions"])
-        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=2.5e-3, desc="P4-2v focused")
+        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=_PYMUST_ATOL_PEAK, desc="P4-2v focused")
 
     def test_l11_5v_plane_matches(self, l11_5v_plane_reference):
         """L11-5v plane wave must match PyMUST."""
         ref = l11_5v_plane_reference
         fastsimus_rp = _fastsimus_pfield(L11_5v, ref["delays"], ref["positions"])
-        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=2.5e-3, desc="L11-5v plane")
+        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=_PYMUST_ATOL_PEAK, desc="L11-5v plane")
 
     def test_c5_2v_focused_matches(self, c5_2v_focused_reference):
         """C5-2v convex focused beam must match PyMUST."""
         ref = c5_2v_focused_reference
         fastsimus_rp = _fastsimus_pfield(C5_2v, ref["delays"], ref["positions"])
-        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=2.5e-3, desc="C5-2v focused")
+        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=_PYMUST_ATOL_PEAK, desc="C5-2v focused")
