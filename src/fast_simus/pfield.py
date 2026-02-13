@@ -140,11 +140,11 @@ def _pfield_core(
     """Core pfield implementation shared by standalone pfield and simus."""
     xp: _ArrayNamespace = array_namespace(x, z, delays)  # type: ignore[assignment]
 
-    # --- Extract medium parameters ---
+    # Extract medium parameters
     c = medium.speed_of_sound
     alpha_db = medium.attenuation
 
-    # --- Validate inputs ---
+    # Validate inputs
     if x.shape != z.shape:
         msg = "x and z must have the same shape"
         raise ValueError(msg)
@@ -174,7 +174,7 @@ def _pfield_core(
     x_flat = xp.reshape(x, (-1,)) if x.ndim > 1 else x
     z_flat = xp.reshape(z, (-1,)) if z.ndim > 1 else z
 
-    # --- TX apodization ---
+    # TX apodization
     if tx_apodization is None:
         apod = xp.ones(n_elements, dtype=xp.float64)
     else:
@@ -188,17 +188,17 @@ def _pfield_core(
     apod = xp.where(nan_mask, xp.asarray(0.0), apod)
     delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
 
-    # --- Baffle type ---
+    # Baffle type
     non_rigid_baffle = baffle != BaffleType.RIGID
 
-    # --- Element splitting ---
+    # Element splitting
     if element_splitting is not None:
         n_sub = element_splitting
     else:
         lambda_min = c / (fc * (1.0 + bandwidth / 2.0))
         n_sub = ceil(element_width / lambda_min)
 
-    # --- Element positions (already computed, passed in) ---
+    # Element positions (already computed, passed in)
     # xe, ze, theta_e are 1-D arrays with shape (n_elements,)
     if theta_e is None:
         the_1d = xp.zeros(n_elements, dtype=xp.float64)
@@ -207,7 +207,7 @@ def _pfield_core(
 
     h = float(apex_offset)
 
-    # --- Sub-element centroids (shape: n_elements, n_sub) ---
+    # Sub-element centroids (shape: n_elements, n_sub)
     seg_length = element_width / n_sub
     seg_offsets = xp.asarray(
         [-element_width / 2.0 + seg_length / 2.0 + i * seg_length for i in range(n_sub)],
@@ -220,12 +220,12 @@ def _pfield_core(
     xi = seg_2d * cos_the  # (n_elements, n_sub)
     zi = seg_2d * sin_neg_the
 
-    # --- Out-of-field mask ---
+    # Out-of-field mask
     is_out = z_flat < 0
     if radius_of_curvature != inf:
         is_out = is_out | ((x_flat**2 + (z_flat + h) ** 2) <= radius_of_curvature**2)
 
-    # --- Distances and angles (shape: nx, n_elements, n_sub) ---
+    # Distances and angles (shape: nx, n_elements, n_sub)
     # Broadcasting: x_flat (nx,) -> (nx, 1, 1)
     #               xe (n_elements,) -> (1, n_elements, 1)
     #               xi (n_elements, n_sub) -> (1, n_elements, n_sub)
@@ -245,14 +245,14 @@ def _pfield_core(
     theta_arr = xp.asin((dxi + eps_sp) / (sqrt_d2 + eps_sp)) - the_1d[None, :, None]
     sin_theta = xp.sin(theta_arr)
 
-    # --- Frequency step ---
+    # Frequency step
     if _is_simus and _simus_df is not None:
         df = _simus_df
     else:
         df = 1.0 / (float(xp.max(r)) / c + float(xp.max(delays_clean)))
         df = frequency_step * df
 
-    # --- Frequency samples ---
+    # Frequency samples
     n_freq = int(2 * ceil(fc / df) + 1)
     f = xp.linspace(0, 2 * fc, n_freq, dtype=xp.float64)
     df = float(f[1])
@@ -274,12 +274,12 @@ def _pfield_core(
     pulse_spect = pulse_spectrum(w_f, fc, tx_n_wavelengths)
     probe_spect = probe_spectrum(w_f, fc, bandwidth)
 
-    # --- Initialization ---
+    # Initialization
     rp_accum = xp.asarray(0.0, dtype=xp.float64)
     if _is_simus:
         spect_rows = []  # Accumulate rows in a list, stack at end
 
-    # --- Obliquity factor ---
+    # Obliquity factor
     if non_rigid_baffle:
         if baffle == BaffleType.SOFT:
             obli_fac = xp.cos(theta_arr)
@@ -295,7 +295,7 @@ def _pfield_core(
         obli_fac,
     )
 
-    # --- Exponential arrays ---
+    # Exponential arrays
     f0 = float(f_sel[0])
     kw0 = 2.0 * pi * f0 / c
     kwa0 = alpha_db / 8.69 * f0 / 1e6 * 1e2
@@ -313,7 +313,7 @@ def _pfield_core(
     # Incorporate obliquity / sqrt(r) (2D, no elevation)
     exp_arr = exp_arr * obli_fac / xp.sqrt(r)
 
-    # --- Simplified directivity (center-frequency only) ---
+    # Simplified directivity (center-frequency only)
     if not full_frequency_directivity:
         kc = 2.0 * pi * fc / c
         # Use unnormalized sinc: sinc(x/pi) from array_api_extra
@@ -322,8 +322,7 @@ def _pfield_core(
         dir_arr = xpx.sinc(sinc_arg, xp=xp)  # ty: ignore[invalid-argument-type]
         exp_arr = exp_arr * cast(Array, dir_arr)
 
-    # --- Frequency loop ---
-
+    # Frequency loop
     for k in range(n_sampling):
         fk = float(f_sel[k])
         kw = 2.0 * pi * fk / c
@@ -360,7 +359,7 @@ def _pfield_core(
         # Zero out-of-field (no mutation)
         rp_k = xp.where(is_out[:, None], xp.asarray(0.0 + 0j), rp_k)
 
-        # --- Accumulate ---
+        # Accumulate
         if _is_simus:
             if _rc is None:
                 msg = "_rc must be provided when _is_simus=True"
@@ -377,7 +376,7 @@ def _pfield_core(
         else:
             rp_accum = rp_accum + xp.abs(rp_k) ** 2
 
-    # --- Correcting factor ---
+    # Correcting factor
     cor_fac = 1.0 if tx_n_wavelengths == float("inf") else df
     cor_fac = cor_fac * element_width
 
