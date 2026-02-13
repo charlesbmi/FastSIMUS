@@ -236,17 +236,17 @@ class TestPfieldMatchesPyMUST:
     def test_p4_2v_focused_matches(self, p4_2v_focused_reference):
         """P4-2v focused beam must match PyMUST."""
         ref = p4_2v_focused_reference
-        our_rp = _fastsimus_pfield(P4_2v, ref["delays"], ref["positions"])
-        np.testing.assert_allclose(our_rp, ref["rp"], rtol=_PYMUST_RTOL, atol=1e-10)
+        fastsimus_rp = _fastsimus_pfield(P4_2v, ref["delays"], ref["positions"])
+        np.testing.assert_allclose(fastsimus_rp, ref["rp"], rtol=_PYMUST_RTOL, atol=1e-10)
 
     def test_l11_5v_plane_matches(self, l11_5v_plane_reference):
         """L11-5v plane wave must match PyMUST."""
         ref = l11_5v_plane_reference
-        our_rp = _fastsimus_pfield(L11_5v, ref["delays"], ref["positions"])
-        np.testing.assert_allclose(our_rp, ref["rp"], rtol=_PYMUST_RTOL, atol=1e-10)
+        fastsimus_rp = _fastsimus_pfield(L11_5v, ref["delays"], ref["positions"])
+        np.testing.assert_allclose(fastsimus_rp, ref["rp"], rtol=_PYMUST_RTOL, atol=1e-10)
 
     def test_c5_2v_focused_matches(self, c5_2v_focused_reference):
         """C5-2v convex focused beam must match PyMUST."""
         ref = c5_2v_focused_reference
-        our_rp = _fastsimus_pfield(C5_2v, ref["delays"], ref["positions"])
-        np.testing.assert_allclose(our_rp, ref["rp"], rtol=_PYMUST_RTOL, atol=1e-10)
+        fastsimus_rp = _fastsimus_pfield(C5_2v, ref["delays"], ref["positions"])
+        np.testing.assert_allclose(fastsimus_rp, ref["rp"], rtol=_PYMUST_RTOL, atol=1e-10)

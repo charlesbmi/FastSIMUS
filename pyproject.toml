@@ -200,6 +200,9 @@ ignore = [
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.deptry.package_module_name_map]
+pytest-benchmark = "pytest_benchmark"
+
 
 # ---- test settings ----
 [tool.pytest.ini_options]

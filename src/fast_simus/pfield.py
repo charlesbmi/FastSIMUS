@@ -147,7 +147,7 @@ def _select_frequencies(
     bandwidth: float,
     tx_n_wavelengths: float,
     db_thresh: float,
-    df_upper: float,
+    max_freq_step: float,
     xp: _ArrayNamespace,
 ) -> _FrequencyPlan:
     """Select frequency samples for pfield computation.
@@ -157,14 +157,14 @@ def _select_frequencies(
         bandwidth: Fractional bandwidth.
         tx_n_wavelengths: Number of wavelengths in TX pulse.
         db_thresh: Threshold in dB for frequency component selection.
-        df_upper: Upper bound for frequency step.
+        max_freq_step: Upper bound for frequency step.
         xp: Array namespace.
 
     Returns:
         FrequencyPlan with selected frequencies and spectra.
     """
     # Frequency samples
-    n_freq = int(2 * ceil(fc / df_upper) + 1)
+    n_freq = int(2 * ceil(fc / max_freq_step) + 1)
     frequencies = xp.linspace(0, 2 * fc, n_freq, dtype=xp.float64)
     freq_step = float(frequencies[1])
 
@@ -459,8 +459,8 @@ def _pfield_core(
 
     # Select frequencies
     freq_plan = _select_frequencies(fc, bandwidth, tx_n_wavelengths, db_thresh, df, xp)
-    f_sel = freq_plan.selected_freqs
-    n_sampling = f_sel.shape[0]
+    selected_freqs = freq_plan.selected_freqs
+    n_sampling = selected_freqs.shape[0]
     pulse_spect = freq_plan.pulse_spectrum
     probe_spect = freq_plan.probe_spectrum
     freq_mask = freq_plan.freq_mask
@@ -475,7 +475,7 @@ def _pfield_core(
     obliquity_factor = _obliquity_factor(theta_arr, baffle, xp)
 
     # Exponential arrays
-    freq_start = float(f_sel[0])
+    freq_start = float(selected_freqs[0])
     phase_decay, phase_decay_step = _init_exponentials(
         freq_start, speed_of_sound, alpha_db, distances, obliquity_factor, df, xp
     )
@@ -492,8 +492,8 @@ def _pfield_core(
 
     # Frequency loop
     for freq_idx in range(n_sampling):
-        freq_k = float(f_sel[freq_idx])
-        wavenumber = 2.0 * pi * freq_k / speed_of_sound
+        current_freq = float(selected_freqs[freq_idx])
+        wavenumber = 2.0 * pi * current_freq / speed_of_sound
 
         if freq_idx > 0:
             phase_decay = phase_decay * phase_decay_step
