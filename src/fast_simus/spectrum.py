@@ -15,28 +15,30 @@ from __future__ import annotations
 from math import log, pi
 
 import array_api_extra as xpx
-from array_api_compat import array_namespace
+from beartype import beartype as typechecker
+from jaxtyping import Complex, Float, jaxtyped
 
-from fast_simus.utils._array_api import Array
+from fast_simus.utils._array_api import Array, array_namespace
 
 
+@jaxtyped(typechecker=typechecker)
 def pulse_spectrum(
-    angular_freq: Array,
-    freq_center: float,
-    tx_n_wavelengths: float = 1.0,
-) -> Array:
+    angular_freq: Float[Array, " n_freqs"],
+    freq_center: float | int,
+    tx_n_wavelengths: float | int = 1.0,
+) -> Complex[Array, " n_freqs"]:
     """Compute the pulse spectrum for a windowed sine pulse.
 
     Computes the frequency-domain representation of a windowed sine pulse
     with the given center frequency and number of wavelengths.
 
     Args:
-        angular_freq: Angular frequency in rad/s.
+        angular_freq: Angular frequency in rad/s. Shape (n_freqs,).
         freq_center: Center frequency in Hz. Must be positive.
         tx_n_wavelengths: Number of wavelengths of the TX pulse.
 
     Returns:
-        Complex spectrum at the given angular frequencies.
+        Complex spectrum at the given angular frequencies. Shape (n_freqs,).
     """
     pulse_duration_s = tx_n_wavelengths / freq_center
     angular_freq_center = 2.0 * pi * freq_center
@@ -48,11 +50,12 @@ def pulse_spectrum(
     return 1j * (xpx.sinc(arg1, xp=xp) - xpx.sinc(arg2, xp=xp))  # ty: ignore[invalid-argument-type, invalid-return-type]
 
 
+@jaxtyped(typechecker=typechecker)
 def probe_spectrum(
-    angular_freq: Array,
-    freq_center: float,
-    bandwidth: float = 0.75,
-) -> Array:
+    angular_freq: Float[Array, " n_freqs"],
+    freq_center: float | int,
+    bandwidth: float | int = 0.75,
+) -> Float[Array, " n_freqs"]:
     """Compute the probe frequency response.
 
     Computes the one-way probe frequency response using a generalized normal
@@ -63,12 +66,13 @@ def probe_spectrum(
     appropriate for one-way (transmit-only or receive-only) use.
 
     Args:
-        angular_freq: Angular frequency in rad/s.
+        angular_freq: Angular frequency in rad/s. Shape (n_freqs,).
         freq_center: Center frequency in Hz. Must be positive.
         bandwidth: Fractional bandwidth (0.75 = 75%). Must be in (0, 2.0).
 
     Returns:
         Real-valued probe response (one-way) at the given angular frequencies.
+        Shape (n_freqs,).
 
     References:
         Generalized normal window:

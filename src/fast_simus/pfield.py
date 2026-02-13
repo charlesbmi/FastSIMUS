@@ -16,10 +16,12 @@ References:
 
 from __future__ import annotations
 
-from math import ceil, inf, pi
-from typing import cast
+from math import ceil, inf, log, pi, prod
+from typing import NamedTuple, cast
 
 import array_api_extra as xpx
+from beartype import beartype as typechecker
+from jaxtyping import Float, jaxtyped
 
 from fast_simus.medium_params import MediumParams
 from fast_simus.spectrum import probe_spectrum, pulse_spectrum
@@ -29,20 +31,255 @@ from fast_simus.utils.geometry import element_positions
 
 _DEFAULT_MEDIUM = MediumParams()
 
+# Conversion factor: Nepers to dB
+# 20/log(10) ≈ 8.6859
+_NEPER_TO_DB = 20.0 / log(10.0)
 
+
+class _FrequencyPlan(NamedTuple):
+    """Frequency sampling plan for pfield computation."""
+
+    f_sel: Array  # Selected frequencies, shape (n_sampling,)
+    freq_mask: Array  # Boolean mask for selected frequencies, shape (n_freq,)
+    pulse_spect: Array  # Pulse spectrum at selected frequencies, shape (n_sampling,)
+    probe_spect: Array  # Probe spectrum at selected frequencies, shape (n_sampling,)
+    df: float  # Frequency step in Hz
+
+
+class _SimusContext(NamedTuple):
+    """Context for SIMUS-specific computation (internal use)."""
+
+    rc: Array | None  # Scatterer reflectivity coefficients
+    rx_delay: Array | None  # Receive delays
+    df: float | None  # Frequency step override
+
+
+def _subelement_centroids(
+    element_width: float,
+    n_sub: int,
+    theta_e: Array,
+    xp: _ArrayNamespace,
+) -> tuple[Array, Array]:
+    """Compute sub-element centroid positions relative to element centers.
+
+    Args:
+        element_width: Element width in meters.
+        n_sub: Number of sub-elements per element.
+        theta_e: Element angular positions in radians. Shape (n_elements,).
+        xp: Array namespace.
+
+    Returns:
+        Tuple of (xi, zi) each with shape (n_elements, n_sub):
+        - xi: Lateral positions of sub-element centroids.
+        - zi: Axial positions of sub-element centroids.
+    """
+    seg_length = element_width / n_sub
+    seg_offsets = xp.asarray(
+        [-element_width / 2.0 + seg_length / 2.0 + i * seg_length for i in range(n_sub)],
+        dtype=xp.float64,
+    )
+    # Broadcasting: (n_sub,) -> (1, n_sub), (n_elements,) -> (n_elements, 1)
+    seg_2d = xp.reshape(seg_offsets, (1, n_sub))
+    cos_the = xp.cos(theta_e)[:, None]  # (n_elements, 1)
+    sin_neg_the = xp.sin(-theta_e)[:, None]
+    xi = seg_2d * cos_the  # (n_elements, n_sub)
+    zi = seg_2d * sin_neg_the
+    return xi, zi
+
+
+def _distances_and_angles(
+    x_flat: Array,
+    z_flat: Array,
+    xi: Array,
+    zi: Array,
+    xe: Array,
+    ze: Array,
+    theta_e: Array,
+    c: float,
+    fc: float,
+    xp: _ArrayNamespace,
+) -> tuple[Array, Array, Array]:
+    """Compute distances and angles from grid points to sub-elements.
+
+    Args:
+        x_flat: Flattened x-coordinates of grid points. Shape (nx,).
+        z_flat: Flattened z-coordinates of grid points. Shape (nx,).
+        xi: Sub-element lateral positions. Shape (n_elements, n_sub).
+        zi: Sub-element axial positions. Shape (n_elements, n_sub).
+        xe: Element lateral positions. Shape (n_elements,).
+        ze: Element axial positions. Shape (n_elements,).
+        theta_e: Element angular positions. Shape (n_elements,).
+        c: Speed of sound in m/s.
+        fc: Center frequency in Hz.
+        xp: Array namespace.
+
+    Returns:
+        Tuple of (r, sin_theta, theta_arr):
+        - r: Distances with shape (nx, n_elements, n_sub).
+        - sin_theta: Sine of angles with shape (nx, n_elements, n_sub).
+        - theta_arr: Angles relative to element normal with shape (nx, n_elements, n_sub).
+    """
+    # Distances and angles (shape: nx, n_elements, n_sub)
+    # Broadcasting: x_flat (nx,) -> (nx, 1, 1)
+    #               xe (n_elements,) -> (1, n_elements, 1)
+    #               xi (n_elements, n_sub) -> (1, n_elements, n_sub)
+    dxi = x_flat[:, None, None] - xi[None, :, :] - xe[None, :, None]
+    dz_arr = z_flat[:, None, None] - zi[None, :, :] - ze[None, :, None]
+    d2 = dxi**2 + dz_arr**2
+
+    # r with clipping
+    r = xp.sqrt(d2)
+    small_d = xp.asarray(c / fc / 2.0)
+    r = xp.where(r < small_d, small_d, r)
+
+    # Angle relative to element normal
+    eps_sp = xp.asarray(1e-16)  # Small epsilon to avoid division by zero
+    sqrt_d2 = xp.sqrt(d2)
+    # Broadcasting: theta_e (n_elements,) -> (1, n_elements, 1)
+    theta_arr = xp.asin((dxi + eps_sp) / (sqrt_d2 + eps_sp)) - theta_e[None, :, None]
+    sin_theta = xp.sin(theta_arr)
+
+    return r, sin_theta, theta_arr
+
+
+def _select_frequencies(
+    fc: float,
+    bandwidth: float,
+    tx_n_wavelengths: float,
+    db_thresh: float,
+    df_upper: float,
+    xp: _ArrayNamespace,
+) -> _FrequencyPlan:
+    """Select frequency samples for pfield computation.
+
+    Args:
+        fc: Center frequency in Hz.
+        bandwidth: Fractional bandwidth.
+        tx_n_wavelengths: Number of wavelengths in TX pulse.
+        db_thresh: Threshold in dB for frequency component selection.
+        df_upper: Upper bound for frequency step.
+        xp: Array namespace.
+
+    Returns:
+        FrequencyPlan with selected frequencies and spectra.
+    """
+    # Frequency samples
+    n_freq = int(2 * ceil(fc / df_upper) + 1)
+    f = xp.linspace(0, 2 * fc, n_freq, dtype=xp.float64)
+    df = float(f[1])
+
+    # Keep only significant components (dB threshold)
+    w_all = xp.asarray(2.0 * pi) * f
+    s_mag = xp.abs(pulse_spectrum(w_all, fc, tx_n_wavelengths) * probe_spectrum(w_all, fc, bandwidth))
+    g_db = 20.0 * xp.log10(xp.asarray(1e-200) + s_mag / xp.max(s_mag))
+    above = g_db > db_thresh
+    idx_first, idx_last = _first_last_true(xp, above)
+    all_indices = xp.arange(f.shape[0])
+    freq_mask = (all_indices >= idx_first) & (all_indices <= idx_last)
+
+    f_sel = f[freq_mask]
+
+    w_f = xp.asarray(2.0 * pi) * f_sel
+    pulse_spect = pulse_spectrum(w_f, fc, tx_n_wavelengths)
+    probe_spect = probe_spectrum(w_f, fc, bandwidth)
+
+    return _FrequencyPlan(f_sel, freq_mask, pulse_spect, probe_spect, df)
+
+
+def _obliquity_factor(
+    theta_arr: Array,
+    baffle: BaffleType | float,
+    xp: _ArrayNamespace,
+) -> Array:
+    """Compute obliquity factor based on baffle type.
+
+    Args:
+        theta_arr: Angles relative to element normal. Shape (nx, n_elements, n_sub).
+        baffle: Baffle type or impedance ratio.
+        xp: Array namespace.
+
+    Returns:
+        Obliquity factor with shape (nx, n_elements, n_sub).
+    """
+    non_rigid_baffle = baffle != BaffleType.RIGID
+    eps_sp = xp.asarray(1e-16)
+
+    if non_rigid_baffle:
+        if baffle == BaffleType.SOFT:
+            obli_fac = xp.cos(theta_arr)
+        else:
+            cos_th = xp.cos(theta_arr)
+            obli_fac = cos_th / (cos_th + float(baffle))
+    else:
+        obli_fac = xp.ones(theta_arr.shape, dtype=xp.float64)
+
+    obli_fac = xp.where(
+        xp.abs(theta_arr) >= xp.asarray(pi / 2),
+        eps_sp,
+        obli_fac,
+    )
+
+    return obli_fac
+
+
+def _init_exponentials(
+    f0: float,
+    c: float,
+    alpha_db: float,
+    r: Array,
+    obli_fac: Array,
+    df: float,
+    xp: _ArrayNamespace,
+) -> tuple[Array, Array]:
+    """Initialize exponential arrays for frequency loop.
+
+    Args:
+        f0: Initial frequency in Hz.
+        c: Speed of sound in m/s.
+        alpha_db: Attenuation coefficient in dB/cm/MHz.
+        r: Distances. Shape (nx, n_elements, n_sub).
+        obli_fac: Obliquity factor. Shape (nx, n_elements, n_sub).
+        df: Frequency step in Hz.
+        xp: Array namespace.
+
+    Returns:
+        Tuple of (exp_arr, exp_df):
+        - exp_arr: Initial exponential array with shape (nx, n_elements, n_sub).
+        - exp_df: Exponential increment for frequency step, same shape.
+    """
+    kw0 = 2.0 * pi * f0 / c
+    kwa0 = alpha_db / _NEPER_TO_DB * f0 / 1e6 * 1e2
+
+    # exp(-kwa*r + 1j*mod(kw*r, 2pi))
+    kw0_r = xp.asarray(kw0) * r
+    two_pi = xp.asarray(2.0 * pi)
+    phase_mod = kw0_r - two_pi * xp.floor(kw0_r / two_pi)
+    exp_arr = xp.exp(xp.asarray(-kwa0) * r) * (xp.cos(phase_mod) + xp.asarray(1j) * xp.sin(phase_mod))
+
+    dkw = 2.0 * pi * df / c
+    dkwa = alpha_db / _NEPER_TO_DB * df / 1e6 * 1e2
+    exp_df = xp.exp(xp.asarray(-dkwa + 1j * dkw) * r)
+
+    # Incorporate obliquity / sqrt(r) (2D, no elevation)
+    exp_arr = exp_arr * obli_fac / xp.sqrt(r)
+
+    return exp_arr, exp_df
+
+
+@jaxtyped(typechecker=typechecker)
 def pfield(
-    positions: Array,
-    delays: Array,
+    positions: Float[Array, "*grid_shape 2"],
+    delays: Float[Array, " n_elements"],
     params: TransducerParams,
     medium: MediumParams = _DEFAULT_MEDIUM,
     *,
-    tx_apodization: Array | None = None,
-    tx_n_wavelengths: float = 1.0,
-    db_thresh: float = -60.0,
+    tx_apodization: Float[Array, " n_elements"] | None = None,
+    tx_n_wavelengths: float | int = 1.0,
+    db_thresh: float | int = -60.0,
     full_frequency_directivity: bool = False,
     element_splitting: int | None = None,
-    frequency_step: float = 1.0,
-) -> Array:
+    frequency_step: float | int = 1.0,
+) -> Float[Array, " *grid_shape"]:
     """Compute the RMS acoustic pressure field of a transducer array.
 
     Calculates the radiation pattern (root-mean-square of acoustic pressure)
@@ -103,9 +340,7 @@ def pfield(
         element_splitting=element_splitting,
         frequency_step=frequency_step,
         _is_simus=False,
-        _rc=None,
-        _rx_delay=None,
-        _simus_df=None,
+        _simus_ctx=None,
     )
     return cast(Array, result)
 
@@ -133,12 +368,10 @@ def _pfield_core(
     element_splitting: int | None,
     frequency_step: float,
     _is_simus: bool,
-    _rc: Array | None,
-    _rx_delay: Array | None,
-    _simus_df: float | None,
+    _simus_ctx: _SimusContext | None,
 ) -> Array | tuple[Array, Array, Array]:
     """Core pfield implementation shared by standalone pfield and simus."""
-    xp: _ArrayNamespace = array_namespace(x, z, delays)  # type: ignore[assignment]
+    xp: _ArrayNamespace = array_namespace(x, z, delays)
 
     # Extract medium parameters
     c = medium.speed_of_sound
@@ -159,9 +392,7 @@ def _pfield_core(
 
     # Store original shape for output reshaping
     original_shape = x.shape
-    nx = 1
-    for s in x.shape:
-        nx *= s
+    nx = prod(x.shape)
 
     # Early return for empty grid
     if nx == 0:
@@ -188,9 +419,6 @@ def _pfield_core(
     apod = xp.where(nan_mask, xp.asarray(0.0), apod)
     delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
 
-    # Baffle type
-    non_rigid_baffle = baffle != BaffleType.RIGID
-
     # Element splitting
     if element_splitting is not None:
         n_sub = element_splitting
@@ -208,17 +436,7 @@ def _pfield_core(
     h = float(apex_offset)
 
     # Sub-element centroids (shape: n_elements, n_sub)
-    seg_length = element_width / n_sub
-    seg_offsets = xp.asarray(
-        [-element_width / 2.0 + seg_length / 2.0 + i * seg_length for i in range(n_sub)],
-        dtype=xp.float64,
-    )
-    # Broadcasting: (n_sub,) -> (1, n_sub), (n_elements,) -> (n_elements, 1)
-    seg_2d = xp.reshape(seg_offsets, (1, n_sub))
-    cos_the = xp.cos(the_1d)[:, None]  # (n_elements, 1)
-    sin_neg_the = xp.sin(-the_1d)[:, None]
-    xi = seg_2d * cos_the  # (n_elements, n_sub)
-    zi = seg_2d * sin_neg_the
+    xi, zi = _subelement_centroids(element_width, n_sub, the_1d, xp)
 
     # Out-of-field mask
     is_out = z_flat < 0
@@ -226,53 +444,23 @@ def _pfield_core(
         is_out = is_out | ((x_flat**2 + (z_flat + h) ** 2) <= radius_of_curvature**2)
 
     # Distances and angles (shape: nx, n_elements, n_sub)
-    # Broadcasting: x_flat (nx,) -> (nx, 1, 1)
-    #               xe (n_elements,) -> (1, n_elements, 1)
-    #               xi (n_elements, n_sub) -> (1, n_elements, n_sub)
-    dxi = x_flat[:, None, None] - xi[None, :, :] - xe[None, :, None]
-    dz_arr = z_flat[:, None, None] - zi[None, :, :] - ze[None, :, None]
-    d2 = dxi**2 + dz_arr**2
-
-    # r with clipping
-    r = xp.sqrt(d2)
-    small_d = xp.asarray(c / fc / 2.0)
-    r = xp.where(r < small_d, small_d, r)
-
-    # Angle relative to element normal
-    eps_sp = xp.asarray(1e-16)  # Small epsilon to avoid division by zero
-    sqrt_d2 = xp.sqrt(d2)
-    # Broadcasting: the_1d (n_elements,) -> (1, n_elements, 1)
-    theta_arr = xp.asin((dxi + eps_sp) / (sqrt_d2 + eps_sp)) - the_1d[None, :, None]
-    sin_theta = xp.sin(theta_arr)
+    r, sin_theta, theta_arr = _distances_and_angles(x_flat, z_flat, xi, zi, xe, ze, the_1d, c, fc, xp)
 
     # Frequency step
-    if _is_simus and _simus_df is not None:
-        df = _simus_df
+    if _is_simus and _simus_ctx is not None and _simus_ctx.df is not None:
+        df = _simus_ctx.df
     else:
         df = 1.0 / (float(xp.max(r)) / c + float(xp.max(delays_clean)))
         df = frequency_step * df
 
-    # Frequency samples
-    n_freq = int(2 * ceil(fc / df) + 1)
-    f = xp.linspace(0, 2 * fc, n_freq, dtype=xp.float64)
-    df = float(f[1])
-
-    # Keep only significant components (dB threshold)
-    w_all = xp.asarray(2.0 * pi) * f
-    s_mag = xp.abs(pulse_spectrum(w_all, fc, tx_n_wavelengths) * probe_spectrum(w_all, fc, bandwidth))
-    g_db = 20.0 * xp.log10(xp.asarray(1e-200) + s_mag / xp.max(s_mag))
-    above = g_db > db_thresh
-    idx_first, idx_last = _first_last_true(xp, above)
-    all_indices = xp.arange(f.shape[0])
-    freq_mask = (all_indices >= idx_first) & (all_indices <= idx_last)
-    idx_out = freq_mask
-
-    f_sel = f[freq_mask]
+    # Select frequencies
+    freq_plan = _select_frequencies(fc, bandwidth, tx_n_wavelengths, db_thresh, df, xp)
+    f_sel = freq_plan.f_sel
     n_sampling = f_sel.shape[0]
-
-    w_f = xp.asarray(2.0 * pi) * f_sel
-    pulse_spect = pulse_spectrum(w_f, fc, tx_n_wavelengths)
-    probe_spect = probe_spectrum(w_f, fc, bandwidth)
+    pulse_spect = freq_plan.pulse_spect
+    probe_spect = freq_plan.probe_spect
+    idx_out = freq_plan.freq_mask
+    df = freq_plan.df
 
     # Initialization
     rp_accum = xp.asarray(0.0, dtype=xp.float64)
@@ -280,42 +468,16 @@ def _pfield_core(
         spect_rows = []  # Accumulate rows in a list, stack at end
 
     # Obliquity factor
-    if non_rigid_baffle:
-        if baffle == BaffleType.SOFT:
-            obli_fac = xp.cos(theta_arr)
-        else:
-            cos_th = xp.cos(theta_arr)
-            obli_fac = cos_th / (cos_th + float(baffle))
-    else:
-        obli_fac = xp.ones(theta_arr.shape, dtype=xp.float64)
-
-    obli_fac = xp.where(
-        xp.abs(theta_arr) >= xp.asarray(pi / 2),
-        eps_sp,
-        obli_fac,
-    )
+    obli_fac = _obliquity_factor(theta_arr, baffle, xp)
 
     # Exponential arrays
     f0 = float(f_sel[0])
-    kw0 = 2.0 * pi * f0 / c
-    kwa0 = alpha_db / 8.69 * f0 / 1e6 * 1e2
-
-    # exp(-kwa*r + 1j*mod(kw*r, 2pi))
-    kw0_r = xp.asarray(kw0) * r
-    two_pi = xp.asarray(2.0 * pi)
-    phase_mod = kw0_r - two_pi * xp.floor(kw0_r / two_pi)
-    exp_arr = xp.exp(xp.asarray(-kwa0) * r) * (xp.cos(phase_mod) + xp.asarray(1j) * xp.sin(phase_mod))
-
-    dkw = 2.0 * pi * df / c
-    dkwa = alpha_db / 8.69 * df / 1e6 * 1e2
-    exp_df = xp.exp(xp.asarray(-dkwa + 1j * dkw) * r)
-
-    # Incorporate obliquity / sqrt(r) (2D, no elevation)
-    exp_arr = exp_arr * obli_fac / xp.sqrt(r)
+    exp_arr, exp_df = _init_exponentials(f0, c, alpha_db, r, obli_fac, df, xp)
 
     # Simplified directivity (center-frequency only)
     if not full_frequency_directivity:
         kc = 2.0 * pi * fc / c
+        seg_length = element_width / n_sub
         # Use unnormalized sinc: sinc(x/pi) from array_api_extra
         sinc_arg = xp.asarray(kc * seg_length / 2.0) * sin_theta / pi
         # array-api-extra does not have type interoperability
@@ -361,16 +523,16 @@ def _pfield_core(
 
         # Accumulate
         if _is_simus:
-            if _rc is None:
-                msg = "_rc must be provided when _is_simus=True"
+            if _simus_ctx is None or _simus_ctx.rc is None:
+                msg = "_simus_ctx.rc must be provided when _is_simus=True"
                 raise ValueError(msg)
             spect_k = probe_spect[k]
             rp_flat = xp.reshape(rp_k, (-1,))
-            rc_flat = xp.reshape(_rc, (-1,))
+            rc_flat = xp.reshape(_simus_ctx.rc, (-1,))
             weighted = xp.reshape(rp_flat * rc_flat, (1, -1))
             row = spect_k * xp.reshape(weighted @ rp_mono, (-1,))
-            if _rx_delay is not None:
-                rx_exp = xp.exp(xp.asarray(1j * kw * c) * _rx_delay)
+            if _simus_ctx.rx_delay is not None:
+                rx_exp = xp.exp(xp.asarray(1j * kw * c) * _simus_ctx.rx_delay)
                 row = row * rx_exp
             spect_rows.append(row)
         else:
