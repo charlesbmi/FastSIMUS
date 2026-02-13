@@ -171,8 +171,8 @@ def _pfield_core(
         return xp.zeros((0,), dtype=xp.float64)
 
     # Flatten to 1D
-    x_flat = xp.reshape(x, (-1,)) if x.ndim > 1 else x
-    z_flat = xp.reshape(z, (-1,)) if z.ndim > 1 else z
+    x_flat = xp.reshape(x, (-1,))
+    z_flat = xp.reshape(z, (-1,))
 
     # TX apodization
     if tx_apodization is None:
