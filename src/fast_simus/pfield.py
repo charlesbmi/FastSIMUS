@@ -323,8 +323,9 @@ def _pfield_core(
         kc = 2.0 * pi * fc / c
         # Use unnormalized sinc: sinc(x/pi) from array_api_extra
         sinc_arg = xp.asarray(kc * seg_length / 2.0) * sin_theta / pi
-        dir_arr = xpx.sinc(sinc_arg, xp=xp)  # type: ignore[arg-type]
-        exp_arr = exp_arr * dir_arr  # type: ignore[operator]
+        # array-api-extra does not have type interoperability
+        dir_arr = xpx.sinc(sinc_arg, xp=xp)  # ty: ignore[invalid-argument-type]
+        exp_arr = exp_arr * cast(Array, dir_arr)
 
     # --- Frequency loop ---
 
@@ -343,7 +344,7 @@ def _pfield_core(
 
         # Single-element radiation patterns: average over sub-elements
         if full_frequency_directivity:
-            rp_mono = _mean_last(xp, dir_k * exp_arr)  # type: ignore[operator]
+            rp_mono = _mean_last(xp, dir_k * exp_arr)  # ty: ignore[unsupported-operator]
         elif n_sub > 1:
             rp_mono = _mean_last(xp, exp_arr)
         else:

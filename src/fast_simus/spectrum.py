@@ -44,7 +44,8 @@ def pulse_spectrum(
     xp = array_namespace(angular_freq)
     arg1 = pulse_duration_s * (angular_freq - angular_freq_center) / 2.0 / pi
     arg2 = pulse_duration_s * (angular_freq + angular_freq_center) / 2.0 / pi
-    return 1j * (xpx.sinc(arg1, xp=xp) - xpx.sinc(arg2, xp=xp))
+    # array-api-extra does not have type interoperability
+    return 1j * (xpx.sinc(arg1, xp=xp) - xpx.sinc(arg2, xp=xp))  # ty: ignore[invalid-argument-type, invalid-return-type]
 
 
 def probe_spectrum(
