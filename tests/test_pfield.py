@@ -220,13 +220,64 @@ def _fastsimus_pfield(
 # PyMUST uses float32/complex64 precision throughout its computation.
 # FastSIMUS uses native backend precision (typically float64/complex128),
 # which produces different but more accurate results. The numerical differences
-# arise from:
-# 1. Different rounding behavior in iterative exponential calculations
-# 2. Slightly different code paths (Array API vs raw NumPy operations)
-# 3. Higher precision accumulation in float64 vs float32
-# A tolerance of 10% captures these systematic precision differences while
-# ensuring the physical pressure field patterns match.
-_PYMUST_RTOL = 0.1
+# arise from float32 rounding in propagation exponentials. These are small in
+# absolute terms but large relative errors in sidelobe regions where pressure
+# is ~1/1000 of peak. We use a peak-normalized metric instead of rtol.
+
+
+def _compute_peak_normalized_error(actual: np.ndarray, expected: np.ndarray) -> tuple[float, float]:
+    """Compute peak-normalized max error and report in dB.
+
+    Args:
+        actual: Computed pressure field.
+        expected: Reference pressure field.
+
+    Returns:
+        Tuple of (max_error_fraction, max_error_db) where:
+        - max_error_fraction is max(|actual - expected|) / peak
+        - max_error_db is 20*log10(max_error_fraction)
+    """
+    peak = max(np.max(np.abs(actual)), np.max(np.abs(expected)))
+    if peak == 0:
+        return 0.0, -np.inf
+    max_error = np.max(np.abs(actual - expected))
+    max_error_fraction = max_error / peak
+    max_error_db = 20 * np.log10(max_error_fraction) if max_error_fraction > 0 else -np.inf
+    return max_error_fraction, max_error_db
+
+
+def _assert_pfield_close(actual: np.ndarray, expected: np.ndarray, atol_peak: float = 1e-3, desc: str = "") -> None:
+    """Assert pressure fields match using peak-normalized metric.
+
+    Compares fields as fraction of peak value, so atol_peak=1e-3 means
+    all differences are within -60dB of the peak pressure. This is more
+    appropriate than rtol for pressure fields where sidelobe levels can
+    be 1/1000 of the peak.
+
+    Args:
+        actual: Computed pressure field.
+        expected: Reference pressure field.
+        atol_peak: Absolute tolerance as fraction of peak (default: 1e-3 = -60dB).
+        desc: Description for error message.
+    """
+    peak = max(np.max(np.abs(actual)), np.max(np.abs(expected)))
+    if peak == 0:
+        return
+
+    max_error_fraction, max_error_db = _compute_peak_normalized_error(actual, expected)
+
+    # Print diagnostic info
+    if desc:
+        print(f"\n{desc}: max error = {max_error_db:.1f} dB ({max_error_fraction:.2e} of peak)")
+
+    # Normalize and compare
+    np.testing.assert_allclose(
+        actual / peak,
+        expected / peak,
+        atol=atol_peak,
+        rtol=0,
+        err_msg=f"{desc}: max error {max_error_db:.1f} dB exceeds tolerance {20 * np.log10(atol_peak):.1f} dB",
+    )
 
 
 @requires_pymust
@@ -237,16 +288,16 @@ class TestPfieldMatchesPyMUST:
         """P4-2v focused beam must match PyMUST."""
         ref = p4_2v_focused_reference
         fastsimus_rp = _fastsimus_pfield(P4_2v, ref["delays"], ref["positions"])
-        np.testing.assert_allclose(fastsimus_rp, ref["rp"], rtol=_PYMUST_RTOL, atol=1e-10)
+        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=2.5e-3, desc="P4-2v focused")
 
     def test_l11_5v_plane_matches(self, l11_5v_plane_reference):
         """L11-5v plane wave must match PyMUST."""
         ref = l11_5v_plane_reference
         fastsimus_rp = _fastsimus_pfield(L11_5v, ref["delays"], ref["positions"])
-        np.testing.assert_allclose(fastsimus_rp, ref["rp"], rtol=_PYMUST_RTOL, atol=1e-10)
+        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=2.5e-3, desc="L11-5v plane")
 
     def test_c5_2v_focused_matches(self, c5_2v_focused_reference):
         """C5-2v convex focused beam must match PyMUST."""
         ref = c5_2v_focused_reference
         fastsimus_rp = _fastsimus_pfield(C5_2v, ref["delays"], ref["positions"])
-        np.testing.assert_allclose(fastsimus_rp, ref["rp"], rtol=_PYMUST_RTOL, atol=1e-10)
+        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=2.5e-3, desc="C5-2v focused")
