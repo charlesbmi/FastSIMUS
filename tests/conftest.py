@@ -3,6 +3,7 @@
 import contextlib
 import sys
 
+import array_api_strict as xp_strict
 import pytest
 
 # Try to import array backends
@@ -19,13 +20,6 @@ with contextlib.suppress(ImportError):
     import jax.numpy as jnp
 
     HAS_JAX = True
-
-HAS_ARRAY_API_STRICT = False
-array_api_strict = None
-with contextlib.suppress(ImportError):
-    import array_api_strict
-
-    HAS_ARRAY_API_STRICT = True
 
 # PyMUST has SyntaxError on Python 3.14+ due to invalid escape sequences
 PYMUST_AVAILABLE = False
@@ -47,12 +41,11 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(
     params=[
-        pytest.param(np, id="numpy", marks=pytest.mark.skipif(not HAS_NUMPY, reason="NumPy not available")),
         pytest.param(
-            array_api_strict,
+            xp_strict,
             id="array-api-strict",
-            marks=pytest.mark.skipif(not HAS_ARRAY_API_STRICT, reason="array-api-strict not available"),
         ),
+        pytest.param(np, id="numpy", marks=pytest.mark.skipif(not HAS_NUMPY, reason="NumPy not available")),
         pytest.param(
             jnp,
             id="jax",
