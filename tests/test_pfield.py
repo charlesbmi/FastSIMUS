@@ -124,16 +124,25 @@ def c5_2v_focused_reference() -> dict[str, Any]:
 class TestPyMUSTReference:
     """Validate that PyMUST reference data is sane."""
 
-    def test_p4_2v_focused_shape_and_positivity(self, p4_2v_focused_reference):
-        """P4-2v focused: output has expected shape and all-positive values."""
-        rp = p4_2v_focused_reference["rp"]
+    @pytest.mark.parametrize(
+        "ref_fixture",
+        ["p4_2v_focused_reference", "l11_5v_plane_reference", "c5_2v_focused_reference"],
+    )
+    def test_shape_and_positivity(self, ref_fixture, request):
+        """Reference output has expected shape and all-positive values."""
+        ref = request.getfixturevalue(ref_fixture)
+        rp = ref["rp"]
         assert rp.shape == (GRID_SIZE, GRID_SIZE)
         assert np.all(rp >= 0), "RMS pressure must be non-negative"
         assert np.max(rp) > 0, "Pressure field should not be all zeros"
 
-    def test_p4_2v_focused_peak_near_focus(self, p4_2v_focused_reference):
-        """P4-2v focused: peak pressure should be near the focal point."""
-        ref = p4_2v_focused_reference
+    @pytest.mark.parametrize(
+        "ref_fixture",
+        ["p4_2v_focused_reference", "c5_2v_focused_reference"],
+    )
+    def test_peak_near_focus(self, ref_fixture, request):
+        """Peak pressure should be near the focal point (focused beams only)."""
+        ref = request.getfixturevalue(ref_fixture)
         rp = ref["rp"]
         x_grid, z_grid = ref["x_grid"], ref["z_grid"]
         x0, z0 = ref["focus"]
@@ -144,34 +153,6 @@ class TestPyMUSTReference:
         z_peak = z_grid[peak_idx]
 
         # Peak should be within 1cm of the intended focus
-        dist = np.sqrt((x_peak - x0) ** 2 + (z_peak - z0) ** 2)
-        assert dist < 0.01, f"Peak at ({x_peak:.4f}, {z_peak:.4f}), focus at ({x0}, {z0}), dist={dist:.4f}"
-
-    def test_l11_5v_plane_shape_and_positivity(self, l11_5v_plane_reference):
-        """L11-5v plane wave: output has expected shape."""
-        rp = l11_5v_plane_reference["rp"]
-        assert rp.shape == (GRID_SIZE, GRID_SIZE)
-        assert np.all(rp >= 0)
-        assert np.max(rp) > 0
-
-    def test_c5_2v_focused_shape_and_positivity(self, c5_2v_focused_reference):
-        """C5-2v convex focused: output has expected shape."""
-        rp = c5_2v_focused_reference["rp"]
-        assert rp.shape == (GRID_SIZE, GRID_SIZE)
-        assert np.all(rp >= 0)
-        assert np.max(rp) > 0
-
-    def test_c5_2v_focused_peak_near_focus(self, c5_2v_focused_reference):
-        """C5-2v focused: peak should be near the focal point."""
-        ref = c5_2v_focused_reference
-        rp = ref["rp"]
-        x_grid, z_grid = ref["x_grid"], ref["z_grid"]
-        x0, z0 = ref["focus"]
-
-        peak_idx = np.unravel_index(np.argmax(rp), rp.shape)
-        x_peak = x_grid[peak_idx]
-        z_peak = z_grid[peak_idx]
-
         dist = np.sqrt((x_peak - x0) ** 2 + (z_peak - z0) ** 2)
         assert dist < 0.01, f"Peak at ({x_peak:.4f}, {z_peak:.4f}), focus at ({x0}, {z0}), dist={dist:.4f}"
 
@@ -283,20 +264,16 @@ def _assert_pfield_close(actual: np.ndarray, expected: np.ndarray, atol_peak: fl
 class TestPfieldMatchesPyMUST:
     """Compare FastSIMUS pfield output against PyMUST reference."""
 
-    def test_p4_2v_focused_matches(self, p4_2v_focused_reference):
-        """P4-2v focused beam must match PyMUST."""
-        ref = p4_2v_focused_reference
-        fastsimus_rp = _fastsimus_pfield(P4_2v, ref["delays"], ref["positions"])
-        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=_PYMUST_ATOL_PEAK, desc="P4-2v focused")
-
-    def test_l11_5v_plane_matches(self, l11_5v_plane_reference):
-        """L11-5v plane wave must match PyMUST."""
-        ref = l11_5v_plane_reference
-        fastsimus_rp = _fastsimus_pfield(L11_5v, ref["delays"], ref["positions"])
-        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=_PYMUST_ATOL_PEAK, desc="L11-5v plane")
-
-    def test_c5_2v_focused_matches(self, c5_2v_focused_reference):
-        """C5-2v convex focused beam must match PyMUST."""
-        ref = c5_2v_focused_reference
-        fastsimus_rp = _fastsimus_pfield(C5_2v, ref["delays"], ref["positions"])
-        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=_PYMUST_ATOL_PEAK, desc="C5-2v focused")
+    @pytest.mark.parametrize(
+        ("preset_fn", "ref_fixture", "desc"),
+        [
+            (P4_2v, "p4_2v_focused_reference", "P4-2v focused"),
+            (L11_5v, "l11_5v_plane_reference", "L11-5v plane"),
+            (C5_2v, "c5_2v_focused_reference", "C5-2v focused"),
+        ],
+    )
+    def test_matches_pymust(self, preset_fn, ref_fixture, desc, request):
+        """FastSIMUS pfield must match PyMUST reference."""
+        ref = request.getfixturevalue(ref_fixture)
+        fastsimus_rp = _fastsimus_pfield(preset_fn, ref["delays"], ref["positions"])
+        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=_PYMUST_ATOL_PEAK, desc=desc)

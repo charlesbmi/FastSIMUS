@@ -14,9 +14,11 @@ class TestPulseSpectrumMatchesPyMUST:
     """Compare pulse_spectrum against PyMUST Param.getPulseSpectrumFunction."""
 
     @pytest.mark.parametrize("probe_name", ["P4-2v", "L11-5v", "C5-2v"])
-    def test_pulse_spectrum_matches(self, probe_name):
+    @pytest.mark.parametrize("tx_n_wavelengths", [1.0, 2.0])
+    def test_pulse_spectrum_matches(self, probe_name, tx_n_wavelengths):
         """Pulse spectrum should match PyMUST for standard probes."""
         pymust_param = pymust.getparam(probe_name)
+        pymust_param.TXnow = tx_n_wavelengths
 
         # PyMUST reference (no chirp)
         pymust_fn = pymust_param.getPulseSpectrumFunction(None)
@@ -29,22 +31,9 @@ class TestPulseSpectrumMatchesPyMUST:
         # FastSIMUS implementation
         # PyMUST bandwidth is in %, FastSIMUS uses fraction - but pulse spectrum
         # only depends on fc and TXnow, not bandwidth
-        our_result = pulse_spectrum(angular_freqs, pymust_param.fc, tx_n_wavelengths=1.0)
+        our_result = pulse_spectrum(angular_freqs, pymust_param.fc, tx_n_wavelengths=tx_n_wavelengths)
 
         np.testing.assert_allclose(our_result, pymust_result, rtol=1e-10, atol=1e-14)
-
-    def test_pulse_spectrum_txnow_2(self):
-        """Pulse spectrum with TXnow=2 should match PyMUST."""
-        pymust_param = pymust.getparam("P4-2v")
-        pymust_param.TXnow = 2
-
-        pymust_fn = pymust_param.getPulseSpectrumFunction(None)
-
-        angular_freqs = 2 * np.pi * np.linspace(0, 2 * pymust_param.fc, 500)  # type: ignore[operator]
-
-        np.testing.assert_allclose(
-            pulse_spectrum(angular_freqs, pymust_param.fc, tx_n_wavelengths=2.0), pymust_fn(angular_freqs), rtol=1e-10
-        )
 
 
 class TestProbeSpectrumMatchesPyMUST:

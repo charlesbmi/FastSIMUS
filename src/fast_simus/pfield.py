@@ -1,7 +1,8 @@
 """Pressure field computation for ultrasound transducer arrays.
 
-Computes the RMS acoustic pressure field radiated by a uniform linear or
-convex array. The model uses Fraunhofer (far-field) equations in the x-z plane.
+Implements PFIELD algorithm for simulating ultrasound beam patterns from
+phased/linear/convex arrays using Fraunhofer (far-field) approximation in
+the azimuthal plane and Fresnel (paraxial) approximation in elevation.
 
 All functions are Array API compliant and work with NumPy, JAX, CuPy backends.
 
@@ -289,6 +290,36 @@ def pfield(
     Calculates the radiation pattern (root-mean-square of acoustic pressure)
     for a uniform linear or convex array whose elements are excited at
     different time delays. 2-D computation only (no elevation focusing).
+
+    Algorithm
+    ---------
+    Implements Garcia 2022 Eq. 22, computing acoustic pressure by superposing
+    contributions from all array elements:
+
+        P(X,w,t) ~ P_TX(w) exp(-iwt) Sum_n W_n [exp(ikr_n)/r_n] D(theta_n,k) exp(iw*tau_n)
+
+    Where:
+      - P_TX(w): Transmit pulse spectrum (windowed sinusoid x transducer response)
+      - r_n: Distance from sub-element n to field point
+      - D(theta_n,k): Element directivity = sinc(kb*sin(theta)) x obliquity_factor
+      - W_n: Transmit apodization weights
+      - tau_n: Transmit time delays for focusing/steering
+
+    Wide elements are split into nu sub-elements where nu = ceil(width/lambda_min)
+    to satisfy far-field conditions. The RMS field is computed by integrating
+    |P(X,w)|^2 over the frequency band (Garcia 2022 Eq. 41-42):
+
+        P_RMS(X) = sqrt[Integral |P(X,w)|^2 dw] ~ sqrt[Delta_w Sum |P(X,w_j)|^2]
+
+    Frequency sampling uses adaptive step Delta_w to avoid phase aliasing, ensuring
+    (Delta_w/c)*r_max + Delta_w*tau_max < 2*pi everywhere in the region of interest.
+
+    Implementation Notes
+    --------------------
+    - **2D mode**: Uses 1/sqrt(r) geometric spreading (no elevation focusing)
+    - **Attenuation**: Frequency-linear absorption exp(-alpha*f*r) with alpha in dB/cm/MHz
+    - **Baffle**: Obliquity factor depends on boundary condition (rigid/soft/custom)
+    - **Directivity**: Can be frequency-dependent (slower) or center-frequency only
 
     Args:
         positions: Grid positions in meters. Shape ``(*grid_shape, 2)`` where
