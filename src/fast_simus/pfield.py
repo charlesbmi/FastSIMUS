@@ -22,7 +22,7 @@ from typing import NamedTuple
 
 import array_api_extra as xpx
 from beartype import beartype as typechecker
-from jaxtyping import Float, jaxtyped
+from jaxtyping import Complex, Float, jaxtyped
 
 from fast_simus.medium_params import MediumParams
 from fast_simus.spectrum import probe_spectrum, pulse_spectrum
@@ -47,22 +47,23 @@ class _FrequencyPlan(NamedTuple):
     freq_step: float  # Frequency step in Hz
 
 
+@jaxtyped(typechecker=typechecker)
 def _subelement_centroids(
     element_width: float,
     n_sub: int,
-    theta_e: Array,
+    theta_e: Float[Array, " n_elements"],
     xp: _ArrayNamespace,
-) -> tuple[Array, Array]:
+) -> tuple[Float[Array, "n_elements n_sub"], Float[Array, "n_elements n_sub"]]:
     """Compute sub-element centroid positions relative to element centers.
 
     Args:
         element_width: Element width in meters.
         n_sub: Number of sub-elements per element.
-        theta_e: Element angular positions in radians. Shape (n_elements,).
+        theta_e: Element angular positions in radians.
         xp: Array namespace.
 
     Returns:
-        Tuple of (subelement_dx, subelement_dz) each with shape (n_elements, n_sub):
+        Tuple of (subelement_dx, subelement_dz):
         - subelement_dx: Lateral positions of sub-element centroids.
         - subelement_dz: Axial positions of sub-element centroids.
     """
@@ -73,47 +74,51 @@ def _subelement_centroids(
     )
     # Broadcasting: (n_sub,) -> (1, n_sub), (n_elements,) -> (n_elements, 1)
     seg_offsets_2d = xp.reshape(seg_offsets, (1, n_sub))
-    cos_theta = xp.cos(theta_e)[:, None]  # (n_elements, 1)
+    cos_theta = xp.cos(theta_e)[:, None]
     sin_neg_theta = xp.sin(-theta_e)[:, None]
-    subelement_dx = seg_offsets_2d * cos_theta  # (n_elements, n_sub)
+    subelement_dx = seg_offsets_2d * cos_theta
     subelement_dz = seg_offsets_2d * sin_neg_theta
     return subelement_dx, subelement_dz
 
 
+@jaxtyped(typechecker=typechecker)
 def _distances_and_angles(
-    x_flat: Array,
-    z_flat: Array,
-    subelement_dx: Array,
-    subelement_dz: Array,
-    element_x: Array,
-    element_z: Array,
-    theta_e: Array,
+    x_flat: Float[Array, " n_points"],
+    z_flat: Float[Array, " n_points"],
+    subelement_dx: Float[Array, "n_elements n_sub"],
+    subelement_dz: Float[Array, "n_elements n_sub"],
+    element_x: Float[Array, " n_elements"],
+    element_z: Float[Array, " n_elements"],
+    theta_e: Float[Array, " n_elements"],
     speed_of_sound: float,
     freq_center: float,
     xp: _ArrayNamespace,
-) -> tuple[Array, Array, Array]:
+) -> tuple[
+    Float[Array, "n_points n_elements n_sub"],
+    Float[Array, "n_points n_elements n_sub"],
+    Float[Array, "n_points n_elements n_sub"],
+]:
     """Compute distances and angles from grid points to sub-elements.
 
     Args:
-        x_flat: Flattened x-coordinates of grid points. Shape (nx,).
-        z_flat: Flattened z-coordinates of grid points. Shape (nx,).
-        subelement_dx: Sub-element lateral positions. Shape (n_elements, n_sub).
-        subelement_dz: Sub-element axial positions. Shape (n_elements, n_sub).
-        element_x: Element lateral positions. Shape (n_elements,).
-        element_z: Element axial positions. Shape (n_elements,).
-        theta_e: Element angular positions. Shape (n_elements,).
+        x_flat: Flattened x-coordinates of grid points.
+        z_flat: Flattened z-coordinates of grid points.
+        subelement_dx: Sub-element lateral positions.
+        subelement_dz: Sub-element axial positions.
+        element_x: Element lateral positions.
+        element_z: Element axial positions.
+        theta_e: Element angular positions.
         speed_of_sound: Speed of sound in m/s.
         freq_center: Center frequency in Hz.
         xp: Array namespace.
 
     Returns:
         Tuple of (distances, sin_theta, theta_arr):
-        - distances: Distances with shape (nx, n_elements, n_sub).
-        - sin_theta: Sine of angles with shape (nx, n_elements, n_sub).
-        - theta_arr: Angles relative to element normal with shape (nx, n_elements, n_sub).
+        - distances: Distances from grid points to sub-elements.
+        - sin_theta: Sine of angles relative to element normal.
+        - theta_arr: Angles relative to element normal.
     """
-    # Distances and angles (shape: nx, n_elements, n_sub)
-    # Broadcasting: x_flat (nx,) -> (nx, 1, 1)
+    # Broadcasting: x_flat (n_points,) -> (n_points, 1, 1)
     #               element_x (n_elements,) -> (1, n_elements, 1)
     #               subelement_dx (n_elements, n_sub) -> (1, n_elements, n_sub)
     delta_x = x_flat[:, None, None] - subelement_dx[None, :, :] - element_x[None, :, None]
@@ -181,20 +186,21 @@ def _select_frequencies(
     return _FrequencyPlan(selected_freqs, freq_mask, pulse_spect, probe_spect, freq_step)
 
 
+@jaxtyped(typechecker=typechecker)
 def _obliquity_factor(
-    theta_arr: Array,
+    theta_arr: Float[Array, "n_points n_elements n_sub"],
     baffle: BaffleType | float,
     xp: _ArrayNamespace,
-) -> Array:
+) -> Float[Array, "n_points n_elements n_sub"]:
     """Compute obliquity factor based on baffle type.
 
     Args:
-        theta_arr: Angles relative to element normal. Shape (nx, n_elements, n_sub).
+        theta_arr: Angles relative to element normal.
         baffle: Baffle type or impedance ratio.
         xp: Array namespace.
 
     Returns:
-        Obliquity factor with shape (nx, n_elements, n_sub).
+        Obliquity factor.
     """
     non_rigid_baffle = baffle != BaffleType.RIGID
     epsilon = xp.asarray(1e-16)
@@ -217,30 +223,34 @@ def _obliquity_factor(
     return obliquity_factor
 
 
+@jaxtyped(typechecker=typechecker)
 def _init_exponentials(
     freq_start: float,
     speed_of_sound: float,
     alpha_db: float,
-    distances: Array,
-    obliquity_factor: Array,
+    distances: Float[Array, "n_points n_elements n_sub"],
+    obliquity_factor: Float[Array, "n_points n_elements n_sub"],
     freq_step: float,
     xp: _ArrayNamespace,
-) -> tuple[Array, Array]:
+) -> tuple[
+    Complex[Array, "n_points n_elements n_sub"],
+    Complex[Array, "n_points n_elements n_sub"],
+]:
     """Initialize exponential arrays for frequency loop.
 
     Args:
         freq_start: Initial frequency in Hz.
         speed_of_sound: Speed of sound in m/s.
         alpha_db: Attenuation coefficient in dB/cm/MHz.
-        distances: Distances. Shape (nx, n_elements, n_sub).
-        obliquity_factor: Obliquity factor. Shape (nx, n_elements, n_sub).
+        distances: Distances.
+        obliquity_factor: Obliquity factor.
         freq_step: Frequency step in Hz.
         xp: Array namespace.
 
     Returns:
         Tuple of (phase_decay, phase_decay_step):
-        - phase_decay: Initial exponential array with shape (nx, n_elements, n_sub).
-        - phase_decay_step: Exponential increment for frequency step, same shape.
+        - phase_decay: Initial complex exponential array.
+        - phase_decay_step: Complex exponential increment per frequency step.
     """
     wavenumber_init = 2.0 * pi * freq_start / speed_of_sound
     attenuation_wavenum = alpha_db / _NEPER_TO_DB * freq_start / 1e6 * 1e2
