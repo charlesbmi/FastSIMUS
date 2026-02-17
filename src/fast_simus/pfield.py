@@ -227,7 +227,7 @@ def _obliquity_factor(
 def _init_exponentials(
     freq_start: float,
     speed_of_sound: float,
-    alpha_db: float,
+    attenuation: float,
     distances: Float[Array, "n_points n_elements n_sub"],
     obliquity_factor: Float[Array, "n_points n_elements n_sub"],
     freq_step: float,
@@ -241,7 +241,7 @@ def _init_exponentials(
     Args:
         freq_start: Initial frequency in Hz.
         speed_of_sound: Speed of sound in m/s.
-        alpha_db: Attenuation coefficient in dB/cm/MHz.
+        attenuation: Attenuation coefficient in dB/cm/MHz.
         distances: Distances.
         obliquity_factor: Obliquity factor.
         freq_step: Frequency step in Hz.
@@ -253,7 +253,7 @@ def _init_exponentials(
         - phase_decay_step: Complex exponential increment per frequency step.
     """
     wavenumber_init = 2.0 * pi * freq_start / speed_of_sound
-    attenuation_wavenum = alpha_db / _NEPER_TO_DB * freq_start / 1e6 * 1e2
+    attenuation_wavenum = attenuation / _NEPER_TO_DB * freq_start / 1e6 * 1e2
 
     # exp(-kwa*distances + 1j*mod(kw*distances, 2pi))
     kw0_r = xp.asarray(wavenumber_init) * distances
@@ -264,7 +264,7 @@ def _init_exponentials(
     )
 
     wavenumber_step = 2.0 * pi * freq_step / speed_of_sound
-    attenuation_step = alpha_db / _NEPER_TO_DB * freq_step / 1e6 * 1e2
+    attenuation_step = attenuation / _NEPER_TO_DB * freq_step / 1e6 * 1e2
     phase_decay_step = xp.exp(xp.asarray(-attenuation_step + 1j * wavenumber_step) * distances)
 
     # Incorporate obliquity / sqrt(distances) (2D, no elevation)
@@ -378,13 +378,14 @@ def pfield(
     )
 
 
+@jaxtyped(typechecker=typechecker)
 def _pfield_core(
-    x: Array,
-    z: Array,
-    delays: Array,
-    element_x: Array,
-    element_z: Array,
-    theta_e: Array | None,
+    x: Float[Array, "*grid_shape"],
+    z: Float[Array, "*grid_shape"],
+    delays: Float[Array, " n_elements"],
+    element_x: Float[Array, " n_elements"],
+    element_z: Float[Array, " n_elements"],
+    theta_e: Float[Array, " n_elements"] | None,
     apex_offset: float,
     fc: float,
     element_width: float,
@@ -394,13 +395,13 @@ def _pfield_core(
     radius_of_curvature: float,
     medium: MediumParams,
     *,
-    tx_apodization: Array | None,
+    tx_apodization: Float[Array, " n_elements"] | None,
     tx_n_wavelengths: float,
     db_thresh: float,
     full_frequency_directivity: bool,
     element_splitting: int | None,
     frequency_step: float,
-) -> Array:
+) -> Float[Array, "*grid_shape"]:
     """Core pfield implementation computing RMS pressure field.
 
     When SIMUS support is added, the per-frequency accumulation logic
@@ -413,7 +414,7 @@ def _pfield_core(
 
     # Extract medium parameters
     speed_of_sound = medium.speed_of_sound
-    alpha_db = medium.attenuation
+    attenuation = medium.attenuation
 
     # Validate inputs
     if x.shape != z.shape:
@@ -502,7 +503,7 @@ def _pfield_core(
     # Exponential arrays
     freq_start = float(selected_freqs[0])
     phase_decay, phase_decay_step = _init_exponentials(
-        freq_start, speed_of_sound, alpha_db, distances, obliquity_factor, df, xp
+        freq_start, speed_of_sound, attenuation, distances, obliquity_factor, df, xp
     )
 
     # Simplified directivity (center-frequency only)
@@ -513,7 +514,7 @@ def _pfield_core(
         sinc_arg = xp.asarray(center_wavenumber * seg_length / 2.0) * sin_theta / pi
         # array-api-extra does not have type interoperability
         directivity = xpx.sinc(sinc_arg, xp=xp)  # type: ignore[arg-type]
-        phase_decay = phase_decay * directivity  # type: ignore[assignment]
+        phase_decay = phase_decay * directivity
 
     # Frequency loop
     for freq_idx in range(n_sampling):
@@ -531,7 +532,7 @@ def _pfield_core(
 
         # Single-element radiation patterns: average over sub-elements
         if full_frequency_directivity:
-            element_pattern = xp.mean(directivity_k * phase_decay, axis=-1)  # ty: ignore[unsupported-operator]
+            element_pattern = xp.mean(directivity_k * phase_decay, axis=-1)
         elif n_sub > 1:
             element_pattern = xp.mean(phase_decay, axis=-1)
         else:
