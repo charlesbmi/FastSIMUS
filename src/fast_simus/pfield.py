@@ -402,15 +402,6 @@ def _pfield_core(
     speed_of_sound = medium.speed_of_sound
     attenuation = medium.attenuation
 
-    # Validate inputs
-    if delays.ndim != 1:
-        msg = f"delays must be 1-D, got shape {delays.shape}"
-        raise ValueError(msg)
-
-    if delays.shape[0] != n_elements:
-        msg = f"delays has {delays.shape[0]} elements, expected {n_elements}"
-        raise ValueError(msg)
-
     # Store original shape for output reshaping
     original_shape = point_positions.shape[:-1]
     n_points = prod(point_positions.shape[:-1])
@@ -427,9 +418,6 @@ def _pfield_core(
         apodization = xp.ones(n_elements, dtype=xp.float64)
     else:
         apodization = xp.asarray(tx_apodization, dtype=xp.float64)
-        if apodization.ndim != 1 or apodization.shape[0] != n_elements:
-            msg = f"tx_apodization must have shape ({n_elements},), got {apodization.shape}"
-            raise ValueError(msg)
 
     # Zero apodization where delays are NaN; replace NaN delays with 0
     nan_mask = xp.isnan(delays)
