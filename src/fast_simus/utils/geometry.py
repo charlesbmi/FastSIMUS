@@ -22,8 +22,7 @@ def element_positions(
     radius: float,
     xp: _ArrayNamespace,
 ) -> tuple[
-    Float[Array, " n_elements"],
-    Float[Array, " n_elements"],
+    Float[Array, "n_elements 2"],
     Float[Array, " n_elements"] | None,
     float,
 ]:
@@ -41,9 +40,9 @@ def element_positions(
         xp: Array namespace for creating arrays in the desired backend.
 
     Returns:
-        Tuple of (x_positions_m, z_positions_m, theta_rad, apex_offset_m):
-        - x_positions_m: Array of x-coordinates in meters. Shape (n_elements,).
-        - z_positions_m: Array of z-coordinates in meters. Shape (n_elements,).
+        Tuple of (positions, theta_rad, apex_offset_m):
+        - positions: Array of (x, z) coordinates in meters. Shape (n_elements, 2).
+          positions[:, 0] is lateral (x), positions[:, 1] is axial (z).
         - theta_rad: Array of angular positions in radians for convex arrays,
           None for linear arrays. Shape (n_elements,) or None.
         - apex_offset_m: Distance from array center to arc apex in meters.
@@ -93,4 +92,6 @@ def element_positions(
         z = xp.asarray(radius) * xp.cos(theta) - apex_offset
         x = xp.asarray(radius) * xp.sin(theta)
 
-    return x, z, theta, apex_offset
+    # Stack x and z into a single position array
+    positions = xp.stack([x, z], axis=-1)
+    return positions, theta, apex_offset

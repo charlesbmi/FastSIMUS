@@ -53,7 +53,7 @@ def _subelement_centroids(
     n_sub: int,
     theta_e: Float[Array, " n_elements"],
     xp: _ArrayNamespace,
-) -> tuple[Float[Array, "n_elements n_sub"], Float[Array, "n_elements n_sub"]]:
+) -> Float[Array, "n_elements n_sub 2"]:
     """Compute sub-element centroid positions relative to element centers.
 
     Args:
@@ -63,9 +63,8 @@ def _subelement_centroids(
         xp: Array namespace.
 
     Returns:
-        Tuple of (subelement_dx, subelement_dz):
-        - subelement_dx: Lateral positions of sub-element centroids.
-        - subelement_dz: Axial positions of sub-element centroids.
+        Sub-element offsets with shape (n_elements, n_sub, 2) where [..., 0]
+        is lateral (x) and [..., 1] is axial (z).
     """
     seg_length = element_width / n_sub
     seg_offsets = xp.asarray(
@@ -78,17 +77,14 @@ def _subelement_centroids(
     sin_neg_theta = xp.sin(-theta_e)[:, None]
     subelement_dx = seg_offsets_2d * cos_theta
     subelement_dz = seg_offsets_2d * sin_neg_theta
-    return subelement_dx, subelement_dz
+    return xp.stack([subelement_dx, subelement_dz], axis=-1)
 
 
 @jaxtyped(typechecker=typechecker)
 def _distances_and_angles(
-    x_flat: Float[Array, " n_points"],
-    z_flat: Float[Array, " n_points"],
-    subelement_dx: Float[Array, "n_elements n_sub"],
-    subelement_dz: Float[Array, "n_elements n_sub"],
-    element_x: Float[Array, " n_elements"],
-    element_z: Float[Array, " n_elements"],
+    points_flat: Float[Array, "n_points 2"],
+    subelement_offsets: Float[Array, "n_elements n_sub 2"],
+    element_pos: Float[Array, "n_elements 2"],
     theta_e: Float[Array, " n_elements"],
     speed_of_sound: float,
     freq_center: float,
@@ -101,12 +97,9 @@ def _distances_and_angles(
     """Compute distances and angles from grid points to sub-elements.
 
     Args:
-        x_flat: Flattened x-coordinates of grid points.
-        z_flat: Flattened z-coordinates of grid points.
-        subelement_dx: Sub-element lateral positions.
-        subelement_dz: Sub-element axial positions.
-        element_x: Element lateral positions.
-        element_z: Element axial positions.
+        points_flat: Flattened grid point positions. Shape (n_points, 2).
+        subelement_offsets: Sub-element offsets. Shape (n_elements, n_sub, 2).
+        element_pos: Element positions. Shape (n_elements, 2).
         theta_e: Element angular positions.
         speed_of_sound: Speed of sound in m/s.
         freq_center: Center frequency in Hz.
@@ -118,11 +111,12 @@ def _distances_and_angles(
         - sin_theta: Sine of angles relative to element normal.
         - theta_arr: Angles relative to element normal.
     """
-    # Broadcasting: x_flat (n_points,) -> (n_points, 1, 1)
-    #               element_x (n_elements,) -> (1, n_elements, 1)
-    #               subelement_dx (n_elements, n_sub) -> (1, n_elements, n_sub)
-    delta_x = x_flat[:, None, None] - subelement_dx[None, :, :] - element_x[None, :, None]
-    delta_z = z_flat[:, None, None] - subelement_dz[None, :, :] - element_z[None, :, None]
+    # Broadcasting: points_flat (n_points, 2) -> (n_points, 1, 1, 2)
+    #               element_pos (n_elements, 2) -> (1, n_elements, 1, 2)
+    #               subelement_offsets (n_elements, n_sub, 2) -> (1, n_elements, n_sub, 2)
+    delta = points_flat[:, None, None, :] - subelement_offsets[None, :, :, :] - element_pos[None, :, None, :]
+    delta_x = delta[..., 0]
+    delta_z = delta[..., 1]
     dist_squared = delta_x**2 + delta_z**2
 
     # distances with clipping
@@ -347,19 +341,13 @@ def pfield(
     """
     xp = array_namespace(positions, delays)
 
-    # Extract x and z from positions
-    x = positions[..., 0]
-    z = positions[..., 1]
-
     # Compute element positions
-    element_x, element_z, theta_e, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
+    element_pos, theta_e, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
 
     return _pfield_core(
-        x=x,
-        z=z,
+        point_positions=positions,
         delays=delays,
-        element_x=element_x,
-        element_z=element_z,
+        element_pos=element_pos,
         theta_e=theta_e,
         apex_offset=apex_offset,
         fc=params.freq_center,
@@ -380,11 +368,9 @@ def pfield(
 
 @jaxtyped(typechecker=typechecker)
 def _pfield_core(
-    x: Float[Array, "*grid_shape"],
-    z: Float[Array, "*grid_shape"],
+    point_positions: Float[Array, "*grid_shape 2"],
     delays: Float[Array, " n_elements"],
-    element_x: Float[Array, " n_elements"],
-    element_z: Float[Array, " n_elements"],
+    element_pos: Float[Array, "n_elements 2"],
     theta_e: Float[Array, " n_elements"] | None,
     apex_offset: float,
     fc: float,
@@ -410,17 +396,13 @@ def _pfield_core(
     backscatter accumulation (Eq. 32) without branching inside the loop.
     See: Garcia 2022, Sec. 4 (Eqs. 29-34).
     """
-    xp: _ArrayNamespace = array_namespace(x, z, delays)
+    xp: _ArrayNamespace = array_namespace(point_positions, delays)
 
     # Extract medium parameters
     speed_of_sound = medium.speed_of_sound
     attenuation = medium.attenuation
 
     # Validate inputs
-    if x.shape != z.shape:
-        msg = "x and z must have the same shape"
-        raise ValueError(msg)
-
     if delays.ndim != 1:
         msg = f"delays must be 1-D, got shape {delays.shape}"
         raise ValueError(msg)
@@ -430,16 +412,15 @@ def _pfield_core(
         raise ValueError(msg)
 
     # Store original shape for output reshaping
-    original_shape = x.shape
-    n_points = prod(x.shape)
+    original_shape = point_positions.shape[:-1]
+    n_points = prod(point_positions.shape[:-1])
 
     # Early return for empty grid
     if n_points == 0:
         return xp.zeros((0,), dtype=xp.float64)
 
     # Flatten to 1D
-    x_flat = xp.reshape(x, (-1,))
-    z_flat = xp.reshape(z, (-1,))
+    points_flat = xp.reshape(point_positions, (-1, 2))
 
     # TX apodization
     if tx_apodization is None:
@@ -463,23 +444,25 @@ def _pfield_core(
         n_sub = ceil(element_width / lambda_min)
 
     # Element positions (already computed, passed in)
-    # element_x, element_z, theta_e are 1-D arrays with shape (n_elements,)
+    # element_pos: (n_elements, 2), theta_e: (n_elements,) or None
     if theta_e is None:
         theta_elements = xp.zeros(n_elements, dtype=xp.float64)
     else:
         theta_elements = theta_e
 
-    # Sub-element centroids (shape: n_elements, n_sub)
-    subelement_dx, subelement_dz = _subelement_centroids(element_width, n_sub, theta_elements, xp)
+    # Sub-element centroids (shape: n_elements, n_sub, 2)
+    subelement_offsets = _subelement_centroids(element_width, n_sub, theta_elements, xp)
 
     # Out-of-field mask
+    x_flat = points_flat[:, 0]
+    z_flat = points_flat[:, 1]
     is_out = z_flat < 0
     if radius_of_curvature != inf:
         is_out = is_out | ((x_flat**2 + (z_flat + apex_offset) ** 2) <= radius_of_curvature**2)
 
     # Distances and angles (shape: n_points, n_elements, n_sub)
     distances, sin_theta, theta_arr = _distances_and_angles(
-        x_flat, z_flat, subelement_dx, subelement_dz, element_x, element_z, theta_elements, speed_of_sound, fc, xp
+        points_flat, subelement_offsets, element_pos, theta_elements, speed_of_sound, fc, xp
     )
 
     # Frequency step

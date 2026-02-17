@@ -31,8 +31,7 @@ class TestFocusedDelays:
         # FastSIMUS implementation
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         focus = np.array([x0, z0])
         fastsimus_delays = focused(
             elem_pos, focus, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex
@@ -48,8 +47,7 @@ class TestFocusedDelays:
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         focus = np.array([x0, z0])
         fastsimus_delays = focused(
             elem_pos, focus, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex
@@ -65,8 +63,7 @@ class TestFocusedDelays:
 
         params = C5_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         focus = np.array([x0, z0])
         fastsimus_delays = focused(
             elem_pos, focus, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex
@@ -83,8 +80,7 @@ class TestFocusedDelays:
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
 
         fastsimus_delays = np.stack(
             [
@@ -113,8 +109,7 @@ class TestPlaneWaveDelays:
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         fastsimus_delays = plane_wave(
             elem_pos, tilt, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex
         )
@@ -129,8 +124,7 @@ class TestPlaneWaveDelays:
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         fastsimus_delays = plane_wave(
             elem_pos, tilt, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex
         )
@@ -146,8 +140,7 @@ class TestPlaneWaveDelays:
 
         params = C5_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         fastsimus_delays = plane_wave(
             elem_pos, tilt, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex
         )
@@ -162,8 +155,7 @@ class TestPlaneWaveDelays:
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
 
         fastsimus_delays = np.stack(
             [
@@ -205,8 +197,7 @@ class TestCircularWaveDelays:
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
         aperture_length = (params.n_elements - 1) * params.pitch
 
         fastsimus_delays = np.stack(
@@ -226,8 +217,8 @@ class TestArrayAPICompliance:
         """Output should preserve input array backend."""
         params = P4_2v()
         xp_np = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp_np)
-        elem_pos = xp_strict.asarray(np.stack([element_x, element_z], axis=-1))
+        elem_pos_np, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp_np)
+        elem_pos = xp_strict.asarray(elem_pos_np)
         focus = xp_strict.asarray([0.02, 0.05])
 
         delays = focused(elem_pos, focus, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex)
@@ -239,8 +230,8 @@ class TestArrayAPICompliance:
         """Output should preserve input array backend."""
         params = P4_2v()
         xp_np = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp_np)
-        elem_pos = xp_strict.asarray(np.stack([element_x, element_z], axis=-1))
+        elem_pos_np, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp_np)
+        elem_pos = xp_strict.asarray(elem_pos_np)
         tilt = 0.0
 
         delays = plane_wave(elem_pos, tilt, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex)
@@ -256,8 +247,7 @@ class TestEdgeCases:
         """Tilt angles must satisfy |tilt| < pi/2."""
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         with pytest.raises(ValueError, match="Tilt"):
             plane_wave(
                 elem_pos,
@@ -271,8 +261,7 @@ class TestEdgeCases:
         """Width angles must satisfy 0 < width < pi."""
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
         aperture_length = (params.n_elements - 1) * params.pitch
 
         with pytest.raises(ValueError, match="Width"):
@@ -285,8 +274,7 @@ class TestEdgeCases:
         """Focus dimensions must be valid."""
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
         # Invalid shape (should be (dim,) matching element_positions)
         focus = np.array([0.0, 0.01, 0.05])  # Shape (3,) instead of (2,)
 
