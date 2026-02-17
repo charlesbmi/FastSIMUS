@@ -82,7 +82,7 @@ def _subelement_centroids(
 
 @jaxtyped(typechecker=typechecker)
 def _distances_and_angles(
-    points_flat: Float[Array, "n_points 2"],
+    points: Float[Array, "*batch 2"],
     subelement_offsets: Float[Array, "n_elements n_sub 2"],
     element_pos: Float[Array, "n_elements 2"],
     theta_e: Float[Array, " n_elements"],
@@ -90,14 +90,14 @@ def _distances_and_angles(
     freq_center: float,
     xp: _ArrayNamespace,
 ) -> tuple[
-    Float[Array, "n_points n_elements n_sub"],
-    Float[Array, "n_points n_elements n_sub"],
-    Float[Array, "n_points n_elements n_sub"],
+    Float[Array, "*batch n_elements n_sub"],
+    Float[Array, "*batch n_elements n_sub"],
+    Float[Array, "*batch n_elements n_sub"],
 ]:
     """Compute distances and angles from grid points to sub-elements.
 
     Args:
-        points_flat: Flattened grid point positions. Shape (n_points, 2).
+        points: Grid point positions. Shape (*batch, 2).
         subelement_offsets: Sub-element offsets. Shape (n_elements, n_sub, 2).
         element_pos: Element positions. Shape (n_elements, 2).
         theta_e: Element angular positions.
@@ -111,10 +111,10 @@ def _distances_and_angles(
         - sin_theta: Sine of angles relative to element normal.
         - theta_arr: Angles relative to element normal.
     """
-    # Broadcasting: points_flat (n_points, 2) -> (n_points, 1, 1, 2)
+    # Broadcasting: points (*batch, 2) -> (*batch, 1, 1, 2)
     #               element_pos (n_elements, 2) -> (1, n_elements, 1, 2)
     #               subelement_offsets (n_elements, n_sub, 2) -> (1, n_elements, n_sub, 2)
-    delta = points_flat[:, None, None, :] - subelement_offsets[None, :, :, :] - element_pos[None, :, None, :]
+    delta = points[..., None, None, :] - subelement_offsets[None, :, :, :] - element_pos[None, :, None, :]
     delta_x = delta[..., 0]
     delta_z = delta[..., 1]
     dist_squared = delta_x**2 + delta_z**2
@@ -127,8 +127,8 @@ def _distances_and_angles(
     # Angle relative to element normal
     epsilon = xp.asarray(1e-16)  # Small epsilon to avoid division by zero
     sqrt_d2 = xp.sqrt(dist_squared)
-    # Broadcasting: theta_e (n_elements,) -> (1, n_elements, 1)
-    theta_arr = xp.asin((delta_x + epsilon) / (sqrt_d2 + epsilon)) - theta_e[None, :, None]
+    # Broadcasting: theta_e (n_elements,) -> (n_elements, 1)
+    theta_arr = xp.asin((delta_x + epsilon) / (sqrt_d2 + epsilon)) - theta_e[:, None]
     sin_theta = xp.sin(theta_arr)
 
     return distances, sin_theta, theta_arr
@@ -182,10 +182,10 @@ def _select_frequencies(
 
 @jaxtyped(typechecker=typechecker)
 def _obliquity_factor(
-    theta_arr: Float[Array, "n_points n_elements n_sub"],
+    theta_arr: Float[Array, "*batch n_elements n_sub"],
     baffle: BaffleType | float,
     xp: _ArrayNamespace,
-) -> Float[Array, "n_points n_elements n_sub"]:
+) -> Float[Array, "*batch n_elements n_sub"]:
     """Compute obliquity factor based on baffle type.
 
     Args:
@@ -222,13 +222,13 @@ def _init_exponentials(
     freq_start: float,
     speed_of_sound: float,
     attenuation: float,
-    distances: Float[Array, "n_points n_elements n_sub"],
-    obliquity_factor: Float[Array, "n_points n_elements n_sub"],
+    distances: Float[Array, "*batch n_elements n_sub"],
+    obliquity_factor: Float[Array, "*batch n_elements n_sub"],
     freq_step: float,
     xp: _ArrayNamespace,
 ) -> tuple[
-    Complex[Array, "n_points n_elements n_sub"],
-    Complex[Array, "n_points n_elements n_sub"],
+    Complex[Array, "*batch n_elements n_sub"],
+    Complex[Array, "*batch n_elements n_sub"],
 ]:
     """Initialize exponential arrays for frequency loop.
 
@@ -402,16 +402,10 @@ def _pfield_core(
     speed_of_sound = medium.speed_of_sound
     attenuation = medium.attenuation
 
-    # Store original shape for output reshaping
-    original_shape = point_positions.shape[:-1]
-    n_points = prod(point_positions.shape[:-1])
-
     # Input validation
+    n_points = prod(point_positions.shape[:-1])
     if n_points == 0:
         raise ValueError("Grid has no points")
-
-    # Flatten to 1D
-    points_flat = xp.reshape(point_positions, (-1, 2))
 
     # TX apodization
     if tx_apodization is None:
@@ -442,15 +436,15 @@ def _pfield_core(
     subelement_offsets = _subelement_centroids(element_width, n_sub, theta_elements, xp)
 
     # Out-of-field mask
-    x_flat = points_flat[:, 0]
-    z_flat = points_flat[:, 1]
-    is_out = z_flat < 0
+    x = point_positions[..., 0]
+    z = point_positions[..., 1]
+    is_out = z < 0
     if radius_of_curvature != inf:
-        is_out = is_out | ((x_flat**2 + (z_flat + apex_offset) ** 2) <= radius_of_curvature**2)
+        is_out = is_out | ((x**2 + (z + apex_offset) ** 2) <= radius_of_curvature**2)
 
-    # Distances and angles (shape: n_points, n_elements, n_sub)
+    # Distances and angles (shape: *grid_shape, n_elements, n_sub)
     distances, sin_theta, theta_arr = _distances_and_angles(
-        points_flat, subelement_offsets, element_pos, theta_elements, speed_of_sound, fc, xp
+        point_positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, fc, xp
     )
 
     # Frequency step
@@ -508,21 +502,21 @@ def _pfield_core(
             element_pattern = xp.mean(phase_decay, axis=-1)
         else:
             # n_sub == 1, squeeze last dimension
-            element_pattern = xp.reshape(phase_decay, (phase_decay.shape[0], phase_decay.shape[1]))
+            element_pattern = phase_decay[..., 0]
 
         # Transmit delays + apodization
         # delays_clean is 1-D (n_elements,), apply phase shift
         delay_exp = xp.exp(xp.asarray(1j * wavenumber * speed_of_sound) * delays_clean)
         delay_apodization = delay_exp * apodization  # Element-wise, shape (n_elements,)
 
-        # Sum across elements: element_pattern (n_points, n_elements), delay_apodization (n_elements,)
-        pressure_k = element_pattern @ xp.reshape(delay_apodization, (-1, 1))
+        # Sum across elements: element_pattern (*grid_shape, n_elements), delay_apodization (n_elements,)
+        pressure_k = xp.sum(element_pattern * delay_apodization, axis=-1)
 
         # Apply spectrum
         pressure_k = pulse_spect[freq_idx] * pressure_k * probe_spect[freq_idx]
 
         # Zero out-of-field (no mutation)
-        pressure_k = xp.where(is_out[:, None], xp.asarray(0.0 + 0j), pressure_k)
+        pressure_k = xp.where(is_out, xp.asarray(0.0 + 0j), pressure_k)
 
         # Accumulate
         pressure_accum = pressure_accum + xp.abs(pressure_k) ** 2
@@ -531,9 +525,9 @@ def _pfield_core(
     correction_factor = 1.0 if tx_n_wavelengths == float("inf") else df
     correction_factor = correction_factor * element_width
 
-    # RMS pressure, reshape to original grid shape
+    # RMS pressure
     pressure_rms = xp.sqrt(pressure_accum * correction_factor)
-    return xp.reshape(pressure_rms, original_shape)
+    return pressure_rms
 
 
 def _first_last_true(xp: _ArrayNamespace, mask: Array) -> tuple[int, int]:
