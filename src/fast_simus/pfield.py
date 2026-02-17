@@ -18,7 +18,7 @@ References:
 from __future__ import annotations
 
 from math import ceil, inf, log, pi, prod
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import array_api_extra as xpx
 from beartype import beartype as typechecker
@@ -45,14 +45,6 @@ class _FrequencyPlan(NamedTuple):
     pulse_spectrum: Array  # Pulse spectrum at selected frequencies, shape (n_sampling,)
     probe_spectrum: Array  # Probe spectrum at selected frequencies, shape (n_sampling,)
     freq_step: float  # Frequency step in Hz
-
-
-class _SimusContext(NamedTuple):
-    """Context for SIMUS-specific computation (internal use)."""
-
-    reflectivity_coeffs: Array | None  # Scatterer reflectivity coefficients
-    rx_delay: Array | None  # Receive delays
-    freq_step: float | None  # Frequency step override
 
 
 def _subelement_centroids(
@@ -352,8 +344,7 @@ def pfield(
     # Compute element positions
     element_x, element_z, theta_e, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
 
-    # _pfield_core returns Array when _is_simus=False
-    result = _pfield_core(
+    return _pfield_core(
         x=x,
         z=z,
         delays=delays,
@@ -374,10 +365,7 @@ def pfield(
         full_frequency_directivity=full_frequency_directivity,
         element_splitting=element_splitting,
         frequency_step=frequency_step,
-        _is_simus=False,
-        _simus_ctx=None,
     )
-    return cast(Array, result)
 
 
 def _pfield_core(
@@ -402,10 +390,15 @@ def _pfield_core(
     full_frequency_directivity: bool,
     element_splitting: int | None,
     frequency_step: float,
-    _is_simus: bool,
-    _simus_ctx: _SimusContext | None,
-) -> Array | tuple[Array, Array, Array]:
-    """Core pfield implementation shared by standalone pfield and simus."""
+) -> Array:
+    """Core pfield implementation computing RMS pressure field.
+
+    When SIMUS support is added, the per-frequency accumulation logic
+    (currently inlined as |P_k|^2 summation) should be extracted into
+    an accumulator protocol, so that SIMUS can plug in its own
+    backscatter accumulation (Eq. 32) without branching inside the loop.
+    See: Garcia 2022, Sec. 4 (Eqs. 29-34).
+    """
     xp: _ArrayNamespace = array_namespace(x, z, delays)
 
     # Extract medium parameters
@@ -431,9 +424,6 @@ def _pfield_core(
 
     # Early return for empty grid
     if n_points == 0:
-        if _is_simus:
-            empty = xp.zeros((0,), dtype=xp.float64)
-            return empty, empty, empty
         return xp.zeros((0,), dtype=xp.float64)
 
     # Flatten to 1D
@@ -482,11 +472,8 @@ def _pfield_core(
     )
 
     # Frequency step
-    if _is_simus and _simus_ctx is not None and _simus_ctx.freq_step is not None:
-        df = _simus_ctx.freq_step
-    else:
-        df = 1.0 / (float(xp.max(distances)) / speed_of_sound + float(xp.max(delays_clean)))
-        df = frequency_step * df
+    df = 1.0 / (float(xp.max(distances)) / speed_of_sound + float(xp.max(delays_clean)))
+    df = frequency_step * df
 
     # Select frequencies
     freq_plan = _select_frequencies(fc, bandwidth, tx_n_wavelengths, db_thresh, df, xp)
@@ -494,13 +481,10 @@ def _pfield_core(
     n_sampling = selected_freqs.shape[0]
     pulse_spect = freq_plan.pulse_spectrum
     probe_spect = freq_plan.probe_spectrum
-    freq_mask = freq_plan.freq_mask
     df = freq_plan.freq_step
 
     # Initialization
     pressure_accum = xp.asarray(0.0, dtype=xp.float64)
-    if _is_simus:
-        spectrum_rows = []  # Accumulate rows in a list, stack at end
 
     # Obliquity factor
     obliquity_factor = _obliquity_factor(theta_arr, baffle, xp)
@@ -518,8 +502,8 @@ def _pfield_core(
         # Use unnormalized sinc: sinc(x/pi) from array_api_extra
         sinc_arg = xp.asarray(center_wavenumber * seg_length / 2.0) * sin_theta / pi
         # array-api-extra does not have type interoperability
-        directivity = xpx.sinc(sinc_arg, xp=xp)  # ty: ignore[invalid-argument-type]
-        phase_decay = phase_decay * cast(Array, directivity)
+        directivity = xpx.sinc(sinc_arg, xp=xp)  # type: ignore[arg-type]
+        phase_decay = phase_decay * directivity  # type: ignore[assignment]
 
     # Frequency loop
     for freq_idx in range(n_sampling):
@@ -559,31 +543,11 @@ def _pfield_core(
         pressure_k = xp.where(is_out[:, None], xp.asarray(0.0 + 0j), pressure_k)
 
         # Accumulate
-        if _is_simus:
-            if _simus_ctx is None or _simus_ctx.reflectivity_coeffs is None:
-                msg = "_simus_ctx.reflectivity_coeffs must be provided when _is_simus=True"
-                raise ValueError(msg)
-            spectrum_k = probe_spect[freq_idx]
-            rp_flat = xp.reshape(pressure_k, (-1,))
-            rc_flat = xp.reshape(_simus_ctx.reflectivity_coeffs, (-1,))
-            weighted = xp.reshape(rp_flat * rc_flat, (1, -1))
-            row = spectrum_k * xp.reshape(weighted @ element_pattern, (-1,))
-            if _simus_ctx.rx_delay is not None:
-                rx_exp = xp.exp(xp.asarray(1j * wavenumber * speed_of_sound) * _simus_ctx.rx_delay)
-                row = row * rx_exp
-            spectrum_rows.append(row)
-        else:
-            pressure_accum = pressure_accum + xp.abs(pressure_k) ** 2
+        pressure_accum = pressure_accum + xp.abs(pressure_k) ** 2
 
     # Correcting factor
     correction_factor = 1.0 if tx_n_wavelengths == float("inf") else df
     correction_factor = correction_factor * element_width
-
-    if _is_simus:
-        # Stack accumulated rows into spectrum array
-        spectrum = xp.stack(spectrum_rows, axis=0) * correction_factor
-        pressure_accum = pressure_accum * correction_factor
-        return pressure_accum, spectrum, freq_mask
 
     # RMS pressure, reshape to original grid shape
     pressure_rms = xp.sqrt(pressure_accum * correction_factor)
