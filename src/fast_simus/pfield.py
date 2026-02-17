@@ -406,9 +406,9 @@ def _pfield_core(
     original_shape = point_positions.shape[:-1]
     n_points = prod(point_positions.shape[:-1])
 
-    # Early return for empty grid
+    # Input validation
     if n_points == 0:
-        return xp.zeros((0,), dtype=xp.float64)
+        raise ValueError("Grid has no points")
 
     # Flatten to 1D
     points_flat = xp.reshape(point_positions, (-1, 2))
