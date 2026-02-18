@@ -22,7 +22,7 @@ from typing import NamedTuple
 
 import array_api_extra as xpx
 from beartype import beartype as typechecker
-from jaxtyping import Complex, Float, jaxtyped
+from jaxtyping import Bool, Complex, Float, jaxtyped
 
 from fast_simus.medium_params import MediumParams
 from fast_simus.spectrum import probe_spectrum, pulse_spectrum
@@ -38,13 +38,21 @@ _NEPER_TO_DB = 20.0 / log(10.0)
 
 
 class _FrequencyPlan(NamedTuple):
-    """Frequency sampling plan for pfield computation."""
+    """Frequency sampling plan for pfield computation.
 
-    selected_freqs: Array  # Selected frequencies, shape (n_sampling,)
-    freq_mask: Array  # Boolean mask for selected frequencies, shape (n_freq,)
-    pulse_spectrum: Array  # Pulse spectrum at selected frequencies, shape (n_sampling,)
-    probe_spectrum: Array  # Probe spectrum at selected frequencies, shape (n_sampling,)
-    freq_step: float  # Frequency step in Hz
+    Attributes:
+        selected_freqs: Selected frequencies, shape
+        freq_mask: Boolean mask for selected frequencies, shape
+        pulse_spectrum: Pulse spectrum at selected frequencies, shape
+        probe_spectrum: Probe spectrum at selected frequencies, shape
+        freq_step: Frequency step in Hz
+    """
+
+    selected_freqs: Float[Array, " n_sampling"]
+    freq_mask: Bool[Array, " n_freq"]
+    pulse_spectrum: Float[Array, " n_sampling"]
+    probe_spectrum: Float[Array, " n_sampling"]
+    freq_step: float
 
 
 @jaxtyped(typechecker=typechecker)
