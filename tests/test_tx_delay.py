@@ -179,8 +179,7 @@ class TestCircularWaveDelays:
 
         params = P4_2v()
         xp = array_namespace(np.array([1.0]))
-        element_x, element_z, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
-        elem_pos = np.stack([element_x, element_z], axis=-1)
+        elem_pos, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
         aperture_length = (params.n_elements - 1) * params.pitch
         fastsimus_delays = diverging_wave(
             elem_pos, tilt, width, aperture_length=aperture_length, speed_of_sound=SPEED_OF_SOUND
