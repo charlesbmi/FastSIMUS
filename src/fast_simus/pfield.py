@@ -105,9 +105,9 @@ def _distances_and_angles(
     """Compute distances and angles from grid points to sub-elements.
 
     Args:
-        points: Grid point positions. Shape (*batch, 2).
-        subelement_offsets: Sub-element offsets. Shape (n_elements, n_sub, 2).
-        element_pos: Element positions. Shape (n_elements, 2).
+        points: Grid point positions.
+        subelement_offsets: Sub-element offsets.
+        element_pos: Element positions.
         theta_e: Element angular positions.
         speed_of_sound: Speed of sound in m/s.
         freq_center: Center frequency in Hz.
