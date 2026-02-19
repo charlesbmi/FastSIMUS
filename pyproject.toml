@@ -203,6 +203,9 @@ convention = "google"
 [tool.deptry.package_module_name_map]
 pytest-benchmark = "pytest_benchmark"
 
+[tool.ty.environment]
+extra-paths = ["stubs"]
+
 
 # ---- test settings ----
 [tool.pytest.ini_options]
