@@ -486,7 +486,7 @@ def _pfield_core(
         # Use unnormalized sinc: sinc(x/pi) from array_api_extra
         sinc_arg = xp.asarray(center_wavenumber * seg_length / 2.0) * sin_theta / pi
         # array-api-extra does not have type interoperability
-        directivity = xpx.sinc(sinc_arg, xp=xp)  # type: ignore[arg-type]
+        directivity = xpx.sinc(sinc_arg, xp=xp)
         phase_decay = phase_decay * directivity
 
     # Frequency loop
@@ -501,7 +501,7 @@ def _pfield_core(
         if full_frequency_directivity:
             # Use unnormalized sinc: sinc(x/pi) from array_api_extra
             sinc_arg_k = xp.asarray(wavenumber * seg_length / 2.0) * sin_theta / pi
-            directivity_k = xpx.sinc(sinc_arg_k, xp=xp)  # type: ignore[arg-type]
+            directivity_k = xpx.sinc(sinc_arg_k, xp=xp)
 
         # Single-element radiation patterns: average over sub-elements
         if full_frequency_directivity:

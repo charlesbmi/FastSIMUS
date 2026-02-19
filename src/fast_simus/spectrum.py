@@ -47,7 +47,7 @@ def pulse_spectrum(
     sinc_arg_lower = pulse_duration_s * (angular_freq - angular_freq_center) / 2.0 / pi
     sinc_arg_upper = pulse_duration_s * (angular_freq + angular_freq_center) / 2.0 / pi
     # array-api-extra does not have type interoperability
-    return 1j * (xpx.sinc(sinc_arg_lower, xp=xp) - xpx.sinc(sinc_arg_upper, xp=xp))  # ty: ignore[invalid-argument-type, invalid-return-type]
+    return 1j * (xpx.sinc(sinc_arg_lower, xp=xp) - xpx.sinc(sinc_arg_upper, xp=xp))
 
 
 @jaxtyped(typechecker=typechecker)

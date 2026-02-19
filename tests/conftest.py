@@ -1,9 +1,12 @@
 """Pytest configuration for FastSIMUS tests."""
 
 import contextlib
+from typing import cast
 
 import array_api_strict as xp_strict
 import pytest
+
+from fast_simus.utils._array_api import _ArrayNamespace
 
 # Try to import array backends
 HAS_NUMPY = False
@@ -37,9 +40,9 @@ with contextlib.suppress(ImportError):
         ),
     ]
 )
-def xp(request):
+def xp(request) -> _ArrayNamespace:
     """Fixture providing different array API backends.
 
     Parametrizes tests to run with NumPy, array-api-strict, and JAX.
     """
-    return request.param
+    return cast(_ArrayNamespace, request.param)
