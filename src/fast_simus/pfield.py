@@ -276,6 +276,75 @@ def _init_exponentials(
 
 
 @jaxtyped(typechecker=typechecker)
+def _pfield_freq_step(
+    phase_decay: Complex[Array, "*batch n_elements n_sub"],
+    delays_clean: Float[Array, " n_elements"],
+    apodization: Float[Array, " n_elements"],
+    is_out: Bool[Array, " *batch"],
+    wavenumber: float,
+    speed_of_sound: float,
+    pulse_spect_k: complex,
+    probe_spect_k: complex | float,
+    n_sub: int,
+    seg_length: float,
+    sin_theta: Float[Array, "*batch n_elements n_sub"],
+    full_frequency_directivity: bool,
+    xp: _ArrayNamespace,
+) -> Float[Array, " *batch"]:
+    """Compute pressure field contribution for a single frequency sample.
+
+    Args:
+        phase_decay: Complex exponential array with propagation and attenuation.
+        delays_clean: Transmit time delays (NaN replaced with 0).
+        apodization: Transmit apodization weights (zeroed where delays were NaN).
+        is_out: Out-of-field mask.
+        wavenumber: Angular wavenumber for this frequency (2*pi*f/c).
+        speed_of_sound: Speed of sound in m/s.
+        pulse_spect_k: Pulse spectrum value at this frequency.
+        probe_spect_k: Probe spectrum value at this frequency.
+        n_sub: Number of sub-elements per element.
+        seg_length: Sub-element length (element_width / n_sub).
+        sin_theta: Sine of angles relative to element normal.
+        full_frequency_directivity: If True, compute frequency-dependent directivity.
+        xp: Array namespace.
+
+    Returns:
+        Squared magnitude |P_k|^2 of the pressure field at this frequency.
+    """
+    # Directivity (frequency-dependent path)
+    if full_frequency_directivity:
+        # Use unnormalized sinc: sinc(x/pi) from array_api_extra
+        sinc_arg_k = xp.asarray(wavenumber * seg_length / 2.0) * sin_theta / pi
+        directivity_k = xpx.sinc(sinc_arg_k, xp=xp)
+
+    # Single-element radiation patterns: average over sub-elements
+    if full_frequency_directivity:
+        element_pattern = xp.mean(directivity_k * phase_decay, axis=-1)
+    elif n_sub > 1:
+        element_pattern = xp.mean(phase_decay, axis=-1)
+    else:
+        # n_sub == 1, squeeze last dimension
+        element_pattern = phase_decay[..., 0]
+
+    # Transmit delays + apodization
+    # delays_clean is 1-D (n_elements,), apply phase shift
+    delay_exp = xp.exp(xp.asarray(1j * wavenumber * speed_of_sound) * delays_clean)
+    delay_apodization = delay_exp * apodization
+
+    # Sum across elements: element_pattern (*batch, n_elements), delay_apodization (n_elements,)
+    pressure_k = xp.sum(element_pattern * delay_apodization, axis=-1)
+
+    # Apply spectrum
+    pressure_k = pulse_spect_k * pressure_k * probe_spect_k
+
+    # Zero out-of-field (no mutation)
+    pressure_k = xp.where(is_out, xp.asarray(0.0 + 0j), pressure_k)
+
+    # Return squared magnitude
+    return xp.abs(pressure_k) ** 2
+
+
+@jaxtyped(typechecker=typechecker)
 def pfield(
     positions: Float[Array, "*grid_shape 2"],
     delays: Float[Array, " n_elements"],
@@ -433,6 +502,8 @@ def _pfield_core(
         lambda_min = speed_of_sound / (fc * (1.0 + bandwidth / 2.0))
         n_sub = ceil(element_width / lambda_min)
 
+    seg_length = element_width / n_sub
+
     # Element positions (already computed, passed in)
     # element_pos: (n_elements, 2), theta_e: (n_elements,) or None
     if theta_e is None:
@@ -455,7 +526,10 @@ def _pfield_core(
         point_positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, fc, xp
     )
 
-    # Frequency step
+    # Frequency selection
+
+    # df chosen so phase increment 2*pi*(df*r/c + df*delay) < 2*pi
+    # => df < 1/(r_max/c + delay_max)
     df = 1.0 / (float(xp.max(distances)) / speed_of_sound + float(xp.max(delays_clean)))
     df = frequency_step * df
 
@@ -482,7 +556,6 @@ def _pfield_core(
     # Simplified directivity (center-frequency only)
     if not full_frequency_directivity:
         center_wavenumber = 2.0 * pi * fc / speed_of_sound
-        seg_length = element_width / n_sub
         # Use unnormalized sinc: sinc(x/pi) from array_api_extra
         sinc_arg = xp.asarray(center_wavenumber * seg_length / 2.0) * sin_theta / pi
         # array-api-extra does not have type interoperability
@@ -497,37 +570,25 @@ def _pfield_core(
         if freq_idx > 0:
             phase_decay = phase_decay * phase_decay_step
 
-        # Directivity (frequency-dependent path)
-        if full_frequency_directivity:
-            # Use unnormalized sinc: sinc(x/pi) from array_api_extra
-            sinc_arg_k = xp.asarray(wavenumber * seg_length / 2.0) * sin_theta / pi
-            directivity_k = xpx.sinc(sinc_arg_k, xp=xp)
-
-        # Single-element radiation patterns: average over sub-elements
-        if full_frequency_directivity:
-            element_pattern = xp.mean(directivity_k * phase_decay, axis=-1)
-        elif n_sub > 1:
-            element_pattern = xp.mean(phase_decay, axis=-1)
-        else:
-            # n_sub == 1, squeeze last dimension
-            element_pattern = phase_decay[..., 0]
-
-        # Transmit delays + apodization
-        # delays_clean is 1-D (n_elements,), apply phase shift
-        delay_exp = xp.exp(xp.asarray(1j * wavenumber * speed_of_sound) * delays_clean)
-        delay_apodization = delay_exp * apodization  # Element-wise, shape (n_elements,)
-
-        # Sum across elements: element_pattern (*grid_shape, n_elements), delay_apodization (n_elements,)
-        pressure_k = xp.sum(element_pattern * delay_apodization, axis=-1)
-
-        # Apply spectrum
-        pressure_k = pulse_spect[freq_idx] * pressure_k * probe_spect[freq_idx]
-
-        # Zero out-of-field (no mutation)
-        pressure_k = xp.where(is_out, xp.asarray(0.0 + 0j), pressure_k)
+        # Compute |P_k|^2 for this frequency
+        pressure_k_squared = _pfield_freq_step(
+            phase_decay=phase_decay,
+            delays_clean=delays_clean,
+            apodization=apodization,
+            is_out=is_out,
+            wavenumber=wavenumber,
+            speed_of_sound=speed_of_sound,
+            pulse_spect_k=pulse_spect[freq_idx],
+            probe_spect_k=probe_spect[freq_idx],
+            n_sub=n_sub,
+            seg_length=seg_length,
+            sin_theta=sin_theta,
+            full_frequency_directivity=full_frequency_directivity,
+            xp=xp,
+        )
 
         # Accumulate
-        pressure_accum = pressure_accum + xp.abs(pressure_k) ** 2
+        pressure_accum = pressure_accum + pressure_k_squared
 
     # Correcting factor
     correction_factor = 1.0 if tx_n_wavelengths == float("inf") else df

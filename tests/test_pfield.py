@@ -277,3 +277,27 @@ class TestPfieldMatchesPyMUST:
         ref = request.getfixturevalue(ref_fixture)
         fastsimus_rp = _fastsimus_pfield(preset_fn, ref["delays"], ref["positions"])
         _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=_PYMUST_ATOL_PEAK, desc=desc)
+
+    @pytest.mark.parametrize(
+        ("preset_fn", "ref_fixture", "desc"),
+        [
+            (P4_2v, "p4_2v_focused_reference", "P4-2v focused"),
+            (L11_5v, "l11_5v_plane_reference", "L11-5v plane"),
+            (C5_2v, "c5_2v_focused_reference", "C5-2v focused"),
+        ],
+    )
+    def test_full_frequency_directivity(self, preset_fn, ref_fixture, desc, request):
+        """Full frequency directivity path should give similar results to center-frequency only."""
+        ref = request.getfixturevalue(ref_fixture)
+        params = preset_fn()
+        delays_1d = np.squeeze(ref["delays"])
+
+        # Default: center-frequency directivity
+        rp_default = pfield(ref["positions"], delays_1d, params, full_frequency_directivity=False)
+
+        # Full frequency-dependent directivity
+        rp_full_freq = pfield(ref["positions"], delays_1d, params, full_frequency_directivity=True)
+
+        # Results should be very close (within a few percent)
+        # Full frequency directivity is more accurate but the difference is small for typical bandwidths
+        _assert_pfield_close(rp_full_freq, rp_default, atol_peak=0.05, desc=f"{desc} full_frequency_directivity")
