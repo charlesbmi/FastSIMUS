@@ -96,6 +96,9 @@ bench = [
 
 # ---- Poe the Poet task runner ----
 
+[tool.poe]
+executor = "uv"
+
 [tool.poe.tasks]
 
 [tool.poe.tasks.install]
@@ -128,7 +131,9 @@ cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml"
 
 [tool.poe.tasks.benchmark]
 help = "Run performance benchmarks"
-cmd = "pytest --benchmark-only --benchmark-autosave -p no:xdist"
+cmd = "pytest --benchmark-only --benchmark-autosave -p no:xdist --benchmark-min-rounds=2 --benchmark-warmup-iterations 1"
+executor = { group = "bench" }
+
 
 [tool.poe.tasks.build]
 help = "Build wheel file"
@@ -195,6 +200,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+"tests/benchmarks/*" = ["PLC0415"]  # Deferred imports for optional deps (jax, zea)
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 
 [tool.ruff.lint.pydocstyle]

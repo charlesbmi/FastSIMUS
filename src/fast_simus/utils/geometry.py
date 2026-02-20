@@ -52,9 +52,9 @@ def element_positions(
 
     if is_linear:
         # Linear array: elements evenly spaced along x-axis
-        indices = xp.arange(n_elements, dtype=xp.float64)
+        indices = xp.arange(n_elements)
         x = (indices - (n_elements - 1) / 2) * pitch
-        z = xp.zeros(n_elements, dtype=xp.float64)
+        z = xp.zeros(n_elements)
         theta = None
         apex_offset = 0.0
     else:
@@ -76,16 +76,7 @@ def element_positions(
         theta_end_arr = xp.atan2(chord / 2, apex_offset_arr)
         theta_end = float(theta_end_arr)
 
-        # Try to use linspace if available (most backends support it)
-        if hasattr(xp, "linspace"):
-            theta = xp.linspace(theta_start, theta_end, n_elements, dtype=xp.float64)
-        else:
-            # Manual linspace implementation for Array API compliance
-            indices = xp.arange(n_elements, dtype=xp.float64)
-            if n_elements > 1:
-                theta = theta_start + (theta_end - theta_start) * indices / (n_elements - 1)
-            else:
-                theta = xp.asarray([theta_start], dtype=xp.float64)
+        theta = xp.linspace(theta_start, theta_end, n_elements)
 
         # Convert angular positions to (x, z) coordinates
         # z = radius * cos(theta) - h (where h is apex_offset)

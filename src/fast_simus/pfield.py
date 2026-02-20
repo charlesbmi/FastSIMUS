@@ -6,6 +6,14 @@ the azimuthal plane and Fresnel (paraxial) approximation in elevation.
 
 All functions are Array API compliant and work with NumPy, JAX, CuPy backends.
 
+JAX jit incompatibilities (for future refactor):
+    pfield cannot be jit-compiled due to concrete-value extraction from traced
+    arrays. Primary blocker: L533 df = 1/(float(xp.max(distances)) + ...).
+    Cascade: _select_frequencies(df), _first_last_true (int from nonzero),
+    for freq_idx in range(n_sampling), float(selected_freqs[i]).
+    Fix options: (1) static grid shape -> compute df from geometry before trace;
+    (2) two-phase API: pfield_precompute (eager) + pfield_eval (jit-compatible).
+
 References:
     Garcia D. SIMUS: an open-source simulator for medical ultrasound imaging.
     Part I: theory & examples. CMPB, 2022;218:106726.
@@ -75,10 +83,7 @@ def _subelement_centroids(
         is lateral (x) and [..., 1] is axial (z).
     """
     seg_length = element_width / n_sub
-    seg_offsets = xp.asarray(
-        [-element_width / 2.0 + seg_length / 2.0 + i * seg_length for i in range(n_sub)],
-        dtype=xp.float64,
-    )
+    seg_offsets = xp.asarray([-element_width / 2.0 + seg_length / 2.0 + i * seg_length for i in range(n_sub)])
     # Broadcasting: (n_sub,) -> (1, n_sub), (n_elements,) -> (n_elements, 1)
     seg_offsets_2d = xp.reshape(seg_offsets, (1, n_sub))
     cos_theta = xp.cos(theta_e)[:, None]
@@ -165,7 +170,7 @@ def _select_frequencies(
     """
     # Frequency samples
     n_freq = int(2 * ceil(fc / max_freq_step) + 1)
-    frequencies = xp.linspace(0, 2 * fc, n_freq, dtype=xp.float64)
+    frequencies = xp.linspace(0, 2 * fc, n_freq)
     freq_step = float(frequencies[1])
 
     # Keep only significant components (dB threshold)
@@ -214,7 +219,7 @@ def _obliquity_factor(
             cos_th = xp.cos(theta_arr)
             obliquity_factor = cos_th / (cos_th + float(baffle))
     else:
-        obliquity_factor = xp.ones(theta_arr.shape, dtype=xp.float64)
+        obliquity_factor = xp.ones(theta_arr.shape)
 
     obliquity_factor = xp.where(
         xp.abs(theta_arr) >= xp.asarray(pi / 2),
@@ -486,9 +491,9 @@ def _pfield_core(
 
     # TX apodization
     if tx_apodization is None:
-        apodization = xp.ones(n_elements, dtype=xp.float64)
+        apodization = xp.ones(n_elements)
     else:
-        apodization = xp.asarray(tx_apodization, dtype=xp.float64)
+        apodization = xp.asarray(tx_apodization)
 
     # Zero apodization where delays are NaN; replace NaN delays with 0
     nan_mask = xp.isnan(delays)
@@ -507,7 +512,7 @@ def _pfield_core(
     # Element positions (already computed, passed in)
     # element_pos: (n_elements, 2), theta_e: (n_elements,) or None
     if theta_e is None:
-        theta_elements = xp.zeros(n_elements, dtype=xp.float64)
+        theta_elements = xp.zeros(n_elements)
     else:
         theta_elements = theta_e
 
@@ -530,6 +535,7 @@ def _pfield_core(
 
     # df chosen so phase increment 2*pi*(df*r/c + df*delay) < 2*pi
     # => df < 1/(r_max/c + delay_max)
+    # NOTE: float(xp.max(...)) blocks jax.jit (ConcretizationTypeError)
     df = 1.0 / (float(xp.max(distances)) / speed_of_sound + float(xp.max(delays_clean)))
     df = frequency_step * df
 
@@ -542,7 +548,7 @@ def _pfield_core(
     df = freq_plan.freq_step
 
     # Initialization
-    pressure_accum = xp.asarray(0.0, dtype=xp.float64)
+    pressure_accum = xp.asarray(0.0)
 
     # Obliquity factor
     obliquity_factor = _obliquity_factor(theta_arr, baffle, xp)

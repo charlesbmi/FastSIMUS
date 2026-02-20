@@ -199,9 +199,9 @@ def _fastsimus_pfield(
 #
 # PyMUST uses float32/complex64 precision throughout its pfield computation
 # (coordinates, distances, propagation exponentials are all explicitly cast).
-# FastSIMUS uses float64/complex128, which is strictly more accurate.
+# FastSIMUS uses backend default float/complex (float64 NumPy, float32 JAX).
 #
-# When PyMUST is monkey-patched to use float64, the two implementations agree
+# When PyMUST and FastSIMUS both use float64, the two implementations agree.
 # to -234 dB (machine epsilon) -- confirming zero algorithmic differences.
 # The entire error budget is therefore set by PyMUST's float32 quantization:
 #
