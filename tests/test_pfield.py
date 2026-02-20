@@ -4,14 +4,19 @@ Reference tests compare FastSIMUS pfield against PyMUST's pfield output.
 Tests are structured as invariants that must hold at every refactoring step.
 """
 
-from typing import Any
+from typing import Any, cast
 
+import array_api_strict
 import numpy as np
 import pymust
 import pytest
 
 from fast_simus.pfield import pfield
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
+from fast_simus.utils._array_api import _ArrayNamespace
+
+# Array API backend for FastSIMUS calls
+xp = cast(_ArrayNamespace, array_api_strict)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -178,8 +183,14 @@ def _fastsimus_pfield(
         RMS pressure field with shape (*grid_shape,).
     """
     params = preset_fn()
-    delays_1d = np.squeeze(delays)
-    return pfield(positions, delays_1d, params)
+    # Convert to array-api-strict for FastSIMUS call
+    delays_strict = xp.asarray(np.asarray(delays))
+    delays_1d = xp.reshape(delays_strict, (-1,))
+    positions_strict = xp.asarray(np.asarray(positions))
+    # Call pfield with array-api-strict arrays
+    result = pfield(positions_strict, delays_1d, params)
+    # Convert back to numpy for comparison
+    return np.asarray(result)
 
 
 # ---------------------------------------------------------------------------
@@ -290,14 +301,21 @@ class TestPfieldMatchesPyMUST:
         """Full frequency directivity path should give similar results to center-frequency only."""
         ref = request.getfixturevalue(ref_fixture)
         params = preset_fn()
-        delays_1d = np.squeeze(ref["delays"])
+        # Convert to array-api-strict for FastSIMUS calls
+        delays_strict = xp.asarray(np.asarray(ref["delays"]))
+        delays_1d = xp.reshape(delays_strict, (-1,))
+        positions_strict = xp.asarray(np.asarray(ref["positions"]))
 
         # Default: center-frequency directivity
-        rp_default = pfield(ref["positions"], delays_1d, params, full_frequency_directivity=False)
+        rp_default = pfield(positions_strict, delays_1d, params, full_frequency_directivity=False)
 
         # Full frequency-dependent directivity
-        rp_full_freq = pfield(ref["positions"], delays_1d, params, full_frequency_directivity=True)
+        rp_full_freq = pfield(positions_strict, delays_1d, params, full_frequency_directivity=True)
+
+        # Convert results back to numpy for comparison
+        rp_default_np = np.asarray(rp_default)
+        rp_full_freq_np = np.asarray(rp_full_freq)
 
         # Results should be very close (within a few percent)
         # Full frequency directivity is more accurate but the difference is small for typical bandwidths
-        _assert_pfield_close(rp_full_freq, rp_default, atol_peak=0.05, desc=f"{desc} full_frequency_directivity")
+        _assert_pfield_close(rp_full_freq_np, rp_default_np, atol_peak=0.05, desc=f"{desc} full_frequency_directivity")
