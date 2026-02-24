@@ -1,7 +1,18 @@
-"""Stubs for array-api-extra Array type to work with FastSIMUS Array."""
+"""Stubs for array-api-extra Array type to work with FastSIMUS Array.
 
-from typing import Any
+References:
+    https://data-apis.org/array-api-extra/api-reference.html
+"""
 
-def isclose(*args: Any, **kwargs: Any) -> Any: ...
-def sinc(*args: Any, **kwargs: Any) -> Any: ...
-def __getattr__(name: str) -> Any: ...
+from fast_simus.utils._array_api import Array, ArrayOrScalar, _ArrayNamespace
+
+def isclose(
+    a: ArrayOrScalar,
+    b: ArrayOrScalar,
+    *,
+    rtol: float = 1e-05,
+    atol: float = 1e-08,
+    equal_nan: bool = False,
+    xp: _ArrayNamespace | None = None,
+) -> Array: ...
+def sinc(x: Array, *, xp: _ArrayNamespace | None = None) -> Array: ...

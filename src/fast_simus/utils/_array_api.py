@@ -227,6 +227,9 @@ class Array(Protocol):
     def __bool__(self) -> bool: ...
 
 
+ArrayOrScalar = Array | int | float | complex | bool
+
+
 def array_namespace(
     *arrays: Any,
 ) -> _ArrayNamespace | _ArrayNamespaceWithLinAlg | _ArrayNamespaceWithFFT | _ArrayNamespaceWithLinAlgAndFFT:
