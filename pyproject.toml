@@ -123,11 +123,15 @@ sequence = [
 
 [tool.poe.tasks.test]
 help = "Test only code affected by recent changes, in parallel"
-cmd = "pytest --testmon -n auto --benchmark-skip"
+cmd = "pytest --testmon -n auto"
+# Need isolated = true to avoid conflicts with pytest-benchmark
+executor = { group = "test-parallel", isolated = true}
 
 [tool.poe.tasks.test-all]
 help = "Test all code (no benchmarks)"
-cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml --benchmark-skip"
+cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml"
+# Need isolated = true to avoid conflicts with pytest-benchmark
+executor = { group = "test-parallel", isolated = true }
 
 [tool.poe.tasks.benchmark]
 help = "Run performance benchmarks"
@@ -149,10 +153,12 @@ script = "shutil:rmtree('dist', ignore_errors=True)"
 [tool.poe.tasks.docs-test]
 help = "Test if documentation can be built without warnings or errors"
 cmd = "mkdocs build -s"
+executor = { group = "docs" }
 
 [tool.poe.tasks.docs]
 help = "Build and serve the documentation"
 cmd = "mkdocs serve"
+executor = { group = "docs" }
 
 
 # ---- lint settings ----
