@@ -9,10 +9,6 @@ All functions are Array API compliant and work with NumPy, JAX, CuPy backends.
 References:
     Garcia D. SIMUS: an open-source simulator for medical ultrasound imaging.
     Part I: theory & examples. CMPB, 2022;218:106726.
-
-    Shahriari S, Garcia D. Meshfree simulations of ultrasound vector flow
-    imaging using smoothed particle hydrodynamics. Phys Med Biol,
-    2018;63:205011.
 """
 
 from __future__ import annotations

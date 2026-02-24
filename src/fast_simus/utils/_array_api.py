@@ -62,6 +62,9 @@ class _ArrayNamespace(Protocol):
     uint32: Any
     uint64: Any
 
+    # Constants
+    pi: float
+
     # Creation functions
     def asarray(self, obj: Any, *, dtype: Any = None, device: Any = None, copy: bool = False) -> Array: ...
     def arange(
