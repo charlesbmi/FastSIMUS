@@ -52,7 +52,8 @@ def element_positions(
 
     if is_linear:
         # Linear array: elements evenly spaced along x-axis
-        indices = xp.arange(n_elements)
+        # Use float indices to satisfy array_api_strict (float+float promotion)
+        indices = xp.arange(0.0, float(n_elements))
         x = (indices - (n_elements - 1) / 2) * pitch
         z = xp.zeros(n_elements)
         theta = None

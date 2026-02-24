@@ -6,14 +6,6 @@ the azimuthal plane and Fresnel (paraxial) approximation in elevation.
 
 All functions are Array API compliant and work with NumPy, JAX, CuPy backends.
 
-JAX jit incompatibilities (for future refactor):
-    pfield cannot be jit-compiled due to concrete-value extraction from traced
-    arrays. Primary blocker: L533 df = 1/(float(xp.max(distances)) + ...).
-    Cascade: _select_frequencies(df), _first_last_true (int from nonzero),
-    for freq_idx in range(n_sampling), float(selected_freqs[i]).
-    Fix options: (1) static grid shape -> compute df from geometry before trace;
-    (2) two-phase API: pfield_precompute (eager) + pfield_eval (jit-compatible).
-
 References:
     Garcia D. SIMUS: an open-source simulator for medical ultrasound imaging.
     Part I: theory & examples. CMPB, 2022;218:106726.
@@ -535,7 +527,6 @@ def _pfield_core(
 
     # df chosen so phase increment 2*pi*(df*r/c + df*delay) < 2*pi
     # => df < 1/(r_max/c + delay_max)
-    # NOTE: float(xp.max(...)) blocks jax.jit (ConcretizationTypeError)
     df = 1.0 / (float(xp.max(distances)) / speed_of_sound + float(xp.max(delays_clean)))
     df = frequency_step * df
 
