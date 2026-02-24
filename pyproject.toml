@@ -123,11 +123,11 @@ sequence = [
 
 [tool.poe.tasks.test]
 help = "Test only code affected by recent changes, in parallel"
-cmd = "pytest --testmon -n auto"
+cmd = "pytest --testmon -n auto --benchmark-skip"
 
 [tool.poe.tasks.test-all]
-help = "Test all code"
-cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml"
+help = "Test all code (no benchmarks)"
+cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml --benchmark-skip"
 
 [tool.poe.tasks.benchmark]
 help = "Run performance benchmarks"
@@ -200,6 +200,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+"tests/**/*" = ["PLC0415"]  # Deferred imports for optional dependencies
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 
 [tool.ruff.lint.pydocstyle]
