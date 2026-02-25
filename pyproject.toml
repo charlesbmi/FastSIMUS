@@ -32,6 +32,7 @@ classifiers = [
 ]
 dependencies = [
     "array-api-compat>=1.13",
+    "array-api-extra==0.9.2",
     "beartype>=0.19.0",
     "jaxtyping>=0.2.37",
     "pydantic>=2.0,<3.0",
@@ -95,6 +96,9 @@ bench = [
 
 # ---- Poe the Poet task runner ----
 
+[tool.poe]
+executor = "uv"
+
 [tool.poe.tasks]
 
 [tool.poe.tasks.install]
@@ -119,15 +123,21 @@ sequence = [
 
 [tool.poe.tasks.test]
 help = "Test only code affected by recent changes, in parallel"
-cmd = "pytest --testmon -n auto"
+cmd = "pytest --testmon -n auto -p no:benchmark"
+# Need isolated = true to avoid conflicts with pytest-benchmark
+executor = { group = "test-parallel", python = "<3.14"}
 
 [tool.poe.tasks.test-all]
-help = "Test all code"
-cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml"
+help = "Test all code (no benchmarks)"
+cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml -p no:benchmark"
+# Need isolated = true to avoid conflicts with pytest-benchmark
+executor = { group = "test-parallel" }
 
 [tool.poe.tasks.benchmark]
 help = "Run performance benchmarks"
-cmd = "pytest --benchmark-only --benchmark-autosave -p no:xdist"
+cmd = "pytest --benchmark-only --benchmark-autosave -p no:xdist --benchmark-min-rounds=2 --benchmark-warmup-iterations 1"
+executor = { group = "bench" }
+
 
 [tool.poe.tasks.build]
 help = "Build wheel file"
@@ -143,10 +153,12 @@ script = "shutil:rmtree('dist', ignore_errors=True)"
 [tool.poe.tasks.docs-test]
 help = "Test if documentation can be built without warnings or errors"
 cmd = "mkdocs build -s"
+executor = { group = "docs" }
 
 [tool.poe.tasks.docs]
 help = "Build and serve the documentation"
 cmd = "mkdocs serve"
+executor = { group = "docs" }
 
 
 # ---- lint settings ----
@@ -194,17 +206,29 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+"tests/**/*" = ["PLC0415"]  # Deferred imports for optional dependencies
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.deptry.package_module_name_map]
+pytest-benchmark = "pytest_benchmark"
+
+[tool.ty.environment]
+extra-paths = ["stubs"]
+
 
 # ---- test settings ----
 [tool.pytest.ini_options]
 filterwarnings = [
-    "error",  # make warnings errors
-    "ignore::SyntaxWarning:pymust",  # PyMUST uses deprecated syntax
+    "error",  # FastSIMUS: treat all warnings as errors
+    "ignore::SyntaxWarning:pymust.*",  # PyMUST: invalid escape sequences in simus/mkmovie
+    "ignore::DeprecationWarning:pymust.*",
+    # PyMUST has \m in docstrings; module filter can't catch compile-time warnings,
+    # so match by message instead. DeprecationWarning on 3.11, SyntaxWarning on 3.12+.
+    "ignore:invalid escape sequence:DeprecationWarning",
+    "ignore:invalid escape sequence:SyntaxWarning",
 ]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]

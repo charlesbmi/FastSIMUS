@@ -26,6 +26,18 @@ wheels = [
 ]
 
 [[package]]
+name = "array-api-extra"
+version = "0.9.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "array-api-compat" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/58/a0/571d22e229aad80c4d200914db5218e7dae399aff097b34e8671c2fd6ff3/array_api_extra-0.9.2.tar.gz", hash = "sha256:630013895e6d1cb411ddb9a4a7aa9d3861281a448caaf4ce7a60f4284708d236", size = 87176, upload-time = "2026-01-03T13:37:45.703Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/21/2b/bfa1cfe370dd4ed51f834f2c6ad93b7f6263b83615ab96ad91094cc98ec6/array_api_extra-0.9.2-py3-none-any.whl", hash = "sha256:d0643a9a4e981746057649accad068ca0fe4066d890f6a95d8b4cd5131b3b661", size = 51056, upload-time = "2026-01-03T13:37:44.252Z" },
+]
+
+[[package]]
 name = "array-api-strict"
 version = "2.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -417,6 +429,7 @@ version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "array-api-compat" },
+    { name = "array-api-extra" },
     { name = "beartype" },
     { name = "jaxtyping" },
     { name = "pydantic" },
@@ -496,6 +509,7 @@ test-parallel = [
 [package.metadata]
 requires-dist = [
     { name = "array-api-compat", specifier = ">=1.13" },
+    { name = "array-api-extra", specifier = "==0.9.2" },
     { name = "beartype", specifier = ">=0.19.0" },
     { name = "jaxtyping", specifier = ">=0.2.37" },
     { name = "pydantic", specifier = ">=2.0,<3.0" },

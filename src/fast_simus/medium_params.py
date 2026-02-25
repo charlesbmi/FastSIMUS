@@ -10,7 +10,10 @@ class MediumParams(BaseModel):
     (e.g., soft tissue, water) that affect ultrasound wave propagation.
     """
 
-    model_config = ConfigDict(use_attribute_docstrings=True)
+    model_config = ConfigDict(
+        use_attribute_docstrings=True,
+        frozen=True,
+    )
 
     speed_of_sound: float = Field(default=1540.0, gt=0)
     """Speed of sound in m/s."""

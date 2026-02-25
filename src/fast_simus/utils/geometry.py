@@ -22,8 +22,7 @@ def element_positions(
     radius: float,
     xp: _ArrayNamespace,
 ) -> tuple[
-    Float[Array, " n_elements"],
-    Float[Array, " n_elements"],
+    Float[Array, "n_elements 2"],
     Float[Array, " n_elements"] | None,
     float,
 ]:
@@ -41,9 +40,9 @@ def element_positions(
         xp: Array namespace for creating arrays in the desired backend.
 
     Returns:
-        Tuple of (x_positions_m, z_positions_m, theta_rad, apex_offset_m):
-        - x_positions_m: Array of x-coordinates in meters. Shape (n_elements,).
-        - z_positions_m: Array of z-coordinates in meters. Shape (n_elements,).
+        Tuple of (positions, theta_rad, apex_offset_m):
+        - positions: Array of (x, z) coordinates in meters. Shape (n_elements, 2).
+          positions[:, 0] is lateral (x), positions[:, 1] is axial (z).
         - theta_rad: Array of angular positions in radians for convex arrays,
           None for linear arrays. Shape (n_elements,) or None.
         - apex_offset_m: Distance from array center to arc apex in meters.
@@ -53,9 +52,9 @@ def element_positions(
 
     if is_linear:
         # Linear array: elements evenly spaced along x-axis
-        indices = xp.arange(n_elements, dtype=xp.float64)
+        indices = xp.arange(n_elements, dtype=xp.float32)
         x = (indices - (n_elements - 1) / 2) * pitch
-        z = xp.zeros(n_elements, dtype=xp.float64)
+        z = xp.zeros(n_elements)
         theta = None
         apex_offset = 0.0
     else:
@@ -77,20 +76,13 @@ def element_positions(
         theta_end_arr = xp.atan2(chord / 2, apex_offset_arr)
         theta_end = float(theta_end_arr)
 
-        # Try to use linspace if available (most backends support it)
-        if hasattr(xp, "linspace"):
-            theta = xp.linspace(theta_start, theta_end, n_elements, dtype=xp.float64)
-        else:
-            # Manual linspace implementation for Array API compliance
-            indices = xp.arange(n_elements, dtype=xp.float64)
-            if n_elements > 1:
-                theta = theta_start + (theta_end - theta_start) * indices / (n_elements - 1)
-            else:
-                theta = xp.asarray([theta_start], dtype=xp.float64)
+        theta = xp.linspace(theta_start, theta_end, n_elements)
 
         # Convert angular positions to (x, z) coordinates
         # z = radius * cos(theta) - h (where h is apex_offset)
         z = xp.asarray(radius) * xp.cos(theta) - apex_offset
         x = xp.asarray(radius) * xp.sin(theta)
 
-    return x, z, theta, apex_offset
+    # Stack x and z into a single position array
+    positions = xp.stack([x, z], axis=-1)
+    return positions, theta, apex_offset

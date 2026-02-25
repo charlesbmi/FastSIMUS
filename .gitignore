@@ -5,6 +5,8 @@ tmp/
 trash/
 attic/
 .kash/
+prd.md
+.taskmaster/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -61,6 +63,8 @@ coverage.xml
 .testmondata-shm
 .testmondata-wal
 cover/
+.benchmarks/
+*.lprof
 
 # Translations
 *.mo
