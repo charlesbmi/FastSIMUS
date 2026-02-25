@@ -222,10 +222,13 @@ extra-paths = ["stubs"]
 # ---- test settings ----
 [tool.pytest.ini_options]
 filterwarnings = [
-    "error",  # treat all warnings as errors
+    "error",  # FastSIMUS: treat all warnings as errors
     "ignore::SyntaxWarning:pymust.*",  # PyMUST: invalid escape sequences in simus/mkmovie
     "ignore::DeprecationWarning:pymust.*",
-    "ignore:invalid escape sequence:SyntaxWarning",  # fallback when module unset at compile time
+    # PyMUST has \m in docstrings; module filter can't catch compile-time warnings,
+    # so match by message instead. DeprecationWarning on 3.11, SyntaxWarning on 3.12+.
+    "ignore:invalid escape sequence:DeprecationWarning",
+    "ignore:invalid escape sequence:SyntaxWarning",
 ]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
