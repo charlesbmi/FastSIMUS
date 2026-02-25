@@ -44,10 +44,10 @@ class _FrequencyPlan(NamedTuple):
         freq_step: Frequency step in Hz
     """
 
-    selected_freqs: Float[Array, " n_sampling"]
+    selected_freqs: Float[Array, " n_frequencies"]
     freq_mask: Bool[Array, " n_freq"]
-    pulse_spectrum: Complex[Array, " n_sampling"]
-    probe_spectrum: Float[Array, " n_sampling"]
+    pulse_spectrum: Complex[Array, " n_frequencies"]
+    probe_spectrum: Float[Array, " n_frequencies"]
     freq_step: float
 
 
@@ -264,32 +264,41 @@ def _init_exponentials(
 
 
 @jaxtyped(typechecker=typechecker)
-def _pfield_freq_step(
-    phase_decay: Complex[Array, "*batch n_elements n_sub"],
+def _pfield_freq_vectorized(
+    phase_decay_init: Complex[Array, "*grid n_elements n_sub"],
+    phase_decay_step: Complex[Array, "*grid n_elements n_sub"],
     delays_clean: Float[Array, " n_elements"],
     tx_apodization: Float[Array, " n_elements"],
-    is_out: Bool[Array, " *batch"],
-    wavenumber: float,
+    is_out: Bool[Array, " *grid"],
+    wavenumbers: Float[Array, " n_freq"],
     speed_of_sound: float,
-    pulse_spect_k: complex | Complex[Array, ""],
-    probe_spect_k: complex | float | Float[Array, ""],
+    pulse_spect: Complex[Array, " n_freq"],
+    probe_spect: Float[Array, " n_freq"],
     n_sub: int,
     seg_length: float,
-    sin_theta: Float[Array, "*batch n_elements n_sub"],
+    sin_theta: Float[Array, "*grid n_elements n_sub"],
     full_frequency_directivity: bool,
     xp: _ArrayNamespace,
-) -> Float[Array, " *batch"]:
-    """Compute pressure field contribution for a single frequency sample.
+) -> Float[Array, " *grid"]:
+    """Compute pressure field contribution for all frequencies at once.
+
+    Replaces the sequential frequency loop with vectorized tensor operations.
+    Uses the geometric progression: phase_decay[k] = init * step^k.
+
+    The sub-element loop (n_sub iterations) avoids materializing the full
+    (*grid, n_elements, n_sub, n_freq) tensor. Only (*grid, n_elements, n_freq)
+    is materialized per sub-element, then immediately contracted over elements.
 
     Args:
-        phase_decay: Complex exponential array with propagation and attenuation.
+        phase_decay_init: Complex propagation at first frequency.
+        phase_decay_step: Complex multiplier per frequency step.
         delays_clean: Transmit time delays (NaN replaced with 0).
-        tx_apodization: Transmit apodization weights (zeroed where delays were NaN).
+        tx_apodization: Transmit apodization weights.
         is_out: Out-of-field mask.
-        wavenumber: Angular wavenumber for this frequency (2*pi*f/c).
+        wavenumbers: Angular wavenumbers for all frequencies (2*pi*f/c).
         speed_of_sound: Speed of sound in m/s.
-        pulse_spect_k: Pulse spectrum value at this frequency.
-        probe_spect_k: Probe spectrum value at this frequency.
+        pulse_spect: Pulse spectrum at all selected frequencies.
+        probe_spect: Probe response at all selected frequencies.
         n_sub: Number of sub-elements per element.
         seg_length: Sub-element length (element_width / n_sub).
         sin_theta: Sine of angles relative to element normal.
@@ -297,33 +306,38 @@ def _pfield_freq_step(
         xp: Array namespace.
 
     Returns:
-        Squared magnitude |P_k|^2 of the pressure field at this frequency.
+        Sum of |P_k|^2 over all frequencies, shape (*grid,).
     """
-    # Single-element radiation patterns: average over sub-elements
-    if full_frequency_directivity:
-        sinc_arg_k = xp.asarray(wavenumber * seg_length / 2.0) * sin_theta / pi
-        element_pattern = xp.mean(xpx.sinc(sinc_arg_k, xp=xp) * phase_decay, axis=-1)
-    elif n_sub > 1:
-        element_pattern = xp.mean(phase_decay, axis=-1)
-    else:
-        element_pattern = phase_decay[..., 0]
+    n_freq = wavenumbers.shape[0]
+    exponents = xp.arange(n_freq, dtype=xp.float64)  # (n_freq,)
 
-    # Transmit delays + apodization
-    # delays_clean is 1-D (n_elements,), apply phase shift
-    delay_exp = xp.exp(xp.asarray(1j * wavenumber * speed_of_sound) * delays_clean)
-    delay_apodization = delay_exp * tx_apodization
+    # Delay + apodization for all frequencies at once: (n_elements, n_freq)
+    delay_apod = xp.exp(xp.asarray(1j) * wavenumbers * speed_of_sound * delays_clean[:, None]) * tx_apodization[:, None]
 
-    # Sum across elements: element_pattern (*batch, n_elements), delay_apodization (n_elements,)
-    pressure_k = xp.sum(element_pattern * delay_apodization, axis=-1)
+    # Accumulate over sub-elements to avoid materializing the 4D tensor
+    pressure_all = xp.asarray(0.0 + 0j)  # broadcasts to (*grid, n_freq)
 
-    # Apply spectrum
-    pressure_k = pulse_spect_k * pressure_k * probe_spect_k
+    for i in range(n_sub):
+        # Phase at all frequencies for sub-element i: (*grid, n_elements, n_freq)
+        phase_k = phase_decay_init[..., i, None] * phase_decay_step[..., i, None] ** exponents
 
-    # Zero out-of-field (no mutation)
-    pressure_k = xp.where(is_out, xp.asarray(0.0 + 0j), pressure_k)
+        if full_frequency_directivity:
+            sinc_arg = wavenumbers * seg_length / 2.0 * sin_theta[..., i, None] / pi
+            phase_k = xpx.sinc(sinc_arg, xp=xp) * phase_k
 
-    # Return squared magnitude
-    return xp.abs(pressure_k) ** 2
+        # Contract over elements: (*grid, n_elements, n_freq) -> (*grid, n_freq)
+        pressure_all = pressure_all + xp.sum(phase_k * delay_apod, axis=-2)
+
+    pressure_all = pressure_all / n_sub
+
+    # Apply spectra: (n_freq,) broadcasts with (*grid, n_freq)
+    pressure_all = pulse_spect * probe_spect * pressure_all
+
+    # Zero out-of-field points
+    pressure_all = xp.where(is_out[..., None], xp.asarray(0.0 + 0j), pressure_all)
+
+    # Sum |P_k|^2 over frequencies -> (*grid,)
+    return xp.sum(xp.abs(pressure_all) ** 2, axis=-1)
 
 
 @jaxtyped(typechecker=typechecker)
@@ -450,50 +464,40 @@ def pfield(
 
     freq_plan = _select_frequencies(params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, df, xp)
     selected_freqs = freq_plan.selected_freqs
-    n_sampling = selected_freqs.shape[0]
     pulse_spect = freq_plan.pulse_spectrum
     probe_spect = freq_plan.probe_spectrum
     df = freq_plan.freq_step
 
-    pressure_accum = xp.asarray(0.0)
     obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
-
     freq_start = float(selected_freqs[0])
-    phase_decay, phase_decay_step = _init_exponentials(
+    phase_decay_init, phase_decay_step = _init_exponentials(
         freq_start, speed_of_sound, attenuation, distances, obliquity_factor, df, xp
     )
 
-    # Simplified directivity (center-frequency only)
+    # Apply center-frequency directivity (when not computing per-frequency)
     if not full_frequency_directivity:
         center_wavenumber = 2.0 * pi * params.freq_center / speed_of_sound
         sinc_arg = xp.asarray(center_wavenumber * seg_length / 2.0) * sin_theta / pi
-        directivity = xpx.sinc(sinc_arg, xp=xp)
-        phase_decay = phase_decay * directivity
+        phase_decay_init = phase_decay_init * xpx.sinc(sinc_arg, xp=xp)
 
-    # Frequency loop
-    for freq_idx in range(n_sampling):
-        current_freq = float(selected_freqs[freq_idx])
-        wavenumber = 2.0 * pi * current_freq / speed_of_sound
+    wavenumbers = xp.asarray(2.0 * pi) * selected_freqs / speed_of_sound
 
-        if freq_idx > 0:
-            phase_decay = phase_decay * phase_decay_step
-
-        pressure_k_squared = _pfield_freq_step(
-            phase_decay=phase_decay,
-            delays_clean=delays_clean,
-            tx_apodization=tx_apodization,
-            is_out=is_out,
-            wavenumber=wavenumber,
-            speed_of_sound=speed_of_sound,
-            pulse_spect_k=pulse_spect[freq_idx],
-            probe_spect_k=probe_spect[freq_idx],
-            n_sub=n_sub,
-            seg_length=seg_length,
-            sin_theta=sin_theta,
-            full_frequency_directivity=full_frequency_directivity,
-            xp=xp,
-        )
-        pressure_accum = pressure_accum + pressure_k_squared
+    pressure_accum = _pfield_freq_vectorized(
+        phase_decay_init=phase_decay_init,
+        phase_decay_step=phase_decay_step,
+        delays_clean=delays_clean,
+        tx_apodization=tx_apodization,
+        is_out=is_out,
+        wavenumbers=wavenumbers,
+        speed_of_sound=speed_of_sound,
+        pulse_spect=pulse_spect,
+        probe_spect=probe_spect,
+        n_sub=n_sub,
+        seg_length=seg_length,
+        sin_theta=sin_theta,
+        full_frequency_directivity=full_frequency_directivity,
+        xp=xp,
+    )
 
     correction_factor = 1.0 if tx_n_wavelengths == float("inf") else df
     correction_factor = correction_factor * params.element_width
