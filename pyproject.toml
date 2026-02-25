@@ -123,15 +123,15 @@ sequence = [
 
 [tool.poe.tasks.test]
 help = "Test only code affected by recent changes, in parallel"
-cmd = "pytest --testmon -n auto"
+cmd = "pytest --testmon -n auto -p no:benchmark"
 # Need isolated = true to avoid conflicts with pytest-benchmark
-executor = { group = "test-parallel", isolated = true}
+executor = { group = "test-parallel" }
 
 [tool.poe.tasks.test-all]
 help = "Test all code (no benchmarks)"
-cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml"
+cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml -p no:benchmark"
 # Need isolated = true to avoid conflicts with pytest-benchmark
-executor = { group = "test-parallel", isolated = true }
+executor = { group = "test-parallel" }
 
 [tool.poe.tasks.benchmark]
 help = "Run performance benchmarks"
