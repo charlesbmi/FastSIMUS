@@ -125,7 +125,7 @@ sequence = [
 help = "Test only code affected by recent changes, in parallel"
 cmd = "pytest --testmon -n auto -p no:benchmark"
 # Need isolated = true to avoid conflicts with pytest-benchmark
-executor = { group = "test-parallel" }
+executor = { group = "test-parallel", python = "<3.14"}
 
 [tool.poe.tasks.test-all]
 help = "Test all code (no benchmarks)"
@@ -222,10 +222,10 @@ extra-paths = ["stubs"]
 # ---- test settings ----
 [tool.pytest.ini_options]
 filterwarnings = [
-    "error",  # make warnings errors
-    "ignore:invalid escape sequence:SyntaxWarning",  # PyMUST simus/mkmovie have \\m in strings; emitted at compile time
-    "ignore::SyntaxWarning:pymust.*",
+    "error",  # treat all warnings as errors
+    "ignore::SyntaxWarning:pymust.*",  # PyMUST: invalid escape sequences in simus/mkmovie
     "ignore::DeprecationWarning:pymust.*",
+    "ignore:invalid escape sequence:SyntaxWarning",  # fallback when module unset at compile time
 ]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
