@@ -223,9 +223,9 @@ extra-paths = ["stubs"]
 [tool.pytest.ini_options]
 filterwarnings = [
     "error",  # make warnings errors
-    "default::SyntaxWarning",  # PyMUST has invalid escape sequences; module filter can't catch compile-time warnings
-    "ignore::SyntaxWarning:pymust*",
-    "ignore::DeprecationWarning:pymust*",
+    "ignore:invalid escape sequence:SyntaxWarning",  # PyMUST simus/mkmovie have \\m in strings; emitted at compile time
+    "ignore::SyntaxWarning:pymust.*",
+    "ignore::DeprecationWarning:pymust.*",
 ]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
