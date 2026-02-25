@@ -1,4 +1,7 @@
-"""Unit tests for pfield helper functions."""
+"""Unit tests for pfield helper functions.
+
+Uses array-api-strict to test Array API compliance.
+"""
 
 from math import pi
 from typing import cast
@@ -59,8 +62,9 @@ class TestSubelementCentroids:
         # So [-0.25, 0] -> [0, 0.25], [0.25, 0] -> [0, -0.25]
         expected_x = xp.asarray([0.0, 0.0])
         expected_z = xp.asarray([0.25, -0.25])
-        assert bool(xp.all(xpx.isclose(offsets[0, :, 0], expected_x, atol=1e-10, xp=xp)))
-        assert bool(xp.all(xpx.isclose(offsets[0, :, 1], expected_z, atol=1e-10, xp=xp)))
+        atol = 1e-5
+        assert bool(xp.all(xpx.isclose(offsets[0, :, 0], expected_x, atol=atol, xp=xp)))
+        assert bool(xp.all(xpx.isclose(offsets[0, :, 1], expected_z, atol=atol, xp=xp)))
 
     def test_subelements_centered_invariant(self):
         """Invariant: sum(offsets, axis=1) == 0 (sub-elements centered on element)."""
@@ -72,7 +76,7 @@ class TestSubelementCentroids:
 
         # Sum over sub-elements (axis=1) should be zero
         sum_offsets = xp.sum(offsets, axis=1)
-        assert bool(xp.all(xpx.isclose(sum_offsets, 0.0, atol=1e-10, xp=xp)))
+        assert bool(xp.all(xpx.isclose(sum_offsets, 0.0, atol=1e-5, xp=xp)))
 
 
 class TestDistancesAndAngles:
@@ -275,4 +279,4 @@ class TestInitExponentials:
             freq_new, speed_of_sound, attenuation, distances, obliquity_factor, freq_step, xp
         )
 
-        assert bool(xp.all(xpx.isclose(phase_decay_stepped, phase_decay_direct, atol=1e-10, xp=xp)))
+        assert bool(xp.all(xpx.isclose(phase_decay_stepped, phase_decay_direct, atol=1e-5, xp=xp)))

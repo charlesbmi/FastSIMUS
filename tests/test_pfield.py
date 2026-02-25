@@ -4,7 +4,7 @@ Reference tests compare FastSIMUS pfield against PyMUST's pfield output.
 Tests are structured as invariants that must hold at every refactoring step.
 """
 
-from typing import Any, cast
+from typing import NamedTuple, cast
 
 import array_api_strict
 import numpy as np
@@ -12,6 +12,7 @@ import pymust
 import pytest
 
 from fast_simus.pfield import pfield
+from fast_simus.transducer_params import TransducerParams
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
 from fast_simus.utils._array_api import _ArrayNamespace
 
@@ -23,6 +24,19 @@ xp = cast(_ArrayNamespace, array_api_strict)
 # ---------------------------------------------------------------------------
 
 GRID_SIZE = 50
+
+
+class ReferenceData(NamedTuple):
+    """Typed reference data from PyMUST pfield."""
+
+    rp: np.ndarray
+    positions: np.ndarray
+    delays: np.ndarray
+    probe: str
+    x_grid: np.ndarray
+    z_grid: np.ndarray
+    focus: tuple[float, float] | None = None
+    tilt_rad: float | None = None
 
 
 def _make_grid(
@@ -60,21 +74,17 @@ def _pymust_reference(
     x_range: tuple[float, float],
     z_range: tuple[float, float],
     n: int = GRID_SIZE,
-) -> dict[str, Any]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Compute reference pressure field via PyMUST.
 
     Returns:
-        Dictionary with keys:
-        - 'rp': RMS pressure field, shape (n, n)
-        - 'x_grid': x coordinates, shape (n, n)
-        - 'z_grid': z coordinates, shape (n, n)
-        - 'positions': positions array, shape (n, n, 2)
+        Tuple of (rp, x_grid, z_grid, positions).
     """
     param = pymust.getparam(probe_name)
     x_grid, z_grid = _make_grid(x_range, z_range, n)
     positions = np.stack([x_grid, z_grid], axis=-1)
     rp, _spect, _idx = pymust.pfield(x_grid, [], z_grid, delays, param)  # type: ignore[arg-type]
-    return {"rp": rp, "x_grid": x_grid, "z_grid": z_grid, "positions": positions}
+    return rp, x_grid, z_grid, positions
 
 
 # ---------------------------------------------------------------------------
@@ -82,43 +92,66 @@ def _pymust_reference(
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
-def p4_2v_focused_reference() -> dict[str, Any]:
-    """P4-2v phased array, focused beam at (2cm, 5cm)."""
-    param = pymust.getparam("P4-2v")
-    x0, z0 = 0.02, 0.05
-    delays = pymust.txdelayFocused(param, x0, z0)
-    ref = _pymust_reference("P4-2v", delays, (-4e-2, 4e-2), (param.pitch, 10e-2))  # type: ignore[arg-type]
-    ref["delays"] = delays
-    ref["focus"] = (x0, z0)
-    ref["probe"] = "P4-2v"
-    return ref
+@pytest.fixture(
+    params=[
+        pytest.param("P4-2v-focused", id="P4-2v-focused"),
+        pytest.param("L11-5v-plane", id="L11-5v-plane"),
+        pytest.param("C5-2v-focused", id="C5-2v-focused"),
+    ]
+)
+def reference(request: pytest.FixtureRequest) -> ReferenceData:
+    """Parametrized reference data from PyMUST for P4-2v, L11-5v, C5-2v."""
+    case = request.param
+    if case == "P4-2v-focused":
+        param = pymust.getparam("P4-2v")
+        x0, z0 = 0.02, 0.05
+        delays = pymust.txdelayFocused(param, x0, z0)
+        rp, x_grid, z_grid, positions = _pymust_reference(
+            "P4-2v",
+            delays,
+            (-4e-2, 4e-2),
+            (param.pitch, 10e-2),  # type: ignore[arg-type]
+        )
+        return ReferenceData(rp, positions, delays, "P4-2v", x_grid, z_grid, focus=(x0, z0))
+    if case == "L11-5v-plane":
+        param = pymust.getparam("L11-5v")
+        tilt_rad = np.deg2rad(10.0)
+        delays = pymust.txdelayPlane(param, tilt_rad)
+        rp, x_grid, z_grid, positions = _pymust_reference(
+            "L11-5v",
+            delays,
+            (-2e-2, 2e-2),
+            (param.pitch, 4e-2),  # type: ignore[arg-type]
+        )
+        return ReferenceData(rp, positions, delays, "L11-5v", x_grid, z_grid, tilt_rad=tilt_rad)
+    if case == "C5-2v-focused":
+        param = pymust.getparam("C5-2v")
+        x0, z0 = 0.0, 0.06
+        delays = pymust.txdelayFocused(param, x0, z0)
+        rp, x_grid, z_grid, positions = _pymust_reference(
+            "C5-2v",
+            delays,
+            (-4e-2, 4e-2),
+            (param.pitch, 10e-2),  # type: ignore[arg-type]
+        )
+        return ReferenceData(rp, positions, delays, "C5-2v", x_grid, z_grid, focus=(x0, z0))
+    raise ValueError(f"Unknown reference case: {case}")
 
 
-@pytest.fixture()
-def l11_5v_plane_reference() -> dict[str, Any]:
-    """L11-5v linear array, plane wave at 10 degrees."""
-    param = pymust.getparam("L11-5v")
-    tilt_rad = np.deg2rad(10.0)
-    delays = pymust.txdelayPlane(param, tilt_rad)
-    ref = _pymust_reference("L11-5v", delays, (-2e-2, 2e-2), (param.pitch, 4e-2))  # type: ignore[arg-type]
-    ref["delays"] = delays
-    ref["tilt_rad"] = tilt_rad
-    ref["probe"] = "L11-5v"
-    return ref
+def _preset_for_probe(probe: str):
+    """Return preset callable for probe name."""
+    return {"P4-2v": P4_2v, "L11-5v": L11_5v, "C5-2v": C5_2v}[probe]
 
 
-@pytest.fixture()
-def c5_2v_focused_reference() -> dict[str, Any]:
-    """C5-2v convex array, focused beam at (0, 6cm)."""
-    param = pymust.getparam("C5-2v")
-    x0, z0 = 0.0, 0.06
-    delays = pymust.txdelayFocused(param, x0, z0)
-    ref = _pymust_reference("C5-2v", delays, (-4e-2, 4e-2), (param.pitch, 10e-2))  # type: ignore[arg-type]
-    ref["delays"] = delays
-    ref["focus"] = (x0, z0)
-    ref["probe"] = "C5-2v"
-    return ref
+def _assert_valid_pfield_output(rp, expected_shape: tuple[int, ...], *, expect_zero: bool = False) -> None:
+    """Assert pfield output has correct shape and valid values."""
+    assert rp.shape == expected_shape
+    rp_np = np.asarray(rp)
+    assert np.all(rp_np >= 0)
+    if expect_zero:
+        assert np.max(rp_np) < 1e-10
+    else:
+        assert np.max(rp_np) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -129,35 +162,20 @@ def c5_2v_focused_reference() -> dict[str, Any]:
 class TestPyMUSTReference:
     """Validate that PyMUST reference data is sane."""
 
-    @pytest.mark.parametrize(
-        "ref_fixture",
-        ["p4_2v_focused_reference", "l11_5v_plane_reference", "c5_2v_focused_reference"],
-    )
-    def test_shape_and_positivity(self, ref_fixture, request):
+    def test_shape_and_positivity(self, reference: ReferenceData):
         """Reference output has expected shape and all-positive values."""
-        ref = request.getfixturevalue(ref_fixture)
-        rp = ref["rp"]
-        assert rp.shape == (GRID_SIZE, GRID_SIZE)
-        assert np.all(rp >= 0), "RMS pressure must be non-negative"
-        assert np.max(rp) > 0, "Pressure field should not be all zeros"
+        assert reference.rp.shape == (GRID_SIZE, GRID_SIZE)
+        assert np.all(reference.rp >= 0), "RMS pressure must be non-negative"
+        assert np.max(reference.rp) > 0, "Pressure field should not be all zeros"
 
-    @pytest.mark.parametrize(
-        "ref_fixture",
-        ["p4_2v_focused_reference", "c5_2v_focused_reference"],
-    )
-    def test_peak_near_focus(self, ref_fixture, request):
+    @pytest.mark.parametrize("reference", ["P4-2v-focused", "C5-2v-focused"], indirect=True)
+    def test_peak_near_focus(self, reference: ReferenceData):
         """Peak pressure should be near the focal point (focused beams only)."""
-        ref = request.getfixturevalue(ref_fixture)
-        rp = ref["rp"]
-        x_grid, z_grid = ref["x_grid"], ref["z_grid"]
-        x0, z0 = ref["focus"]
-
-        # Find peak location
-        peak_idx = np.unravel_index(np.argmax(rp), rp.shape)
-        x_peak = x_grid[peak_idx]
-        z_peak = z_grid[peak_idx]
-
-        # Peak should be within 1cm of the intended focus
+        assert reference.focus is not None
+        x0, z0 = reference.focus
+        peak_idx = np.unravel_index(np.argmax(reference.rp), reference.rp.shape)
+        x_peak = reference.x_grid[peak_idx]
+        z_peak = reference.z_grid[peak_idx]
         dist = np.sqrt((x_peak - x0) ** 2 + (z_peak - z0) ** 2)
         assert dist < 0.01, f"Peak at ({x_peak:.4f}, {z_peak:.4f}), focus at ({x0}, {z0}), dist={dist:.4f}"
 
@@ -275,47 +293,85 @@ def _assert_pfield_close(actual: np.ndarray, expected: np.ndarray, atol_peak: fl
 class TestPfieldMatchesPyMUST:
     """Compare FastSIMUS pfield output against PyMUST reference."""
 
-    @pytest.mark.parametrize(
-        ("preset_fn", "ref_fixture", "desc"),
-        [
-            (P4_2v, "p4_2v_focused_reference", "P4-2v focused"),
-            (L11_5v, "l11_5v_plane_reference", "L11-5v plane"),
-            (C5_2v, "c5_2v_focused_reference", "C5-2v focused"),
-        ],
-    )
-    def test_matches_pymust(self, preset_fn, ref_fixture, desc, request):
+    def test_matches_pymust(self, reference: ReferenceData):
         """FastSIMUS pfield must match PyMUST reference."""
-        ref = request.getfixturevalue(ref_fixture)
-        fastsimus_rp = _fastsimus_pfield(preset_fn, ref["delays"], ref["positions"])
-        _assert_pfield_close(fastsimus_rp, ref["rp"], atol_peak=_PYMUST_ATOL_PEAK, desc=desc)
+        preset_fn = _preset_for_probe(reference.probe)
+        fastsimus_rp = _fastsimus_pfield(preset_fn, reference.delays, reference.positions)
+        _assert_pfield_close(fastsimus_rp, reference.rp, atol_peak=_PYMUST_ATOL_PEAK, desc=reference.probe)
 
-    @pytest.mark.parametrize(
-        ("preset_fn", "ref_fixture", "desc"),
-        [
-            (P4_2v, "p4_2v_focused_reference", "P4-2v focused"),
-            (L11_5v, "l11_5v_plane_reference", "L11-5v plane"),
-            (C5_2v, "c5_2v_focused_reference", "C5-2v focused"),
-        ],
-    )
-    def test_full_frequency_directivity(self, preset_fn, ref_fixture, desc, request):
+    def test_full_frequency_directivity(self, reference: ReferenceData):
         """Full frequency directivity path should give similar results to center-frequency only."""
-        ref = request.getfixturevalue(ref_fixture)
-        params = preset_fn()
-        # Convert to array-api-strict for FastSIMUS calls
-        delays_strict = xp.asarray(np.asarray(ref["delays"]))
+        params = _preset_for_probe(reference.probe)()
+        delays_strict = xp.asarray(np.asarray(reference.delays))
         delays_1d = xp.reshape(delays_strict, (-1,))
-        positions_strict = xp.asarray(np.asarray(ref["positions"]))
+        positions_strict = xp.asarray(np.asarray(reference.positions))
 
-        # Default: center-frequency directivity
         rp_default = pfield(positions_strict, delays_1d, params, full_frequency_directivity=False)
-
-        # Full frequency-dependent directivity
         rp_full_freq = pfield(positions_strict, delays_1d, params, full_frequency_directivity=True)
 
-        # Convert results back to numpy for comparison
         rp_default_np = np.asarray(rp_default)
         rp_full_freq_np = np.asarray(rp_full_freq)
 
-        # Results should be very close (within a few percent)
-        # Full frequency directivity is more accurate but the difference is small for typical bandwidths
-        _assert_pfield_close(rp_full_freq_np, rp_default_np, atol_peak=0.05, desc=f"{desc} full_frequency_directivity")
+        _assert_pfield_close(
+            rp_full_freq_np,
+            rp_default_np,
+            atol_peak=0.05,
+            desc=f"{reference.probe} full_frequency_directivity",
+        )
+
+
+class TestPfieldEdgeCases:
+    """Edge-case tests for pfield."""
+
+    def test_single_element_array(self):
+        """Single-element array produces valid output."""
+        params = TransducerParams(freq_center=3e6, pitch=1e-3, n_elements=1, width=1e-3)
+        positions = _make_positions((-2e-2, 2e-2), (1e-2, 5e-2), n=20)
+        rp = pfield(xp.asarray(positions), xp.asarray(np.zeros(1)), params)
+        _assert_valid_pfield_output(rp, positions.shape[:-1])
+
+    def test_all_nan_delays_zero_apodization(self):
+        """All-NaN delays yield zero apodization and valid (near-zero) field."""
+        params = L11_5v()
+        positions = _make_positions((-1e-2, 1e-2), (params.pitch, 2e-2), n=10)
+        delays = np.full(params.n_elements, np.nan)
+        rp = pfield(xp.asarray(positions), xp.asarray(delays), params)
+        _assert_valid_pfield_output(rp, positions.shape[:-1], expect_zero=True)
+
+    def test_custom_baffle_float(self):
+        """Custom baffle (float impedance ratio) produces valid output."""
+        params = P4_2v().model_copy(update={"baffle": 1.75})
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=15)
+        rp = pfield(xp.asarray(positions), xp.asarray(np.zeros(params.n_elements)), params)
+        _assert_valid_pfield_output(rp, positions.shape[:-1])
+
+    @pytest.mark.parametrize(
+        "pfield_kwargs",
+        [
+            {"element_splitting": 1},
+            {"frequency_step": 2.0},
+            {"tx_n_wavelengths": 10.0},
+        ],
+        ids=["element_splitting=1", "frequency_step=2", "tx_n_wavelengths=10"],
+    )
+    def test_pfield_options_produce_valid_output(self, pfield_kwargs):
+        """Pfield produces valid output with various option overrides."""
+        params = P4_2v()
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=15)
+        rp = pfield(
+            xp.asarray(positions),
+            xp.asarray(np.zeros(params.n_elements)),
+            params,
+            **pfield_kwargs,
+        )
+        _assert_valid_pfield_output(rp, positions.shape[:-1])
+
+    def test_1d_positions_input(self):
+        """1D positions (single line) produces valid output."""
+        params = P4_2v()
+        positions = np.stack(
+            [np.zeros(30), np.linspace(params.pitch, 5e-2, 30)],
+            axis=-1,
+        )
+        rp = pfield(xp.asarray(positions), xp.asarray(np.zeros(params.n_elements)), params)
+        _assert_valid_pfield_output(rp, (30,))
