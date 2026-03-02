@@ -51,6 +51,34 @@ class _FrequencyPlan(NamedTuple):
     freq_step: float
 
 
+class PfieldPlan(NamedTuple):
+    """Precomputed plan for pfield computation.
+
+    Contains all data-dependent quantities so
+    that ``pfield_compute`` has static array shapes and can be JIT-compiled.
+
+    Attributes:
+        selected_freqs: Significant frequency samples in Hz.
+        pulse_spectrum: Pulse spectrum at selected frequencies (complex).
+        probe_spectrum: Probe response at selected frequencies (real).
+        freq_start: First selected frequency in Hz (Python float for JIT compatibility).
+        freq_step: Frequency step in Hz.
+        n_sub: Number of sub-elements per transducer element.
+        seg_length: Sub-element length in meters (element_width / n_sub).
+        correction_factor: Scaling factor for the RMS integration
+            (df * element_width, or element_width when tx_n_wavelengths=inf).
+    """
+
+    selected_freqs: Float[Array, " n_frequencies"]
+    pulse_spectrum: Complex[Array, " n_frequencies"]
+    probe_spectrum: Float[Array, " n_frequencies"]
+    freq_start: float
+    freq_step: float
+    n_sub: int
+    seg_length: float
+    correction_factor: float
+
+
 @jaxtyped(typechecker=typechecker)
 def _subelement_centroids(
     element_width: float,
@@ -309,7 +337,7 @@ def _pfield_freq_vectorized(
         Sum of |P_k|^2 over all frequencies, shape (*grid,).
     """
     n_freq = wavenumbers.shape[0]
-    exponents = xp.arange(n_freq, dtype=xp.float64)  # (n_freq,)
+    exponents = xp.arange(n_freq, dtype=wavenumbers.dtype)  # match float dtype of inputs
 
     # Delay + apodization for all frequencies at once: (n_elements, n_freq)
     delay_apod = xp.exp(xp.asarray(1j) * wavenumbers * speed_of_sound * delays_clean[:, None]) * tx_apodization[:, None]
@@ -338,6 +366,175 @@ def _pfield_freq_vectorized(
 
     # Sum |P_k|^2 over frequencies -> (*grid,)
     return xp.sum(xp.abs(pressure_all) ** 2, axis=-1)
+
+
+def pfield_precompute(
+    positions: Float[Array, "*grid_shape 2"],
+    delays: Float[Array, " n_elements"],
+    params: TransducerParams,
+    medium: MediumParams = _DEFAULT_MEDIUM,
+    *,
+    tx_n_wavelengths: float | int = 1.0,
+    db_thresh: float | int = -60.0,
+    element_splitting: int | None = None,
+    frequency_step: float | int = 1.0,
+) -> PfieldPlan:
+    """Precompute static quantities for pfield computation.
+
+    Extracts all data-dependent scalars and
+    dynamically-shaped arrays so that ``pfield_compute`` has static shapes
+    suitable for JAX JIT compilation.
+
+    Args:
+        positions: Grid positions in meters. Shape ``(*grid_shape, 2)``.
+        delays: Transmit time delays in seconds. Shape ``(n_elements,)``.
+        params: Transducer parameters.
+        medium: Medium parameters.
+        tx_n_wavelengths: Number of wavelengths in the TX pulse.
+        db_thresh: Threshold in dB for frequency component selection.
+        element_splitting: Number of sub-elements per element (None = auto).
+        frequency_step: Scaling factor for the frequency step.
+
+    Returns:
+        PfieldPlan with static-shaped arrays and precomputed scalars.
+    """
+    xp = array_namespace(positions, delays)
+    speed_of_sound = medium.speed_of_sound
+
+    if positions.size == 0:
+        raise ValueError("Grid has no points")
+
+    # NaN-clean delays (for max-delay calculation)
+    delays_clean = xp.where(xp.isnan(delays), xp.asarray(0.0), delays)
+
+    # Element splitting: requires Python ceil on computed float
+    if element_splitting is not None:
+        n_sub = element_splitting
+    else:
+        lambda_min = speed_of_sound / (params.freq_center * (1.0 + params.bandwidth / 2.0))
+        n_sub = ceil(params.element_width / lambda_min)
+
+    seg_length = params.element_width / n_sub
+
+    # Geometry for max-distance calculation
+    element_pos, theta_elements, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
+    if theta_elements is None:
+        theta_elements = xp.zeros(params.n_elements)
+    subelement_offsets = _subelement_centroids(params.element_width, n_sub, theta_elements, xp)
+    distances, _, _ = _distances_and_angles(
+        positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
+    )
+
+    # Frequency step: requires float() extraction from array
+    df = 1.0 / (float(xp.max(distances)) / speed_of_sound + float(xp.max(delays_clean)))
+    df = float(frequency_step) * df
+
+    # Frequency selection: uses boolean masking -> dynamic n_frequencies
+    freq_plan = _select_frequencies(params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, df, xp)
+    df = freq_plan.freq_step
+
+    correction_factor = 1.0 if tx_n_wavelengths == float("inf") else df
+    correction_factor = correction_factor * params.element_width
+
+    return PfieldPlan(
+        selected_freqs=freq_plan.selected_freqs,
+        pulse_spectrum=freq_plan.pulse_spectrum,
+        probe_spectrum=freq_plan.probe_spectrum,
+        freq_start=float(freq_plan.selected_freqs[0]),
+        freq_step=df,
+        n_sub=n_sub,
+        seg_length=seg_length,
+        correction_factor=correction_factor,
+    )
+
+
+def pfield_compute(
+    positions: Float[Array, "*grid_shape 2"],
+    delays: Float[Array, " n_elements"],
+    plan: PfieldPlan,
+    params: TransducerParams,
+    medium: MediumParams = _DEFAULT_MEDIUM,
+    *,
+    tx_apodization: Float[Array, " n_elements"] | None = None,
+    full_frequency_directivity: bool = False,
+) -> Float[Array, " *grid_shape"]:
+    """Compute the RMS pressure field given a precomputed plan.
+
+    Contains only static-shape operations and is suitable for JAX JIT
+    compilation when ``plan`` and ``params`` are treated as static arguments.
+
+    Args:
+        positions: Grid positions in meters. Shape ``(*grid_shape, 2)``.
+        delays: Transmit time delays in seconds. Shape ``(n_elements,)``.
+        plan: Precomputed plan from ``pfield_precompute``.
+        params: Transducer parameters.
+        medium: Medium parameters.
+        tx_apodization: Transmit apodization weights. Shape ``(n_elements,)``.
+            Elements with NaN delays are automatically zeroed.
+        full_frequency_directivity: If True, compute element directivity at
+            every frequency. If False, use center-frequency-only directivity.
+
+    Returns:
+        RMS pressure field with shape ``(*grid_shape,)``.
+    """
+    xp = array_namespace(positions, delays, tx_apodization)
+
+    element_pos, theta_elements, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
+    if theta_elements is None:
+        theta_elements = xp.zeros(params.n_elements)
+
+    speed_of_sound = medium.speed_of_sound
+    attenuation = medium.attenuation
+
+    if tx_apodization is None:
+        tx_apodization = xp.ones(params.n_elements)
+
+    nan_mask = xp.isnan(delays)
+    tx_apodization = xp.where(nan_mask, xp.asarray(0.0), tx_apodization)
+    delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
+
+    subelement_offsets = _subelement_centroids(params.element_width, plan.n_sub, theta_elements, xp)
+
+    x = positions[..., 0]
+    z = positions[..., 1]
+    is_out = z < 0
+    if params.radius != inf:
+        is_out = is_out | ((x**2 + (z + apex_offset) ** 2) <= params.radius**2)
+
+    distances, sin_theta, theta_arr = _distances_and_angles(
+        positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
+    )
+
+    obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
+    phase_decay_init, phase_decay_step = _init_exponentials(
+        plan.freq_start, speed_of_sound, attenuation, distances, obliquity_factor, plan.freq_step, xp
+    )
+
+    if not full_frequency_directivity:
+        center_wavenumber = 2.0 * pi * params.freq_center / speed_of_sound
+        sinc_arg = xp.asarray(center_wavenumber * plan.seg_length / 2.0) * sin_theta / pi
+        phase_decay_init = phase_decay_init * xpx.sinc(sinc_arg, xp=xp)
+
+    wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
+
+    pressure_accum = _pfield_freq_vectorized(
+        phase_decay_init=phase_decay_init,
+        phase_decay_step=phase_decay_step,
+        delays_clean=delays_clean,
+        tx_apodization=tx_apodization,
+        is_out=is_out,
+        wavenumbers=wavenumbers,
+        speed_of_sound=speed_of_sound,
+        pulse_spect=plan.pulse_spectrum,
+        probe_spect=plan.probe_spectrum,
+        n_sub=plan.n_sub,
+        seg_length=plan.seg_length,
+        sin_theta=sin_theta,
+        full_frequency_directivity=full_frequency_directivity,
+        xp=xp,
+    )
+
+    return xp.sqrt(pressure_accum * plan.correction_factor)
 
 
 @jaxtyped(typechecker=typechecker)
@@ -412,97 +609,25 @@ def pfield(
     Returns:
         RMS pressure field with shape ``(*grid_shape,)``.
     """
-    xp = array_namespace(positions, delays, tx_apodization)
-
-    # Compute element positions and normalize theta_e for linear arrays
-    element_pos, theta_elements, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
-    if theta_elements is None:
-        theta_elements = xp.zeros(params.n_elements)
-
-    speed_of_sound = medium.speed_of_sound
-    attenuation = medium.attenuation
-
-    # Input validation
-    if positions.size == 0:
-        raise ValueError("Grid has no points")
-
-    if tx_apodization is None:
-        tx_apodization = xp.ones(params.n_elements)
-
-    # Zero tx_apodization where delays are NaN; replace NaN delays with 0
-    nan_mask = xp.isnan(delays)
-    tx_apodization = xp.where(nan_mask, xp.asarray(0.0), tx_apodization)
-    delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
-
-    # Element splitting
-    if element_splitting is not None:
-        n_sub = element_splitting
-    else:
-        lambda_min = speed_of_sound / (params.freq_center * (1.0 + params.bandwidth / 2.0))
-        n_sub = ceil(params.element_width / lambda_min)
-
-    seg_length = params.element_width / n_sub
-
-    # Sub-element centroids (shape: n_elements, n_sub, 2)
-    subelement_offsets = _subelement_centroids(params.element_width, n_sub, theta_elements, xp)
-
-    # Out-of-field mask
-    x = positions[..., 0]
-    z = positions[..., 1]
-    is_out = z < 0
-    if params.radius != inf:
-        is_out = is_out | ((x**2 + (z + apex_offset) ** 2) <= params.radius**2)
-
-    # Distances and angles (shape: *grid_shape, n_elements, n_sub)
-    distances, sin_theta, theta_arr = _distances_and_angles(
-        positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
+    plan = pfield_precompute(
+        positions,
+        delays,
+        params,
+        medium,
+        tx_n_wavelengths=tx_n_wavelengths,
+        db_thresh=db_thresh,
+        element_splitting=element_splitting,
+        frequency_step=frequency_step,
     )
-
-    # Frequency selection: df chosen so phase increment 2*pi*(df*r/c + df*delay) < 2*pi
-    df = 1.0 / (float(xp.max(distances)) / speed_of_sound + float(xp.max(delays_clean)))
-    df = frequency_step * df
-
-    freq_plan = _select_frequencies(params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, df, xp)
-    selected_freqs = freq_plan.selected_freqs
-    pulse_spect = freq_plan.pulse_spectrum
-    probe_spect = freq_plan.probe_spectrum
-    df = freq_plan.freq_step
-
-    obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
-    freq_start = float(selected_freqs[0])
-    phase_decay_init, phase_decay_step = _init_exponentials(
-        freq_start, speed_of_sound, attenuation, distances, obliquity_factor, df, xp
-    )
-
-    # Apply center-frequency directivity (when not computing per-frequency)
-    if not full_frequency_directivity:
-        center_wavenumber = 2.0 * pi * params.freq_center / speed_of_sound
-        sinc_arg = xp.asarray(center_wavenumber * seg_length / 2.0) * sin_theta / pi
-        phase_decay_init = phase_decay_init * xpx.sinc(sinc_arg, xp=xp)
-
-    wavenumbers = xp.asarray(2.0 * pi) * selected_freqs / speed_of_sound
-
-    pressure_accum = _pfield_freq_vectorized(
-        phase_decay_init=phase_decay_init,
-        phase_decay_step=phase_decay_step,
-        delays_clean=delays_clean,
+    return pfield_compute(
+        positions,
+        delays,
+        plan,
+        params,
+        medium,
         tx_apodization=tx_apodization,
-        is_out=is_out,
-        wavenumbers=wavenumbers,
-        speed_of_sound=speed_of_sound,
-        pulse_spect=pulse_spect,
-        probe_spect=probe_spect,
-        n_sub=n_sub,
-        seg_length=seg_length,
-        sin_theta=sin_theta,
         full_frequency_directivity=full_frequency_directivity,
-        xp=xp,
     )
-
-    correction_factor = 1.0 if tx_n_wavelengths == float("inf") else df
-    correction_factor = correction_factor * params.element_width
-
-    return xp.sqrt(pressure_accum * correction_factor)
 
 
 def _first_last_true(xp: _ArrayNamespace, mask: Array) -> tuple[int, int]:
