@@ -11,7 +11,7 @@ import numpy as np
 import pymust
 import pytest
 
-from fast_simus.pfield import pfield
+from fast_simus.pfield import pfield, pfield_compute, pfield_precompute
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
 from fast_simus.utils._array_api import _ArrayNamespace
@@ -375,3 +375,29 @@ class TestPfieldEdgeCases:
         )
         rp = pfield(xp.asarray(positions), xp.asarray(np.zeros(params.n_elements)), params)
         _assert_valid_pfield_output(rp, (30,))
+
+
+class TestPfieldPrecomputeCompute:
+    """Tests for the pfield_precompute / pfield_compute split API."""
+
+    @pytest.mark.parametrize("probe", ["P4-2v", "L11-5v", "C5-2v"])
+    def test_precompute_compute_matches_pfield(self, probe: str):
+        """pfield_precompute + pfield_compute must give bit-identical output to pfield."""
+        preset_fn = _preset_for_probe(probe)
+        params = preset_fn()
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=20)
+        delays = np.zeros(params.n_elements)
+
+        positions_strict = xp.asarray(positions)
+        delays_strict = xp.asarray(delays)
+
+        rp_direct = pfield(positions_strict, delays_strict, params)
+
+        plan = pfield_precompute(positions_strict, delays_strict, params)
+        rp_split = pfield_compute(positions_strict, delays_strict, plan, params)
+
+        np.testing.assert_array_equal(
+            np.asarray(rp_direct),
+            np.asarray(rp_split),
+            err_msg=f"{probe}: precompute+compute != pfield",
+        )

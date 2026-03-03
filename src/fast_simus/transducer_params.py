@@ -52,7 +52,7 @@ class TransducerParams(BaseModel):
         0.00035
     """
 
-    model_config = ConfigDict(use_attribute_docstrings=True)
+    model_config = ConfigDict(use_attribute_docstrings=True, frozen=True)
 
     # === Required Fields ===
     freq_center: float = Field(..., gt=0)
