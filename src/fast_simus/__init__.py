@@ -1,7 +1,7 @@
 """FastSIMUS - Fast Simulator for Medical Ultrasound based on SIMUS/MUST."""
 
 from fast_simus.medium_params import MediumParams
-from fast_simus.pfield import PfieldPlan, pfield, pfield_compute, pfield_precompute
+from fast_simus.pfield import PfieldPlan, pfield, pfield_compute, pfield_compute_chunked, pfield_precompute
 from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.tx_delay import (
     diverging_wave,
@@ -20,6 +20,7 @@ __all__ = [
     "focused",
     "pfield",
     "pfield_compute",
+    "pfield_compute_chunked",
     "pfield_precompute",
     "plane_wave",
 ]

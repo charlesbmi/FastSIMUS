@@ -11,7 +11,14 @@ import numpy as np
 import pymust
 import pytest
 
-from fast_simus.pfield import pfield, pfield_compute, pfield_precompute
+from fast_simus.pfield import (
+    _pfield_freq_chunk_freq,
+    _pfield_freq_element_accum,
+    pfield,
+    pfield_compute,
+    pfield_compute_chunked,
+    pfield_precompute,
+)
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
 from fast_simus.utils._array_api import _ArrayNamespace
@@ -401,3 +408,160 @@ class TestPfieldPrecomputeCompute:
             np.asarray(rp_split),
             err_msg=f"{probe}: precompute+compute != pfield",
         )
+
+
+# ---------------------------------------------------------------------------
+# Memory-strategy helper
+# ---------------------------------------------------------------------------
+
+
+def _call_with_strategy(
+    strategy_fn,
+    positions,
+    delays,
+    params: TransducerParams,
+    medium=None,
+    **strategy_kwargs,
+) -> np.ndarray:
+    """Call pfield pipeline using an alternate frequency strategy function."""
+    from math import inf, pi
+
+    import array_api_extra as xpx
+
+    from fast_simus.medium_params import MediumParams
+    from fast_simus.pfield import (
+        _distances_and_angles,
+        _init_exponentials,
+        _obliquity_factor,
+        _subelement_centroids,
+    )
+    from fast_simus.utils._array_api import array_namespace
+    from fast_simus.utils.geometry import element_positions
+
+    if medium is None:
+        medium = MediumParams()
+
+    plan = pfield_precompute(positions, delays, params, medium)
+    xp_ns = array_namespace(positions, delays)
+
+    element_pos, theta_elements, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp_ns)
+    if theta_elements is None:
+        theta_elements = xp_ns.zeros(params.n_elements)
+
+    speed_of_sound = medium.speed_of_sound
+    attenuation = medium.attenuation
+    tx_apodization = xp_ns.ones(params.n_elements)
+
+    nan_mask = xp_ns.isnan(delays)
+    tx_apodization = xp_ns.where(nan_mask, xp_ns.asarray(0.0), tx_apodization)
+    delays_clean = xp_ns.where(nan_mask, xp_ns.asarray(0.0), delays)
+
+    subelement_offsets = _subelement_centroids(params.element_width, plan.n_sub, theta_elements, xp_ns)
+
+    x = positions[..., 0]
+    z = positions[..., 1]
+    is_out = z < 0
+    if params.radius != inf:
+        is_out = is_out | ((x**2 + (z + apex_offset) ** 2) <= params.radius**2)
+
+    distances, sin_theta, theta_arr = _distances_and_angles(
+        positions,
+        subelement_offsets,
+        element_pos,
+        theta_elements,
+        speed_of_sound,
+        params.freq_center,
+        xp_ns,
+    )
+    obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp_ns)
+    phase_decay_init, phase_decay_step = _init_exponentials(
+        plan.freq_start,
+        speed_of_sound,
+        attenuation,
+        distances,
+        obliquity_factor,
+        plan.freq_step,
+        xp_ns,
+    )
+
+    center_wavenumber = 2.0 * pi * params.freq_center / speed_of_sound
+    sinc_arg = xp_ns.asarray(center_wavenumber * plan.seg_length / 2.0) * sin_theta / pi
+    phase_decay_init = phase_decay_init * xpx.sinc(sinc_arg, xp=xp_ns)
+
+    wavenumbers = xp_ns.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
+
+    pressure_accum = strategy_fn(
+        phase_decay_init=phase_decay_init,
+        phase_decay_step=phase_decay_step,
+        delays_clean=delays_clean,
+        tx_apodization=tx_apodization,
+        is_out=is_out,
+        wavenumbers=wavenumbers,
+        speed_of_sound=speed_of_sound,
+        pulse_spect=plan.pulse_spectrum,
+        probe_spect=plan.probe_spectrum,
+        n_sub=plan.n_sub,
+        seg_length=plan.seg_length,
+        sin_theta=sin_theta,
+        full_frequency_directivity=False,
+        xp=xp_ns,
+        **strategy_kwargs,
+    )
+    return np.asarray(xp_ns.sqrt(pressure_accum * plan.correction_factor))
+
+
+# ---------------------------------------------------------------------------
+# Memory-strategy tests
+# ---------------------------------------------------------------------------
+
+
+class TestMemoryStrategies:
+    """Compare memory-reduction strategies against baseline."""
+
+    @pytest.mark.parametrize("chunk_e", [1, 8, 64])
+    def test_element_accum_matches_baseline(self, chunk_e: int):
+        """Element accumulation strategy matches baseline output."""
+        params = P4_2v()
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=20)
+        delays = np.zeros(params.n_elements)
+        pos_strict = xp.asarray(positions)
+        del_strict = xp.asarray(delays)
+
+        baseline = np.asarray(pfield(pos_strict, del_strict, params))
+        result = _call_with_strategy(_pfield_freq_element_accum, pos_strict, del_strict, params, chunk_e=chunk_e)
+        np.testing.assert_allclose(result, baseline, rtol=1e-12)
+
+    @pytest.mark.parametrize("chunk_freq", [1, 4, 50])
+    def test_freq_chunk_matches_baseline(self, chunk_freq: int):
+        """Frequency chunking strategy matches baseline output."""
+        params = P4_2v()
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=20)
+        delays = np.zeros(params.n_elements)
+        pos_strict = xp.asarray(positions)
+        del_strict = xp.asarray(delays)
+
+        baseline = np.asarray(pfield(pos_strict, del_strict, params))
+        result = _call_with_strategy(_pfield_freq_chunk_freq, pos_strict, del_strict, params, chunk_freq=chunk_freq)
+        np.testing.assert_allclose(result, baseline, rtol=1e-12)
+
+    @pytest.mark.parametrize("grid_chunk_size", [100, 200, 10000])
+    def test_grid_chunk_matches_baseline(self, grid_chunk_size: int):
+        """Grid chunking strategy matches baseline output."""
+        params = P4_2v()
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=20)
+        delays = np.zeros(params.n_elements)
+        pos_strict = xp.asarray(positions)
+        del_strict = xp.asarray(delays)
+
+        baseline = np.asarray(pfield(pos_strict, del_strict, params))
+        plan = pfield_precompute(pos_strict, del_strict, params)
+        result = np.asarray(
+            pfield_compute_chunked(
+                pos_strict,
+                del_strict,
+                plan,
+                params,
+                grid_chunk_size=grid_chunk_size,
+            )
+        )
+        _assert_pfield_close(result, baseline, atol_peak=1e-6, desc=f"grid_chunk={grid_chunk_size}")

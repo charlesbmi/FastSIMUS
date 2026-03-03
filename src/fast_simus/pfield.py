@@ -368,6 +368,109 @@ def _pfield_freq_vectorized(
     return xp.sum(xp.abs(pressure_all) ** 2, axis=-1)
 
 
+def _pfield_freq_element_accum(
+    phase_decay_init: Complex[Array, "*grid n_elements n_sub"],
+    phase_decay_step: Complex[Array, "*grid n_elements n_sub"],
+    delays_clean: Float[Array, " n_elements"],
+    tx_apodization: Float[Array, " n_elements"],
+    is_out: Bool[Array, " *grid"],
+    wavenumbers: Float[Array, " n_freq"],
+    speed_of_sound: float,
+    pulse_spect: Complex[Array, " n_freq"],
+    probe_spect: Float[Array, " n_freq"],
+    n_sub: int,
+    seg_length: float,
+    sin_theta: Float[Array, "*grid n_elements n_sub"],
+    full_frequency_directivity: bool,
+    xp: _ArrayNamespace,
+    *,
+    chunk_e: int = 1,
+) -> Float[Array, " *grid"]:
+    """Element-chunked variant of ``_pfield_freq_vectorized``.
+
+    Loops over element chunks of size ``chunk_e`` to avoid materializing the
+    full ``(*grid, n_elements, n_freq)`` tensor. Produces bit-identical results
+    to the baseline vectorized implementation.
+    """
+    n_freq = wavenumbers.shape[0]
+    n_elements = phase_decay_init.shape[-2]
+    exponents = xp.arange(n_freq, dtype=wavenumbers.dtype)
+
+    delay_apod = xp.exp(xp.asarray(1j) * wavenumbers * speed_of_sound * delays_clean[:, None]) * tx_apodization[:, None]
+
+    pressure_all = xp.asarray(0.0 + 0j)
+
+    for i in range(n_sub):
+        for e_start in range(0, n_elements, chunk_e):
+            e_slice = slice(e_start, min(e_start + chunk_e, n_elements))
+            phase_k = phase_decay_init[..., e_slice, i, None] * phase_decay_step[..., e_slice, i, None] ** exponents
+
+            if full_frequency_directivity:
+                sinc_arg = wavenumbers * seg_length / 2.0 * sin_theta[..., e_slice, i, None] / pi
+                phase_k = xpx.sinc(sinc_arg, xp=xp) * phase_k
+
+            pressure_all = pressure_all + xp.sum(phase_k * delay_apod[e_slice, ...], axis=-2)
+
+    pressure_all = pressure_all / n_sub
+    pressure_all = pulse_spect * probe_spect * pressure_all
+    pressure_all = xp.where(is_out[..., None], xp.asarray(0.0 + 0j), pressure_all)
+    return xp.sum(xp.abs(pressure_all) ** 2, axis=-1)
+
+
+def _pfield_freq_chunk_freq(
+    phase_decay_init: Complex[Array, "*grid n_elements n_sub"],
+    phase_decay_step: Complex[Array, "*grid n_elements n_sub"],
+    delays_clean: Float[Array, " n_elements"],
+    tx_apodization: Float[Array, " n_elements"],
+    is_out: Bool[Array, " *grid"],
+    wavenumbers: Float[Array, " n_freq"],
+    speed_of_sound: float,
+    pulse_spect: Complex[Array, " n_freq"],
+    probe_spect: Float[Array, " n_freq"],
+    n_sub: int,
+    seg_length: float,
+    sin_theta: Float[Array, "*grid n_elements n_sub"],
+    full_frequency_directivity: bool,
+    xp: _ArrayNamespace,
+    *,
+    chunk_freq: int = 1,
+) -> Float[Array, " *grid"]:
+    """Frequency-chunked variant of ``_pfield_freq_vectorized``.
+
+    Loops over frequency chunks of size ``chunk_freq``, accumulating
+    ``sum |P_f|^2`` incrementally. Peak memory is proportional to
+    ``(*grid, n_elements, chunk_freq)`` instead of the full frequency axis.
+    """
+    n_freq = wavenumbers.shape[0]
+    exponents = xp.arange(n_freq, dtype=wavenumbers.dtype)
+
+    delay_apod = xp.exp(xp.asarray(1j) * wavenumbers * speed_of_sound * delays_clean[:, None]) * tx_apodization[:, None]
+
+    pressure_sq = xp.zeros(is_out.shape, dtype=wavenumbers.dtype)
+
+    for f_start in range(0, n_freq, chunk_freq):
+        f_slice = slice(f_start, min(f_start + chunk_freq, n_freq))
+        exps = exponents[f_slice]
+
+        pressure_chunk = xp.asarray(0.0 + 0j)
+
+        for i in range(n_sub):
+            phase_k = phase_decay_init[..., i, None] * phase_decay_step[..., i, None] ** exps
+
+            if full_frequency_directivity:
+                sinc_arg = wavenumbers[f_slice] * seg_length / 2.0 * sin_theta[..., i, None] / pi
+                phase_k = xpx.sinc(sinc_arg, xp=xp) * phase_k
+
+            pressure_chunk = pressure_chunk + xp.sum(phase_k * delay_apod[:, f_slice], axis=-2)
+
+        pressure_chunk = pressure_chunk / n_sub
+        pressure_chunk = pulse_spect[f_slice] * probe_spect[f_slice] * pressure_chunk
+        pressure_chunk = xp.where(is_out[..., None], xp.asarray(0.0 + 0j), pressure_chunk)
+        pressure_sq = pressure_sq + xp.sum(xp.abs(pressure_chunk) ** 2, axis=-1)
+
+    return pressure_sq
+
+
 def pfield_precompute(
     positions: Float[Array, "*grid_shape 2"],
     delays: Float[Array, " n_elements"],
@@ -535,6 +638,77 @@ def pfield_compute(
     )
 
     return xp.sqrt(pressure_accum * plan.correction_factor)
+
+
+def pfield_compute_chunked(
+    positions: Float[Array, "*grid_shape 2"],
+    delays: Float[Array, " n_elements"],
+    plan: PfieldPlan,
+    params: TransducerParams,
+    medium: MediumParams = _DEFAULT_MEDIUM,
+    *,
+    grid_chunk_size: int | None = None,
+    tx_apodization: Float[Array, " n_elements"] | None = None,
+    full_frequency_directivity: bool = False,
+) -> Float[Array, " *grid_shape"]:
+    """Compute the RMS pressure field by chunking the spatial grid.
+
+    Wraps ``pfield_compute``, splitting the positions into flat batches of
+    ``grid_chunk_size`` to limit peak memory. The ``plan`` must already be
+    precomputed over the full positions array (for correct max-distance
+    frequency sampling).
+
+    Args:
+        positions: Grid positions in meters. Shape ``(*grid_shape, 2)``.
+        delays: Transmit time delays in seconds. Shape ``(n_elements,)``.
+        plan: Precomputed plan from ``pfield_precompute`` (over full grid).
+        params: Transducer parameters.
+        medium: Medium parameters.
+        grid_chunk_size: Maximum number of grid points per batch. If None,
+            delegates directly to ``pfield_compute`` without chunking.
+        tx_apodization: Transmit apodization weights. Shape ``(n_elements,)``.
+        full_frequency_directivity: If True, compute frequency-dependent
+            directivity at every frequency.
+
+    Returns:
+        RMS pressure field with shape ``(*grid_shape,)``.
+    """
+    if grid_chunk_size is None:
+        return pfield_compute(
+            positions,
+            delays,
+            plan,
+            params,
+            medium,
+            tx_apodization=tx_apodization,
+            full_frequency_directivity=full_frequency_directivity,
+        )
+
+    xp = array_namespace(positions, delays)
+    grid_shape = positions.shape[:-1]
+    n_total = 1
+    for s in grid_shape:
+        n_total *= s
+
+    flat_pos = xp.reshape(positions, (n_total, 2))
+    results = []
+
+    for start in range(0, n_total, grid_chunk_size):
+        end = min(start + grid_chunk_size, n_total)
+        chunk_pos = xp.reshape(flat_pos[start:end, ...], (end - start, 1, 2))
+        chunk_result = pfield_compute(
+            chunk_pos,
+            delays,
+            plan,
+            params,
+            medium,
+            tx_apodization=tx_apodization,
+            full_frequency_directivity=full_frequency_directivity,
+        )
+        results.append(xp.reshape(chunk_result, (end - start,)))
+
+    flat_result = xp.concat(results, axis=0)
+    return xp.reshape(flat_result, grid_shape)
 
 
 @jaxtyped(typechecker=typechecker)
