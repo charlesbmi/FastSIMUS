@@ -9,7 +9,7 @@ from typing import cast
 import array_api_extra as xpx
 import array_api_strict
 import pytest
-from jaxtyping import Bool, Complex, Float, jaxtyped
+from jaxtyping import Complex, Float, jaxtyped
 
 from fast_simus.pfield import (
     _distances_and_angles,
@@ -165,7 +165,6 @@ class TestSelectFrequencies:
             assert isinstance(plan.selected_freqs, Float[Array, " n_sampling"])  # ty: ignore[invalid-argument-type]
             assert isinstance(plan.pulse_spectrum, Complex[Array, " n_sampling"])  # ty: ignore[invalid-argument-type]
             assert isinstance(plan.probe_spectrum, Float[Array, " n_sampling"])  # ty: ignore[invalid-argument-type]
-            assert isinstance(plan.freq_mask, Bool[Array, " n_freq"])  # ty: ignore[invalid-argument-type]
 
     def test_tighter_threshold_fewer_frequencies(self):
         """Tighter db_thresh (-10 dB) selects fewer frequencies than looser (-60 dB)."""

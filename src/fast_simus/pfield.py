@@ -38,14 +38,12 @@ class _FrequencyPlan(NamedTuple):
 
     Attributes:
         selected_freqs: Selected frequencies, shape
-        freq_mask: Boolean mask for selected frequencies, shape
         pulse_spectrum: Pulse spectrum at selected frequencies, shape
         probe_spectrum: Probe spectrum at selected frequencies, shape
         freq_step: Frequency step in Hz
     """
 
     selected_freqs: Float[Array, " n_frequencies"]
-    freq_mask: Bool[Array, " n_freq"]
     pulse_spectrum: Complex[Array, " n_frequencies"]
     probe_spectrum: Float[Array, " n_frequencies"]
     freq_step: float
@@ -194,16 +192,14 @@ def _select_frequencies(
     gain_db = 20.0 * xp.log10(xp.asarray(1e-200) + spectrum_magnitude / xp.max(spectrum_magnitude))
     above_threshold = gain_db > db_thresh
     idx_first, idx_last = _first_last_true(xp, above_threshold)
-    all_indices = xp.arange(frequencies.shape[0])
-    freq_mask = (all_indices >= idx_first) & (all_indices <= idx_last)
 
-    selected_freqs = frequencies[freq_mask]
+    selected_freqs = frequencies[idx_first : idx_last + 1]
 
     angular_freqs_sel = xp.asarray(2.0 * pi) * selected_freqs
     pulse_spect = pulse_spectrum(angular_freqs_sel, fc, tx_n_wavelengths)
     probe_spect = probe_spectrum(angular_freqs_sel, fc, bandwidth)
 
-    return _FrequencyPlan(selected_freqs, freq_mask, pulse_spect, probe_spect, freq_step)
+    return _FrequencyPlan(selected_freqs, pulse_spect, probe_spect, freq_step)
 
 
 @jaxtyped(typechecker=typechecker)
