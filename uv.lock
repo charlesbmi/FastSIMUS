@@ -506,6 +506,7 @@ lint = [
     { name = "deptry" },
     { name = "mdformat" },
     { name = "mdformat-gfm" },
+    { name = "prek" },
     { name = "ruff" },
     { name = "ty" },
 ]
@@ -594,6 +595,7 @@ lint = [
     { name = "deptry", specifier = ">=0.24.0" },
     { name = "mdformat", specifier = ">=0.7.21" },
     { name = "mdformat-gfm", specifier = ">=0.3.6" },
+    { name = "prek", specifier = ">=0.3.0" },
     { name = "ruff", specifier = ">=0.14.11" },
     { name = "ty", specifier = ">=0.0.13" },
 ]
