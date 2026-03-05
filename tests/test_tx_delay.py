@@ -5,6 +5,7 @@ These tests validate that our tx_delay implementation matches PyMUST outputs.
 
 from typing import cast
 
+import array_api_compat
 import array_api_strict
 import numpy as np
 import pymust
@@ -154,7 +155,7 @@ class TestPlaneWaveDelays:
         params = P4_2v()
         elem_pos, _, apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
 
-        fastsimus_delays = np.stack(  # type: ignore[no-matching-overload]
+        fastsimus_delays = xp.stack(
             [
                 plane_wave(elem_pos, t, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex)
                 for t in tilt
@@ -194,7 +195,7 @@ class TestCircularWaveDelays:
         elem_pos, _, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
         aperture_length = (params.n_elements - 1) * params.pitch
 
-        fastsimus_delays = np.stack(  # type: ignore[no-matching-overload]
+        fastsimus_delays = xp.stack(
             [
                 diverging_wave(elem_pos, t, w, aperture_length=aperture_length, speed_of_sound=SPEED_OF_SOUND)
                 for t, w in zip(tilt, width, strict=True)
@@ -215,8 +216,7 @@ class TestArrayAPICompliance:
 
         delays = focused(elem_pos, focus, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex)
 
-        assert hasattr(delays, "__array_namespace__")
-        assert delays.__array_namespace__().__name__ == "array_api_strict"  # type: ignore[misc]
+        assert array_api_compat.is_array_api_strict_namespace(array_api_compat.array_namespace(delays))
 
     def test_plane_wave_delays_preserves_backend(self):
         """Output should preserve input array backend."""
@@ -226,8 +226,7 @@ class TestArrayAPICompliance:
 
         delays = plane_wave(elem_pos, tilt, speed_of_sound=SPEED_OF_SOUND, radius=params.radius, apex_offset=apex)
 
-        assert hasattr(delays, "__array_namespace__")
-        assert delays.__array_namespace__().__name__ == "array_api_strict"  # type: ignore[misc]
+        assert array_api_compat.is_array_api_strict_namespace(array_api_compat.array_namespace(delays))
 
 
 class TestEdgeCases:
