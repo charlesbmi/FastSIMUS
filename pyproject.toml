@@ -233,10 +233,11 @@ filterwarnings = [
     "error",  # FastSIMUS: treat all warnings as errors
     "ignore::SyntaxWarning:pymust.*",  # PyMUST: invalid escape sequences in simus/mkmovie
     "ignore::DeprecationWarning:pymust.*",
-    # PyMUST has \m in docstrings; module filter can't catch compile-time warnings,
-    # so match by message instead. DeprecationWarning on 3.11, SyntaxWarning on 3.12+.
-    "ignore:invalid escape sequence:DeprecationWarning",
-    "ignore:invalid escape sequence:SyntaxWarning",
+    # PyMUST has \m in docstrings that trigger compile-time SyntaxWarning/DeprecationWarning.
+    # Warning filter message matching uses re.match() (anchored at start), so patterns need
+    # a leading .* to match messages like '"\\m" is an invalid escape sequence...'.
+    "ignore:.*invalid escape sequence:DeprecationWarning",
+    "ignore:.*invalid escape sequence:SyntaxWarning",
 ]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
