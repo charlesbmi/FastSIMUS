@@ -113,6 +113,7 @@ cmd = "prek run --all-files"
 [tool.poe.tasks.lint]
 help = "Run code quality tools"
 sequence = [
+    { cmd = "uv lock --locked" },
     { cmd = "ruff format src tests" },
     { cmd = "ruff check --fix src tests" },
     { cmd = "ty check" },
