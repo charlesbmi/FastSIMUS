@@ -2,9 +2,15 @@ version = 1
 revision = 3
 requires-python = ">=3.11, <4.0"
 resolution-markers = [
-    "python_full_version >= '3.13'",
-    "python_full_version == '3.12.*'",
-    "python_full_version < '3.12'",
+    "python_full_version >= '3.13' and sys_platform == 'darwin'",
+    "python_full_version >= '3.13' and sys_platform == 'linux'",
+    "python_full_version >= '3.13' and sys_platform != 'darwin' and sys_platform != 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'linux'",
+    "python_full_version < '3.12' and sys_platform == 'darwin'",
+    "python_full_version < '3.12' and sys_platform == 'linux'",
+    "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'linux'",
 ]
 
 [[package]]
@@ -455,6 +461,7 @@ bench = [
     { name = "array-api-strict" },
     { name = "equinox" },
     { name = "jax" },
+    { name = "mlx", marker = "sys_platform == 'darwin'" },
     { name = "numpy" },
     { name = "pymust" },
     { name = "pytest" },
@@ -475,6 +482,7 @@ dev = [
     { name = "mkdocs-include-markdown-plugin" },
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
+    { name = "mlx", marker = "sys_platform == 'darwin'" },
     { name = "numpy" },
     { name = "poethepoet" },
     { name = "prek" },
@@ -505,6 +513,7 @@ test = [
     { name = "array-api-strict" },
     { name = "equinox" },
     { name = "jax" },
+    { name = "mlx", marker = "sys_platform == 'darwin'" },
     { name = "numpy" },
     { name = "pymust" },
     { name = "pytest" },
@@ -516,6 +525,7 @@ test-parallel = [
     { name = "array-api-strict" },
     { name = "equinox" },
     { name = "jax" },
+    { name = "mlx", marker = "sys_platform == 'darwin'" },
     { name = "numpy" },
     { name = "pymust" },
     { name = "pytest" },
@@ -539,6 +549,7 @@ bench = [
     { name = "array-api-strict", specifier = ">=2.0" },
     { name = "equinox", specifier = ">=0.11" },
     { name = "jax", specifier = ">=0.9" },
+    { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.31" },
     { name = "numpy", specifier = ">=2.3" },
     { name = "pymust", specifier = ">=0.1.9" },
     { name = "pytest", specifier = ">=9.0.2" },
@@ -559,6 +570,7 @@ dev = [
     { name = "mkdocs-include-markdown-plugin", specifier = ">=4.0.0" },
     { name = "mkdocs-material", specifier = ">=9.7.1" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.0" },
+    { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.31" },
     { name = "numpy", specifier = ">=2.3" },
     { name = "poethepoet", specifier = ">=0.32.1" },
     { name = "prek", specifier = ">=0.3.0" },
@@ -589,6 +601,7 @@ test = [
     { name = "array-api-strict", specifier = ">=2.0" },
     { name = "equinox", specifier = ">=0.11" },
     { name = "jax", specifier = ">=0.9" },
+    { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.31" },
     { name = "numpy", specifier = ">=2.3" },
     { name = "pymust", specifier = ">=0.1.9" },
     { name = "pytest", specifier = ">=9.0.2" },
@@ -600,6 +613,7 @@ test-parallel = [
     { name = "array-api-strict", specifier = ">=2.0" },
     { name = "equinox", specifier = ">=0.11" },
     { name = "jax", specifier = ">=0.9" },
+    { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.31" },
     { name = "numpy", specifier = ">=2.3" },
     { name = "pymust", specifier = ">=0.1.9" },
     { name = "pytest", specifier = ">=9.0.2" },
@@ -1263,6 +1277,38 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/79/2b/a826ba18d2179a56e144aef69e57fb2ab7c464ef0b2111940ee8a3a223a2/ml_dtypes-0.5.4-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:0d2ffd05a2575b1519dc928c0b93c06339eb67173ff53acb00724502cda231cf", size = 5366332, upload-time = "2025-11-17T22:32:21.193Z" },
     { url = "https://files.pythonhosted.org/packages/84/44/f4d18446eacb20ea11e82f133ea8f86e2bf2891785b67d9da8d0ab0ef525/ml_dtypes-0.5.4-cp314-cp314t-win_amd64.whl", hash = "sha256:4381fe2f2452a2d7589689693d3162e876b3ddb0a832cde7a414f8e1adf7eab1", size = 236612, upload-time = "2025-11-17T22:32:22.579Z" },
     { url = "https://files.pythonhosted.org/packages/ad/3f/3d42e9a78fe5edf792a83c074b13b9b770092a4fbf3462872f4303135f09/ml_dtypes-0.5.4-cp314-cp314t-win_arm64.whl", hash = "sha256:11942cbf2cf92157db91e5022633c0d9474d4dfd813a909383bd23ce828a4b7d", size = 168825, upload-time = "2025-11-17T22:32:23.766Z" },
+]
+
+[[package]]
+name = "mlx"
+version = "0.31.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mlx-metal", marker = "sys_platform == 'darwin'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1e/d3/fcb8b9f645ae70b3295a353999c3c6c7a66fd43ed8aa716b13da12bf40d4/mlx-0.31.0-cp311-cp311-macosx_14_0_arm64.whl", hash = "sha256:285313eaeba425e58cbb3238c2d1a3894e6252d58f243ce56681d5419a568d6c", size = 575602, upload-time = "2026-02-27T23:49:19.314Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/2a/d35072e8dc31d9550f8218cfc388c1cd12c7fd89e8246540a9c7b873d958/mlx-0.31.0-cp311-cp311-macosx_15_0_arm64.whl", hash = "sha256:acf4f04ff33a80784a0f15c492166dc889e65659b41c410ca5a7c2d78bee2a3a", size = 575603, upload-time = "2026-02-27T23:49:20.651Z" },
+    { url = "https://files.pythonhosted.org/packages/43/fa/eca64a514cd50a4a38cc9b8827db85d9e554c3fe407ede043d061055b1ab/mlx-0.31.0-cp311-cp311-macosx_26_0_arm64.whl", hash = "sha256:f624571e23a86654496c42a507b4bb42ded0edb91f33161fabafdbf6b81ba024", size = 575637, upload-time = "2026-02-27T23:49:22.02Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/7d/87fb0daa006dbbbd8894c3d496c7d9dfc52e4ade260482276d3eca137a15/mlx-0.31.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:de6c0a3e8aa0e7d1365d46634fdbb3f835c164fbdb6ba8a239e039a4efa07fe2", size = 575834, upload-time = "2026-02-27T23:49:26.61Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/e3/aa0fac5a9d52b1a4686c7097e56775c1a96dee3084f9c587b74e4c2cd284/mlx-0.31.0-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:d6af01b15177da995336a6fd9878e7c5994720a9f1614d8f4d1dbe9293167c30", size = 575836, upload-time = "2026-02-27T23:49:28.505Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/15/6aa3edaa34aeef370634756b7d131b8dc1cdb0002ddecdd3d876b5f9fa0c/mlx-0.31.0-cp312-cp312-macosx_26_0_arm64.whl", hash = "sha256:1ad14ddc3a15818f5bba0de35e88559ed8dcb93ccff2ef879ff604d02d663b25", size = 575828, upload-time = "2026-02-27T23:49:29.684Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/09/35d1192cf1f655438213d8baa2264a8bc2426b44d93802dabfc177fd8e81/mlx-0.31.0-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:4f33e9aafc6d3ad29e72743dfb786c4ce67397414f0a091469058626381fc1bc", size = 575815, upload-time = "2026-02-27T23:49:34.607Z" },
+    { url = "https://files.pythonhosted.org/packages/59/9d/29e0cb154a31ed05c9d24c776513bf1ec506b8570e214b4563b55bb19ef6/mlx-0.31.0-cp313-cp313-macosx_15_0_arm64.whl", hash = "sha256:242806b8ad6a4d3ce86cdff513f86520552de7592786712770b2e1ebd178816a", size = 575821, upload-time = "2026-02-27T23:49:35.947Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/6c/437aefdca17216aab02d0fb7528cd63e2c3d8d9c1b079c07d579a770645f/mlx-0.31.0-cp313-cp313-macosx_26_0_arm64.whl", hash = "sha256:7f0bdbac084017820ce513a12318771a06c7ec10fad159839e27c998bc5dad89", size = 575810, upload-time = "2026-02-27T23:49:37.165Z" },
+    { url = "https://files.pythonhosted.org/packages/66/60/0152a44ed737c3b16e9044909d01212b99e216c6ab4b2f76faa054ae8172/mlx-0.31.0-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:cce3e15cf11c608c9e721502fe56e54f9f48b897e9b80f1204a48643d68710c0", size = 577579, upload-time = "2026-02-27T23:49:41.723Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/6b/70f0a254d7ace58a030547a99219f1342c3cf383029e1af90eee3efaeb85/mlx-0.31.0-cp314-cp314-macosx_15_0_arm64.whl", hash = "sha256:ba330fe40d73b202880bbb5cac62de0b639cf4c44a12853bcadb34a9e3ffe880", size = 577582, upload-time = "2026-02-27T23:49:42.998Z" },
+    { url = "https://files.pythonhosted.org/packages/63/5a/81cf057dbc005a43d27b7dfaff88198c61bbfe76cb8da3499821083c3fca/mlx-0.31.0-cp314-cp314-macosx_26_0_arm64.whl", hash = "sha256:d2014d113070846c6cdee980653f561c92a4a663a449f64e70c15bbf74d637e1", size = 577535, upload-time = "2026-02-27T23:49:44.475Z" },
+]
+
+[[package]]
+name = "mlx-metal"
+version = "0.31.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/4f/0a0671dfa62b59bf429edab0e2c9c7f9bc77865aa4218cd46f2f41d7d11a/mlx_metal-0.31.0-py3-none-macosx_14_0_arm64.whl", hash = "sha256:1c572a6e3634a63060c103b0c38ac309e2d217be15519e3d8f0d6b452bb015f5", size = 38596752, upload-time = "2026-02-27T23:29:39.52Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/42/c6d7bfd097b777f932d6cf8c79e41b565070b63cc452a069b8804e505140/mlx_metal-0.31.0-py3-none-macosx_15_0_arm64.whl", hash = "sha256:554dc7cb29e0ea5fb6941df42f11a1de385b095848e6183c7a99d7c1f1a11f5d", size = 38595434, upload-time = "2026-02-27T23:29:43.285Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/8f/cdaffd759b4c71e74c294e773daacad8aafabac103b93e0aa56d4468d279/mlx_metal-0.31.0-py3-none-macosx_26_0_arm64.whl", hash = "sha256:7fd412f55ddf9f1d90c2cd86ce281d19e8eb93d093c6dbd784a49f8bd7d0a22c", size = 47879607, upload-time = "2026-02-27T23:29:46.571Z" },
 ]
 
 [[package]]
