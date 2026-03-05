@@ -129,7 +129,7 @@ sequence = [
 help = "Test only code affected by recent changes, in parallel"
 cmd = "pytest tests/ --ignore=tests/benchmarks --testmon -n auto -p no:benchmark"
 # Need isolated = true to avoid conflicts with pytest-benchmark
-executor = { group = "test-parallel", python = "<3.14"}
+executor = { group = "test-parallel" }
 
 [tool.poe.tasks.test-all]
 help = "Test all code (no benchmarks)"
