@@ -48,14 +48,6 @@ jobs:
           restore-keys: |
             testmon-${{ runner.os }}-py${{ matrix.python-version }}-
 
-      # https://github.com/ml-explore/mlx/issues/2281
-      - name: Default to g++-12 (Linux only; workaround for MLX issue)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get install -y g++-12
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 120
-          sudo update-alternatives --set g++ /usr/bin/g++-12
-
       - name: Run tests with testmon
         run: uv run poe test
 
