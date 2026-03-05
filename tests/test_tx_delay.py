@@ -129,7 +129,7 @@ class TestPlaneWaveDelays:
         )
 
         np.testing.assert_allclose(cast(np.ndarray, fastsimus_delays), pymust_delays, atol=1e-12)
-        np.testing.assert_allclose(fastsimus_delays, 0.0, atol=1e-12)  # type: ignore[no-matching-overload]
+        np.testing.assert_allclose(cast(np.ndarray, fastsimus_delays), 0.0, atol=1e-12)
 
     def test_plane_wave_convex_matches_pymust(self):
         """Plane wave delays for convex array should match PyMUST."""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import EllipsisType
 from typing import Any, Literal, Protocol, Self, cast, runtime_checkable
 
 from array_api_compat import array_namespace as xpc_array_namespace
@@ -207,7 +208,7 @@ class Array(Protocol):
     def __eq__(self, other: int | float | complex | Self) -> Self: ...  # type: ignore[invalid-method-override]
     def __ne__(self, other: int | float | complex | Self) -> Self: ...  # type: ignore[invalid-method-override]
     def __getitem__(
-        self, key: int | slice | ... | None | tuple[int | slice | ... | Self | None, ...] | Self, /
+        self, key: int | slice | EllipsisType | None | tuple[int | slice | EllipsisType | Self | None, ...] | Self, /
     ) -> Self: ...
 
     # Reflected operations for scalar op array

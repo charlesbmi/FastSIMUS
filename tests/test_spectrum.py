@@ -3,11 +3,14 @@
 Compares FastSIMUS spectrum functions against PyMUST reference implementations.
 """
 
+from typing import cast
+
 import numpy as np
 import pymust
 import pytest
 
 from fast_simus.spectrum import probe_spectrum, pulse_spectrum
+from fast_simus.utils._array_api import Array
 
 
 class TestPulseSpectrumMatchesPyMUST:
@@ -23,17 +26,20 @@ class TestPulseSpectrumMatchesPyMUST:
         # PyMUST reference (no chirp)
         pymust_fn = pymust_param.getPulseSpectrumFunction(None)
 
-        # Evaluate at a range of angular frequencies
-        freqs = np.linspace(0, 2 * pymust_param.fc, 500)  # type: ignore[operator]
+        assert pymust_param.fc is not None
+        fc = float(pymust_param.fc)
+        freqs = np.linspace(0, 2 * fc, 500)
         angular_freqs = 2 * np.pi * freqs
 
         pymust_result = pymust_fn(angular_freqs)
         # FastSIMUS implementation
         # PyMUST bandwidth is in %, FastSIMUS uses fraction - but pulse spectrum
         # only depends on fc and TXnow, not bandwidth
-        our_result = pulse_spectrum(angular_freqs, pymust_param.fc, tx_n_wavelengths=tx_n_wavelengths)
+        our_result = pulse_spectrum(cast(Array, angular_freqs), fc, tx_n_wavelengths=tx_n_wavelengths)
 
-        np.testing.assert_allclose(our_result, pymust_result, rtol=1e-10, atol=1e-14)
+        np.testing.assert_allclose(
+            cast(np.ndarray, our_result), cast(np.ndarray, pymust_result), rtol=1e-10, atol=1e-14
+        )
 
 
 class TestProbeSpectrumMatchesPyMUST:
@@ -47,12 +53,14 @@ class TestProbeSpectrumMatchesPyMUST:
         # PyMUST reference
         pymust_fn = pymust_param.getProbeFunction()
 
-        # Evaluate at a range of angular frequencies
-        freqs = np.linspace(0, 2 * pymust_param.fc, 500)  # type: ignore[operator]
+        assert pymust_param.fc is not None and pymust_param.bandwidth is not None
+        fc = float(pymust_param.fc)
+        bandwidth = float(pymust_param.bandwidth) / 100.0
+        freqs = np.linspace(0, 2 * fc, 500)
         angular_freqs = 2 * np.pi * freqs
 
         pymust_result = pymust_fn(angular_freqs)
         # FastSIMUS: convert bandwidth from % to fraction
-        our_result = probe_spectrum(angular_freqs, pymust_param.fc, bandwidth=pymust_param.bandwidth / 100.0)  # type: ignore[arg-type, operator]
+        our_result = probe_spectrum(cast(Array, angular_freqs), fc, bandwidth=bandwidth)
 
-        np.testing.assert_allclose(our_result, pymust_result, rtol=1e-10)
+        np.testing.assert_allclose(cast(np.ndarray, our_result), cast(np.ndarray, pymust_result), rtol=1e-10)
