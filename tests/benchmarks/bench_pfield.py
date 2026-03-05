@@ -81,9 +81,6 @@ def _sync(result: Array, xp: _ArrayNamespace) -> None:
 @pytest.mark.parametrize("grid_n", [100])
 def test_bench_pfield_compute(benchmark, xp, grid_n):
     """Benchmark pfield_compute (P4-2v) across array backends."""
-    if array_api_compat.is_array_api_strict_namespace(xp):
-        pytest.skip("array-api-strict is not a compute backend")
-
     params = P4_2v()
     positions = _make_positions(grid_n, xp)
     delays = xp.zeros(params.n_elements)

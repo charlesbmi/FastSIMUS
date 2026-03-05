@@ -3,7 +3,6 @@
 import contextlib
 from typing import cast
 
-import array_api_strict as xp_strict
 import pytest
 
 from fast_simus.utils._array_api import _ArrayNamespace
@@ -36,10 +35,6 @@ with contextlib.suppress(ImportError):
 
 @pytest.fixture(
     params=[
-        pytest.param(
-            xp_strict,
-            id="array-api-strict",
-        ),
         pytest.param(np, id="numpy", marks=pytest.mark.skipif(not HAS_NUMPY, reason="NumPy not available")),
         pytest.param(
             jnp,
@@ -58,6 +53,8 @@ with contextlib.suppress(ImportError):
 def xp(request) -> _ArrayNamespace:
     """Fixture providing different array API backends.
 
-    Parametrizes tests to run with NumPy, array-api-strict, JAX, and MLX.
+    Parametrizes tests to run with NumPy, JAX, and MLX.
+    Does not include array-api-strict, which can be used in place of parametrized backend
+    for Array API compliance testing.
     """
     return cast(_ArrayNamespace, request.param)
