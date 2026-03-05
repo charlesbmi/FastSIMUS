@@ -10,12 +10,11 @@ on:
     types: [opened, reopened, ready_for_review]
     paths:
       - "**"
-      - "!**.md"
-      - "!**.rst"
-      - "!docs/**"
-      - "!.gitignore"
-      - "!.github/workflows/*.yml"
-      - ".github/workflows/benchmark.yml"
+    paths-ignore:
+      - "**.md"
+      - "**.rst"
+      - "docs/**"
+      - ".gitignore"
   workflow_dispatch:
 
 
