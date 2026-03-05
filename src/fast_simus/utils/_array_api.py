@@ -44,8 +44,11 @@ class _ArrayNamespace(Protocol):
     This covers the common operations and data types used throughout the FastSIMUS codebase.
     Based on the Array API specification: https://data-apis.org/array-api/latest/
 
-    Note: This base protocol does NOT include optional extensions (linalg, fft).
-    Use the extended protocols for namespaces that have these extensions.
+    Notes:
+        - This base protocol does NOT include optional extensions (linalg, fft).
+            Use the extended protocols for namespaces that have these extensions.
+        - We remove some Array API standard functions that are not used in the codebase,
+            to be lenient about other array libraries like MLX
     """
 
     # Data types
