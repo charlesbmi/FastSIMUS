@@ -1,4 +1,4 @@
-name: Benchmark
+name: benchmark
 
 on:
   push:
@@ -20,7 +20,7 @@ on:
 
 
 jobs:
-  benchmark:
+  bench:
     # for now, run on Apple Silicon for mlx
     runs-on: macos-latest
 
