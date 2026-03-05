@@ -54,7 +54,7 @@ def xp(request) -> _ArrayNamespace:
     """Fixture providing different array API backends.
 
     Parametrizes tests to run with NumPy, JAX, and MLX.
-    Does not include array-api-strict, which can be used in place of parametrized backend
+    Does not include array-api-strict, which can be used in place of a parametrized backend
     for Array API compliance testing.
     """
     return cast(_ArrayNamespace, request.param)
