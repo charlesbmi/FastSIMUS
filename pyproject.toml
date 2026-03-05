@@ -63,12 +63,13 @@ docs = [
     "mkdocs-include-markdown-plugin>=4.0.0",
 ]
 lint = [
+    "prek>=0.3.0",
     "codespell>=2.4.1",
     "deptry>=0.24.0",
     "mdformat>=0.7.21",
     "mdformat-gfm>=0.3.6",
     "ruff>=0.14.11",
-    "ty>=0.0.13",
+    "ty>=0.0.20",
 ]
 # Test groups are split because pytest-xdist and pytest-benchmark conflict in parallel mode
 # - test: base test dependencies
@@ -126,19 +127,19 @@ sequence = [
 
 [tool.poe.tasks.test]
 help = "Test only code affected by recent changes, in parallel"
-cmd = "pytest --testmon -n auto -p no:benchmark"
+cmd = "pytest tests/ --ignore=tests/benchmarks --testmon -n auto -p no:benchmark"
 # Need isolated = true to avoid conflicts with pytest-benchmark
-executor = { group = "test-parallel", python = "<3.14"}
+executor = { group = "test-parallel" }
 
 [tool.poe.tasks.test-all]
 help = "Test all code (no benchmarks)"
-cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml -p no:benchmark"
+cmd = "pytest tests/ --ignore=tests/benchmarks -n auto --cov --cov-config=pyproject.toml --cov-report=xml -p no:benchmark"
 # Need isolated = true to avoid conflicts with pytest-benchmark
 executor = { group = "test-parallel" }
 
 [tool.poe.tasks.benchmark]
 help = "Run performance benchmarks"
-cmd = "pytest --benchmark-only --benchmark-autosave -p no:xdist --benchmark-min-rounds=2 --benchmark-warmup-iterations 1"
+cmd = "pytest tests/benchmarks/ --benchmark-only --benchmark-autosave -p no:xdist"
 executor = { group = "bench" }
 
 
@@ -208,8 +209,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
-"tests/**/*" = ["PLC0415"]  # Deferred imports for optional dependencies
+"tests/**" = ["S101", "PLC0415"]  # Deferred imports for optional dependencies
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 
 [tool.ruff.lint.pydocstyle]
@@ -221,17 +221,26 @@ pytest-benchmark = "pytest_benchmark"
 [tool.ty.environment]
 extra-paths = ["stubs"]
 
+[tool.ty.analysis]
+allowed-unresolved-imports = ["mlx.**"]
+
 
 # ---- test settings ----
 [tool.pytest.ini_options]
+python_files = [
+    "test_*.py",
+    "*_test.py",
+    "bench_*.py",
+]
 filterwarnings = [
     "error",  # FastSIMUS: treat all warnings as errors
     "ignore::SyntaxWarning:pymust.*",  # PyMUST: invalid escape sequences in simus/mkmovie
     "ignore::DeprecationWarning:pymust.*",
-    # PyMUST has \m in docstrings; module filter can't catch compile-time warnings,
-    # so match by message instead. DeprecationWarning on 3.11, SyntaxWarning on 3.12+.
-    "ignore:invalid escape sequence:DeprecationWarning",
-    "ignore:invalid escape sequence:SyntaxWarning",
+    # PyMUST has \m in docstrings that trigger compile-time SyntaxWarning/DeprecationWarning.
+    # Warning filter message matching uses re.match() (anchored at start), so patterns need
+    # a leading .* to match messages like '"\\m" is an invalid escape sequence...'.
+    "ignore:.*invalid escape sequence:DeprecationWarning",
+    "ignore:.*invalid escape sequence:SyntaxWarning",
 ]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]

@@ -35,5 +35,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Check lockfile
+        run: uv lock --locked
+
       - name: Run linting
         run: uv run poe lint

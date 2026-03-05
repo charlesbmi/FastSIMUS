@@ -1,0 +1,38 @@
+name: benchmark
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    # To limit Actions,
+    # don't automatically run on synchronize, but allow manual triggering
+    types: [opened, reopened, ready_for_review]
+    paths-ignore:
+      - "**.md"
+      - "**.rst"
+      - "docs/**"
+      - ".gitignore"
+  workflow_dispatch:
+
+
+jobs:
+  bench:
+    # for now, run on Apple Silicon for mlx
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Run benchmarks
+        run: uv run poe benchmark
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: .benchmarks
+          include-hidden-files: true
