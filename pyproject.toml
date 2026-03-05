@@ -126,19 +126,19 @@ sequence = [
 
 [tool.poe.tasks.test]
 help = "Test only code affected by recent changes, in parallel"
-cmd = "pytest --testmon -n auto -p no:benchmark"
+cmd = "pytest tests/ --ignore=tests/benchmarks --testmon -n auto -p no:benchmark"
 # Need isolated = true to avoid conflicts with pytest-benchmark
 executor = { group = "test-parallel", python = "<3.14"}
 
 [tool.poe.tasks.test-all]
 help = "Test all code (no benchmarks)"
-cmd = "pytest -n auto --cov --cov-config=pyproject.toml --cov-report=xml -p no:benchmark"
+cmd = "pytest tests/ --ignore=tests/benchmarks -n auto --cov --cov-config=pyproject.toml --cov-report=xml -p no:benchmark"
 # Need isolated = true to avoid conflicts with pytest-benchmark
 executor = { group = "test-parallel" }
 
 [tool.poe.tasks.benchmark]
 help = "Run performance benchmarks"
-cmd = "pytest --benchmark-only --benchmark-autosave -p no:xdist --benchmark-min-rounds=2 --benchmark-warmup-iterations 1"
+cmd = "pytest tests/benchmarks/ --benchmark-only --benchmark-autosave -p no:xdist"
 executor = { group = "bench" }
 
 
@@ -208,8 +208,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
-"tests/**/*" = ["PLC0415"]  # Deferred imports for optional dependencies
+"tests/**" = ["S101", "PLC0415"]  # Deferred imports for optional dependencies
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 
 [tool.ruff.lint.pydocstyle]
@@ -224,6 +223,11 @@ extra-paths = ["stubs"]
 
 # ---- test settings ----
 [tool.pytest.ini_options]
+python_files = [
+    "test_*.py",
+    "*_test.py",
+    "bench_*.py",
+]
 filterwarnings = [
     "error",  # FastSIMUS: treat all warnings as errors
     "ignore::SyntaxWarning:pymust.*",  # PyMUST: invalid escape sequences in simus/mkmovie

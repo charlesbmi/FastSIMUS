@@ -23,6 +23,16 @@ with contextlib.suppress(ImportError):
 
     HAS_JAX = True
 
+HAS_MLX = False
+mx = None
+with contextlib.suppress(ImportError):
+    import mlx.core as mx
+
+    from fast_simus.backends.mlx import ensure_compat
+
+    ensure_compat(mx)
+    HAS_MLX = True
+
 
 @pytest.fixture(
     params=[
@@ -38,11 +48,16 @@ with contextlib.suppress(ImportError):
                 pytest.mark.skipif(not HAS_JAX, reason="JAX not available"),
             ],
         ),
+        pytest.param(
+            mx,
+            id="mlx",
+            marks=pytest.mark.skipif(not HAS_MLX, reason="MLX not available"),
+        ),
     ]
 )
 def xp(request) -> _ArrayNamespace:
     """Fixture providing different array API backends.
 
-    Parametrizes tests to run with NumPy, array-api-strict, and JAX.
+    Parametrizes tests to run with NumPy, array-api-strict, JAX, and MLX.
     """
     return cast(_ArrayNamespace, request.param)
