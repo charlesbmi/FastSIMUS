@@ -69,7 +69,7 @@ lint = [
     "mdformat>=0.7.21",
     "mdformat-gfm>=0.3.6",
     "ruff>=0.14.11",
-    "ty>=0.0.13",
+    "ty>=0.0.20",
 ]
 # Test groups are split because pytest-xdist and pytest-benchmark conflict in parallel mode
 # - test: base test dependencies
@@ -220,6 +220,9 @@ pytest-benchmark = "pytest_benchmark"
 
 [tool.ty.environment]
 extra-paths = ["stubs"]
+
+[tool.ty.analysis]
+allowed-unresolved-imports = ["mlx.**"]
 
 
 # ---- test settings ----
