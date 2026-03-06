@@ -291,11 +291,8 @@ def _init_exponentials(
 def _pfield_freq_vectorized(
     phase_decay_init: Complex[Array, "*grid n_elements n_sub"],
     phase_decay_step: Complex[Array, "*grid n_elements n_sub"],
-    delays_clean: Float[Array, " n_elements"],
-    tx_apodization: Float[Array, " n_elements"],
     is_out: Bool[Array, " *grid"],
     wavenumbers: Float[Array, " n_freq"],
-    speed_of_sound: float,
     pulse_spect: Complex[Array, " n_freq"],
     probe_spect: Float[Array, " n_freq"],
     n_sub: int,
@@ -306,21 +303,21 @@ def _pfield_freq_vectorized(
 ) -> Float[Array, " *grid"]:
     """Compute pressure field contribution for all frequencies at once.
 
-    Replaces the sequential frequency loop with vectorized tensor operations.
     Uses the geometric progression: phase_decay[k] = init * step^k.
+    Delay+apodization terms are pre-absorbed into phase_decay_init/step
+    by the caller, so the element contraction is a plain sum.
 
     The sub-element loop (n_sub iterations) avoids materializing the full
     (*grid, n_elements, n_sub, n_freq) tensor. Only (*grid, n_elements, n_freq)
     is materialized per sub-element, then immediately contracted over elements.
 
     Args:
-        phase_decay_init: Complex propagation at first frequency.
-        phase_decay_step: Complex multiplier per frequency step.
-        delays_clean: Transmit time delays (NaN replaced with 0).
-        tx_apodization: Transmit apodization weights.
+        phase_decay_init: Complex propagation at first frequency, with
+            delay+apodization already absorbed.
+        phase_decay_step: Complex multiplier per frequency step, with
+            delay step already absorbed.
         is_out: Out-of-field mask.
         wavenumbers: Angular wavenumbers for all frequencies (2*pi*f/c).
-        speed_of_sound: Speed of sound in m/s.
         pulse_spect: Pulse spectrum at all selected frequencies.
         probe_spect: Probe response at all selected frequencies.
         n_sub: Number of sub-elements per element.
@@ -333,12 +330,8 @@ def _pfield_freq_vectorized(
         Sum of |P_k|^2 over all frequencies, shape (*grid,).
     """
     n_freq = wavenumbers.shape[0]
-    exponents = xp.arange(n_freq, dtype=wavenumbers.dtype)  # match float dtype of inputs
+    exponents = xp.arange(n_freq, dtype=wavenumbers.dtype)
 
-    # Delay + apodization for all frequencies at once: (n_elements, n_freq)
-    delay_apod = xp.exp(xp.asarray(1j) * wavenumbers * speed_of_sound * delays_clean[:, None]) * tx_apodization[:, None]
-
-    # Accumulate over sub-elements to avoid materializing the 4D tensor
     pressure_all = xp.asarray(0.0 + 0j)  # broadcasts to (*grid, n_freq)
 
     for i in range(n_sub):
@@ -350,17 +343,14 @@ def _pfield_freq_vectorized(
             phase_k = xpx.sinc(sinc_arg, xp=xp) * phase_k
 
         # Contract over elements: (*grid, n_elements, n_freq) -> (*grid, n_freq)
-        pressure_all = pressure_all + xp.sum(phase_k * delay_apod, axis=-2)
+        pressure_all = pressure_all + xp.sum(phase_k, axis=-2)
 
     pressure_all = pressure_all / n_sub
 
-    # Apply spectra: (n_freq,) broadcasts with (*grid, n_freq)
     pressure_all = pulse_spect * probe_spect * pressure_all
 
-    # Zero out-of-field points
     pressure_all = xp.where(is_out[..., None], xp.asarray(0.0 + 0j), pressure_all)
 
-    # Sum |P_k|^2 over frequencies -> (*grid,)
     return xp.sum(xp.abs(pressure_all) ** 2, axis=-1)
 
 
@@ -511,16 +501,24 @@ def pfield_compute(
         sinc_arg = xp.asarray(center_wavenumber * plan.seg_length / 2.0) * sin_theta / pi
         phase_decay_init = phase_decay_init * xpx.sinc(sinc_arg, xp=xp)
 
+    # Absorb delay+apodization into phase geometric progression.
+    # delay_apod[e,f] = exp(j*2pi*f*delay_e)*apod_e is geometric in f,
+    # so we merge it into phase_decay_init/step to eliminate a
+    # (*grid, n_elements, n_freq) multiply per sub-element iteration.
+    delay_apod_init = (
+        xp.exp(xp.asarray(1j * 2.0 * pi * plan.freq_start) * delays_clean) * tx_apodization
+    )
+    delay_apod_step = xp.exp(xp.asarray(1j * 2.0 * pi * plan.freq_step) * delays_clean)
+    phase_decay_init = phase_decay_init * delay_apod_init[:, None]
+    phase_decay_step = phase_decay_step * delay_apod_step[:, None]
+
     wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
 
     pressure_accum = _pfield_freq_vectorized(
         phase_decay_init=phase_decay_init,
         phase_decay_step=phase_decay_step,
-        delays_clean=delays_clean,
-        tx_apodization=tx_apodization,
         is_out=is_out,
         wavenumbers=wavenumbers,
-        speed_of_sound=speed_of_sound,
         pulse_spect=plan.pulse_spectrum,
         probe_spect=plan.probe_spectrum,
         n_sub=plan.n_sub,
