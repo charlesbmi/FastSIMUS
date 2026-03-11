@@ -13,6 +13,7 @@ References:
 
 from __future__ import annotations
 
+from enum import StrEnum
 from math import ceil, inf, pi
 from typing import NamedTuple
 
@@ -33,6 +34,25 @@ from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace
 from fast_simus.utils.geometry import element_positions
 
 _DEFAULT_MEDIUM = MediumParams()
+
+
+class PfieldStrategy(StrEnum):
+    """Backend strategy for the pfield frequency sweep.
+
+    The three-layer pfield architecture separates:
+    - Layer 1 (setup): geometry, phase init -- pure Array API, shared by all
+    - Layer 2 (step body): per-frequency math -- pure Array API function
+    - Layer 3 (loop driver): iteration mechanism -- backend-specific
+
+    This enum selects the Layer 3 loop driver. When None is passed to
+    pfield_compute, the strategy is auto-selected based on the detected backend.
+    """
+
+    VECTORIZED = "vectorized"
+    FREQ_OUTER = "freq_outer"
+    SCAN = "scan"
+    FREQ_OUTER_MLX = "freq_outer_mlx"
+    METAL = "metal"
 
 
 class PfieldPlan(NamedTuple):
@@ -219,6 +239,7 @@ def pfield_compute(
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
     full_frequency_directivity: bool = False,
+    strategy: PfieldStrategy | None = None,
 ) -> Float[Array, " *grid_shape"]:
     """Compute the RMS pressure field given a precomputed plan.
 
@@ -318,6 +339,7 @@ def pfield(
     full_frequency_directivity: bool = False,
     element_splitting: int | None = None,
     frequency_step: float | int = 1.0,
+    strategy: PfieldStrategy | None = None,
 ) -> Float[Array, " *grid_shape"]:
     """Compute the RMS acoustic pressure field of a transducer array.
 
@@ -395,4 +417,5 @@ def pfield(
         medium,
         tx_apodization=tx_apodization,
         full_frequency_directivity=full_frequency_directivity,
+        strategy=strategy,
     )

@@ -401,3 +401,49 @@ class TestPfieldPrecomputeCompute:
             np.asarray(rp_split),
             err_msg=f"{probe}: precompute+compute != pfield",
         )
+
+
+class TestPfieldStrategy:
+    """Tests for strategy selection and the PfieldStrategy enum."""
+
+    def test_strategy_enum_values(self):
+        """PfieldStrategy has expected string values."""
+        from fast_simus.pfield import PfieldStrategy
+
+        assert PfieldStrategy.VECTORIZED == "vectorized"
+        assert PfieldStrategy.FREQ_OUTER == "freq_outer"
+        assert isinstance(PfieldStrategy.VECTORIZED, str)
+
+    def test_pfield_compute_accepts_strategy_param(self):
+        """pfield_compute accepts strategy kwarg without error."""
+        from fast_simus.pfield import PfieldStrategy
+
+        params = P4_2v()
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=10)
+        delays = np.zeros(params.n_elements)
+        positions_strict = xp.asarray(positions)
+        delays_strict = xp.asarray(delays)
+
+        plan = pfield_precompute(positions_strict, delays_strict, params)
+        rp = pfield_compute(
+            positions_strict,
+            delays_strict,
+            plan,
+            params,
+            strategy=PfieldStrategy.VECTORIZED,
+        )
+        _assert_valid_pfield_output(rp, positions.shape[:-1])
+
+    def test_pfield_accepts_strategy_param(self):
+        """Top-level pfield() accepts strategy kwarg."""
+        from fast_simus.pfield import PfieldStrategy
+
+        params = P4_2v()
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=10)
+        rp = pfield(
+            xp.asarray(positions),
+            xp.asarray(np.zeros(params.n_elements)),
+            params,
+            strategy=PfieldStrategy.VECTORIZED,
+        )
+        _assert_valid_pfield_output(rp, positions.shape[:-1])
