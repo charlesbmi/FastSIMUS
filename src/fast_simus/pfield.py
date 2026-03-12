@@ -14,7 +14,7 @@ References:
 from __future__ import annotations
 
 from enum import StrEnum
-from math import ceil, inf, pi
+from math import ceil, inf, pi, prod
 from typing import NamedTuple
 
 import array_api_extra as xpx
@@ -218,9 +218,7 @@ def _pfield_freq_outer(
             sinc_arg = wavenumbers[k] * seg_length / 2.0 * sin_theta / pi
             directivity_k = xpx.sinc(sinc_arg, xp=xp)
 
-        phase, rp_k = _freq_step_body(
-            phase, phase_decay_step, spectra[k], n_sub, xp, directivity_k=directivity_k
-        )
+        phase, rp_k = _freq_step_body(phase, phase_decay_step, spectra[k], n_sub, xp, directivity_k=directivity_k)
         rp = rp + xp.where(is_out, zero, rp_k)
 
     return rp
@@ -241,7 +239,7 @@ def _select_strategy(
     if "mlx" in name:
         if grid_size > 150 * 150:
             try:
-                from fast_simus.kernels.metal_pfield import pfield_metal  # noqa: F401
+                from fast_simus.kernels.metal_pfield import pfield_metal  # noqa: F401, PLC0415
 
                 return PfieldStrategy.METAL
             except ImportError:
@@ -357,6 +355,8 @@ def pfield_compute(
             Elements with NaN delays are automatically zeroed.
         full_frequency_directivity: If True, compute element directivity at
             every frequency. If False, use center-frequency-only directivity.
+        strategy: Backend strategy for the frequency sweep. If None,
+            auto-selects based on the detected array backend.
 
     Returns:
         RMS pressure field with shape ``(*grid_shape,)``.
@@ -410,8 +410,6 @@ def pfield_compute(
 
     wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
 
-    from math import prod
-
     grid_size = prod(positions.shape[:-1])
     selected = _select_strategy(xp, grid_size, strategy=strategy)
 
@@ -430,7 +428,7 @@ def pfield_compute(
     )
 
     if selected == PfieldStrategy.METAL:
-        from fast_simus.kernels.metal_pfield import pfield_metal
+        from fast_simus.kernels.metal_pfield import pfield_metal  # noqa: PLC0415
 
         pressure_accum = pfield_metal(
             positions=positions,
@@ -441,11 +439,11 @@ def pfield_compute(
             tx_apodization=tx_apodization,
         )
     elif selected == PfieldStrategy.SCAN:
-        from fast_simus._pfield_strategies import _freq_outer_scan
+        from fast_simus._pfield_strategies import _freq_outer_scan  # noqa: PLC0415
 
         pressure_accum = _freq_outer_scan(**inner_kwargs)
     elif selected == PfieldStrategy.FREQ_OUTER_MLX:
-        from fast_simus._pfield_strategies import _freq_outer_mlx
+        from fast_simus._pfield_strategies import _freq_outer_mlx  # noqa: PLC0415
 
         pressure_accum = _freq_outer_mlx(**inner_kwargs)
     elif selected == PfieldStrategy.VECTORIZED:
@@ -527,6 +525,8 @@ def pfield(
             If None, computed automatically as ceil(element_width / smallest_wavelength).
         frequency_step: Scaling factor for the frequency step.
             Values > 1 speed up computation; values < 1 give smoother results.
+        strategy: Backend strategy for the frequency sweep. If None,
+            auto-selects based on the detected array backend.
 
     Returns:
         RMS pressure field with shape ``(*grid_shape,)``.

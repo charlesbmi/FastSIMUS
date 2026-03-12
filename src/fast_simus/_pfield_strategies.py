@@ -40,8 +40,8 @@ def _freq_outer_scan(
     compilation cost regardless of n_freq and enabling automatic
     differentiation through the loop.
     """
-    import jax
-    import jax.numpy as jnp
+    import jax  # noqa: PLC0415
+    import jax.numpy as jnp  # noqa: PLC0415
 
     spectra = pulse_spect * probe_spect
 
@@ -51,9 +51,7 @@ def _freq_outer_scan(
             phase, rp = carry
             sinc_arg = wavenumbers[k] * seg_length / 2.0 * sin_theta / pi
             directivity_k = xpx.sinc(sinc_arg, xp=xp)
-            phase, rp_k = _freq_step_body(
-                phase, phase_decay_step, spectra[k], n_sub, xp, directivity_k=directivity_k
-            )
+            phase, rp_k = _freq_step_body(phase, phase_decay_step, spectra[k], n_sub, xp, directivity_k=directivity_k)
             rp = rp + jnp.where(is_out, 0.0, rp_k)
             return (phase, rp), None
 
@@ -68,9 +66,7 @@ def _freq_outer_scan(
             rp = rp + jnp.where(is_out, 0.0, rp_k)
             return (phase, rp), None
 
-        (_, rp), _ = jax.lax.scan(
-            scan_fn_no_dir, (phase_decay_init, jnp.zeros(phase_decay_init.shape[:-2])), spectra
-        )
+        (_, rp), _ = jax.lax.scan(scan_fn_no_dir, (phase_decay_init, jnp.zeros(phase_decay_init.shape[:-2])), spectra)
 
     return rp
 
@@ -94,10 +90,10 @@ def _freq_outer_mlx(
     after each iteration. Without this, MLX builds an n_freq-deep lazy
     computation graph consuming unbounded memory before executing anything.
     """
-    import mlx.core as mx
+    import mlx.core as mx  # noqa: PLC0415
 
     # MLX array evaluation trigger -- forces lazy graph execution
-    _trigger_compute = getattr(mx, "eval")
+    _trigger_compute = mx.eval
 
     n_freq = wavenumbers.shape[0]
     spectra = pulse_spect * probe_spect
@@ -112,9 +108,7 @@ def _freq_outer_mlx(
             sinc_arg = wavenumbers[k] * seg_length / 2.0 * sin_theta / pi
             directivity_k = xpx.sinc(sinc_arg, xp=xp)
 
-        phase, rp_k = _freq_step_body(
-            phase, phase_decay_step, spectra[k], n_sub, xp, directivity_k=directivity_k
-        )
+        phase, rp_k = _freq_step_body(phase, phase_decay_step, spectra[k], n_sub, xp, directivity_k=directivity_k)
         rp = rp + xp.where(is_out, zero, rp_k)
         _trigger_compute(rp, phase)
 
