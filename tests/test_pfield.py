@@ -468,3 +468,28 @@ class TestPfieldStrategy:
         _assert_pfield_close(
             rp_freq, rp_vec, atol_peak=1e-5, desc=f"{reference.probe} freq_outer vs vectorized"
         )
+
+
+class TestPfieldStrategyCrossBackend:
+    """Test strategies across backends using the xp fixture."""
+
+    def test_strategy_on_backend(self, xp, strategy):
+        """Each strategy produces valid output on each backend."""
+        from fast_simus.pfield import PfieldStrategy
+
+        name = getattr(xp, "__name__", "")
+        if strategy == PfieldStrategy.SCAN and "jax" not in name:
+            pytest.skip("scan requires JAX")
+        if strategy == PfieldStrategy.FREQ_OUTER_MLX and "mlx" not in name:
+            pytest.skip("freq_outer_mlx requires MLX")
+
+        params = P4_2v()
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=15)
+        delays = np.zeros(params.n_elements)
+        rp = pfield(
+            xp.asarray(positions),
+            xp.asarray(delays),
+            params,
+            strategy=strategy,
+        )
+        _assert_valid_pfield_output(rp, positions.shape[:-1])

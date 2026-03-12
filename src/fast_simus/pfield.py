@@ -239,6 +239,8 @@ def _select_strategy(
     if "jax" in name:
         return PfieldStrategy.SCAN
     if "mlx" in name:
+        if grid_size > 150 * 150:
+            return PfieldStrategy.FREQ_OUTER_MLX
         return PfieldStrategy.VECTORIZED
     return PfieldStrategy.FREQ_OUTER
 
@@ -421,7 +423,15 @@ def pfield_compute(
         xp=xp,
     )
 
-    if selected == PfieldStrategy.VECTORIZED:
+    if selected == PfieldStrategy.SCAN:
+        from fast_simus._pfield_strategies import _freq_outer_scan
+
+        pressure_accum = _freq_outer_scan(**inner_kwargs)
+    elif selected == PfieldStrategy.FREQ_OUTER_MLX:
+        from fast_simus._pfield_strategies import _freq_outer_mlx
+
+        pressure_accum = _freq_outer_mlx(**inner_kwargs)
+    elif selected == PfieldStrategy.VECTORIZED:
         pressure_accum = _pfield_freq_vectorized(**inner_kwargs)
     elif selected == PfieldStrategy.FREQ_OUTER:
         pressure_accum = _pfield_freq_outer(**inner_kwargs)
