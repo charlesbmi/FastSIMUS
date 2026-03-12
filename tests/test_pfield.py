@@ -447,3 +447,24 @@ class TestPfieldStrategy:
             strategy=PfieldStrategy.VECTORIZED,
         )
         _assert_valid_pfield_output(rp, positions.shape[:-1])
+
+    def test_freq_outer_matches_vectorized(self, reference: ReferenceData):
+        """freq_outer strategy matches vectorized to high precision."""
+        from fast_simus.pfield import PfieldStrategy
+
+        preset_fn = _preset_for_probe(reference.probe)
+        params = preset_fn()
+        delays_strict = xp.asarray(np.asarray(reference.delays))
+        delays_1d = xp.reshape(delays_strict, (-1,))
+        positions_strict = xp.asarray(np.asarray(reference.positions))
+
+        rp_vec = np.asarray(
+            pfield(positions_strict, delays_1d, params, strategy=PfieldStrategy.VECTORIZED)
+        )
+        rp_freq = np.asarray(
+            pfield(positions_strict, delays_1d, params, strategy=PfieldStrategy.FREQ_OUTER)
+        )
+
+        _assert_pfield_close(
+            rp_freq, rp_vec, atol_peak=1e-5, desc=f"{reference.probe} freq_outer vs vectorized"
+        )

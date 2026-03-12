@@ -150,6 +150,99 @@ def _pfield_freq_vectorized(
     return xp.sum(xp.abs(pressure_all) ** 2, axis=-1)
 
 
+def _freq_step_body(
+    phase: Complex[Array, "*grid n_elements n_sub"],
+    phase_step: Complex[Array, "*grid n_elements n_sub"],
+    spectrum_k: complex,
+    n_sub: int,
+    xp: _ArrayNamespace,
+    *,
+    directivity_k: Float[Array, "*grid n_elements n_sub"] | None = None,
+) -> tuple[Complex[Array, "*grid n_elements n_sub"], Float[Array, " *grid"]]:
+    """One frequency step: geometric update, element contraction, spectrum weight.
+
+    This is the single source of truth for per-frequency math in the
+    frequency-outer loop architecture. All loop drivers (Python for-loop,
+    JAX lax.scan, MLX triggered-compute loop) call this function.
+
+    Args:
+        phase: Current phase state (geometric progression).
+        phase_step: Per-step multiplier for geometric progression.
+        spectrum_k: Combined pulse*probe spectrum weight for this frequency.
+        n_sub: Number of sub-elements per element.
+        xp: Array namespace.
+        directivity_k: Per-element directivity for this frequency (optional,
+            used when full_frequency_directivity=True).
+
+    Returns:
+        Tuple of (updated_phase, rp_k) where rp_k = |P_k|^2 at this frequency.
+    """
+    if directivity_k is not None:
+        phase_weighted = phase * directivity_k
+    else:
+        phase_weighted = phase
+    pressure_k = spectrum_k * xp.sum(xp.mean(phase_weighted, axis=-1), axis=-1)
+    phase = phase * phase_step
+    return phase, xp.real(pressure_k * xp.conj(pressure_k))
+
+
+def _pfield_freq_outer(
+    phase_decay_init: Complex[Array, "*grid n_elements n_sub"],
+    phase_decay_step: Complex[Array, "*grid n_elements n_sub"],
+    is_out: Bool[Array, " *grid"],
+    wavenumbers: Float[Array, " n_freq"],
+    pulse_spect: Complex[Array, " n_freq"],
+    probe_spect: Float[Array, " n_freq"],
+    n_sub: int,
+    seg_length: float,
+    sin_theta: Float[Array, "*grid n_elements n_sub"],
+    full_frequency_directivity: bool,
+    xp: _ArrayNamespace,
+) -> Float[Array, " *grid"]:
+    """Frequency-outer loop: iterate over frequencies, accumulate |P_k|^2.
+
+    Uses sequential geometric progression (phase *= step each iteration)
+    instead of vectorized power (step^k for all k). Reduces peak memory
+    from (*grid, n_elements, n_freq) to (*grid, n_elements, n_sub).
+    """
+    n_freq = wavenumbers.shape[0]
+    spectra = pulse_spect * probe_spect
+
+    phase = phase_decay_init
+    rp = xp.zeros(phase_decay_init.shape[:-2])
+    zero = xp.asarray(0.0)
+
+    for k in range(n_freq):
+        directivity_k = None
+        if full_frequency_directivity:
+            sinc_arg = wavenumbers[k] * seg_length / 2.0 * sin_theta / pi
+            directivity_k = xpx.sinc(sinc_arg, xp=xp)
+
+        phase, rp_k = _freq_step_body(
+            phase, phase_decay_step, spectra[k], n_sub, xp, directivity_k=directivity_k
+        )
+        rp = rp + xp.where(is_out, zero, rp_k)
+
+    return rp
+
+
+def _select_strategy(
+    xp: _ArrayNamespace,
+    grid_size: int,
+    *,
+    strategy: PfieldStrategy | None = None,
+) -> PfieldStrategy:
+    """Auto-select the best pfield strategy for the detected backend."""
+    if strategy is not None:
+        return strategy
+    name = getattr(xp, "__name__", "")
+    if "jax" in name:
+        return PfieldStrategy.SCAN
+    if "mlx" in name:
+        return PfieldStrategy.VECTORIZED
+    return PfieldStrategy.FREQ_OUTER
+
+
 def pfield_precompute(
     positions: Float[Array, "*grid_shape 2"],
     delays: Float[Array, " n_elements"],
@@ -309,7 +402,12 @@ def pfield_compute(
 
     wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
 
-    pressure_accum = _pfield_freq_vectorized(
+    from math import prod
+
+    grid_size = prod(positions.shape[:-1])
+    selected = _select_strategy(xp, grid_size, strategy=strategy)
+
+    inner_kwargs = dict(
         phase_decay_init=phase_decay_init,
         phase_decay_step=phase_decay_step,
         is_out=is_out,
@@ -322,6 +420,13 @@ def pfield_compute(
         full_frequency_directivity=full_frequency_directivity,
         xp=xp,
     )
+
+    if selected == PfieldStrategy.VECTORIZED:
+        pressure_accum = _pfield_freq_vectorized(**inner_kwargs)
+    elif selected == PfieldStrategy.FREQ_OUTER:
+        pressure_accum = _pfield_freq_outer(**inner_kwargs)
+    else:
+        pressure_accum = _pfield_freq_outer(**inner_kwargs)
 
     return xp.sqrt(pressure_accum * plan.correction_factor)
 
