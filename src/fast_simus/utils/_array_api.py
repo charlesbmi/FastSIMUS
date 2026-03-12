@@ -229,6 +229,15 @@ class Array(Protocol):
 ArrayOrScalar = Array | int | float | complex | bool
 
 
+def is_mlx_namespace(xp: object) -> bool:
+    """Return True if xp is an MLX namespace (mlx.core or compatible wrapper).
+
+    MLX is not yet supported by array-api-compat, so we use a name-based check.
+    This mirrors the pattern used by array_api_compat.is_jax_namespace() etc.
+    """
+    return getattr(xp, "__name__", "").startswith("mlx")
+
+
 def array_namespace(
     *arrays: Any,
 ) -> _ArrayNamespace | _ArrayNamespaceWithLinAlg | _ArrayNamespaceWithFFT | _ArrayNamespaceWithLinAlgAndFFT:
@@ -264,7 +273,7 @@ def array_namespace(
         ...     raise RuntimeError("FFT extension not available")
     """
     xp = xpc_array_namespace(*arrays)
-    if getattr(xp, "__name__", "").startswith("mlx"):
+    if is_mlx_namespace(xp):
         from fast_simus.backends.mlx import ensure_compat  # noqa: PLC0415
 
         ensure_compat(xp)

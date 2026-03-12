@@ -15,9 +15,11 @@ from __future__ import annotations
 
 from enum import StrEnum
 from math import ceil, inf, pi, prod
+from types import ModuleType
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 import array_api_extra as xpx
+from array_api_compat import is_jax_namespace
 from beartype import beartype as typechecker
 from jaxtyping import Bool, Complex, Float, jaxtyped
 
@@ -30,7 +32,7 @@ from fast_simus._pfield_math import (
 )
 from fast_simus.medium_params import MediumParams
 from fast_simus.transducer_params import TransducerParams
-from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace, is_mlx_namespace
 from fast_simus.utils.geometry import element_positions
 
 _DEFAULT_MEDIUM = MediumParams()
@@ -157,10 +159,9 @@ def _select_strategy(
     """Auto-select the best pfield strategy for the detected backend."""
     if strategy is not None:
         return strategy
-    name = getattr(xp, "__name__", "")
-    if "jax" in name:
+    if is_jax_namespace(cast(ModuleType, xp)):
         return PfieldStrategy.SCAN
-    if "mlx" in name:
+    if is_mlx_namespace(xp):
         return PfieldStrategy.METAL
     return PfieldStrategy.VECTORIZED
 

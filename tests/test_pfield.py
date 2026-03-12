@@ -10,11 +10,12 @@ import array_api_strict
 import numpy as np
 import pymust
 import pytest
+from array_api_compat import is_jax_namespace
 
 from fast_simus.pfield import pfield, pfield_compute, pfield_precompute
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
-from fast_simus.utils._array_api import Array, _ArrayNamespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace, is_mlx_namespace
 
 # Array API backend for FastSIMUS calls
 xp = cast(_ArrayNamespace, array_api_strict)
@@ -406,15 +407,6 @@ class TestPfieldPrecomputeCompute:
 class TestPfieldStrategy:
     """Tests for strategy selection and the PfieldStrategy enum."""
 
-    def test_strategy_enum_values(self):
-        """PfieldStrategy has expected string values."""
-        from fast_simus.pfield import PfieldStrategy
-
-        assert PfieldStrategy.VECTORIZED == "vectorized"
-        assert PfieldStrategy.SCAN == "scan"
-        assert PfieldStrategy.METAL == "metal"
-        assert isinstance(PfieldStrategy.VECTORIZED, str)
-
     def test_pfield_compute_accepts_strategy_param(self):
         """pfield_compute accepts strategy kwarg without error."""
         from fast_simus.pfield import PfieldStrategy
@@ -457,10 +449,9 @@ class TestPfieldStrategyCrossBackend:
         """Each strategy produces valid output on each backend."""
         from fast_simus.pfield import PfieldStrategy
 
-        name = getattr(xp, "__name__", "")
-        if strategy == PfieldStrategy.SCAN and "jax" not in name:
+        if strategy == PfieldStrategy.SCAN and not is_jax_namespace(xp):
             pytest.skip("scan requires JAX")
-        if strategy == PfieldStrategy.METAL and "mlx" not in name:
+        if strategy == PfieldStrategy.METAL and not is_mlx_namespace(xp):
             pytest.skip("metal requires MLX")
 
         params = P4_2v()

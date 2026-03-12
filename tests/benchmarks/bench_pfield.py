@@ -14,11 +14,12 @@ import contextlib
 from types import ModuleType
 from typing import TYPE_CHECKING, cast
 
-import array_api_compat
 import pytest
+from array_api_compat import is_jax_namespace
 
 from fast_simus.pfield import pfield_compute, pfield_precompute
 from fast_simus.transducer_presets import P4_2v
+from fast_simus.utils._array_api import is_mlx_namespace
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -50,12 +51,12 @@ def _make_positions(grid_length: int, xp: _ArrayNamespace) -> Array:
 
 def _make_compute(plan, params, xp: _ArrayNamespace) -> Callable:
     """Return a (positions, delays) -> result callable with backend-specific JIT."""
-    if array_api_compat.is_jax_namespace(cast(ModuleType, xp)):
+    if is_jax_namespace(cast(ModuleType, xp)):
         assert _eqx is not None
         jitted = _eqx.filter_jit(pfield_compute)
         return lambda pos, dl: jitted(pos, dl, plan, params)
 
-    if _mx is not None and "mlx" in getattr(xp, "__name__", ""):
+    if _mx is not None and is_mlx_namespace(xp):
         return _mx.compile(lambda pos, dl: pfield_compute(pos, dl, plan, params))
 
     return lambda pos, dl: pfield_compute(pos, dl, plan, params)
@@ -63,10 +64,10 @@ def _make_compute(plan, params, xp: _ArrayNamespace) -> Callable:
 
 def _sync(result: Array, xp: _ArrayNamespace) -> None:
     """Block until result is ready for async backends (JAX, MLX)."""
-    if array_api_compat.is_jax_namespace(cast(ModuleType, xp)):
+    if is_jax_namespace(cast(ModuleType, xp)):
         assert _jax is not None
         _jax.block_until_ready(result)
-    elif _mx_sync is not None and "mlx" in getattr(xp, "__name__", ""):
+    elif _mx_sync is not None and is_mlx_namespace(xp):
         _mx_sync(result)
 
 
