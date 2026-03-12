@@ -8,6 +8,7 @@ attic/
 prd.md
 .taskmaster/
 .agents/
+thoughts/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
