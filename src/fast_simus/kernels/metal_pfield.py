@@ -144,12 +144,16 @@ def pfield_metal(
         in_arc = (x_flat**2 + (z_flat + apex_offset) ** 2) <= params.radius**2
         is_out = mx.maximum(is_out, in_arc.astype(mx.float32))
 
+    # Derive freq_start / freq_step from the canonical selected_freqs array.
+    freq_start = float(plan.selected_freqs[0])
+    freq_step = float(plan.selected_freqs[1] - plan.selected_freqs[0]) if n_freq > 1 else 0.0
+
     # Delay+apodization split into real/imag
-    ph_init = mx.array(2.0 * pi * plan.freq_start, dtype=mx.float32) * delays_clean
+    ph_init = mx.array(2.0 * pi * freq_start, dtype=mx.float32) * delays_clean
     da_init_re = (mx.cos(ph_init) * tx_apodization).astype(mx.float32)
     da_init_im = (mx.sin(ph_init) * tx_apodization).astype(mx.float32)
 
-    ph_step = mx.array(2.0 * pi * plan.freq_step, dtype=mx.float32) * delays_clean
+    ph_step = mx.array(2.0 * pi * freq_step, dtype=mx.float32) * delays_clean
     da_step_re = mx.cos(ph_step).astype(mx.float32)
     da_step_im = mx.sin(ph_step).astype(mx.float32)
 
@@ -159,10 +163,10 @@ def pfield_metal(
     pp_mag_sq = mx.abs(_pulse).astype(mx.float32) ** 2 * _probe.astype(mx.float32) ** 2
 
     # Scalar physics parameters
-    wavenumber_init = 2.0 * pi * plan.freq_start / c
-    attenuation_init = alpha / NEPER_TO_DB * plan.freq_start / 1e6 * 1e2
-    wavenumber_step = 2.0 * pi * plan.freq_step / c
-    attenuation_step = alpha / NEPER_TO_DB * plan.freq_step / 1e6 * 1e2
+    wavenumber_init = 2.0 * pi * freq_start / c
+    attenuation_init = alpha / NEPER_TO_DB * freq_start / 1e6 * 1e2
+    wavenumber_step = 2.0 * pi * freq_step / c
+    attenuation_step = alpha / NEPER_TO_DB * freq_step / 1e6 * 1e2
     min_distance = c / params.freq_center / 2.0
     center_wavenumber = 2.0 * pi * params.freq_center / c
     # 1/n_sub^2 because kernel sums (not means) over sub-elements.

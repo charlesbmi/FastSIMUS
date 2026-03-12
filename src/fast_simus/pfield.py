@@ -61,17 +61,12 @@ class PfieldPlan(NamedTuple):
     Contains all data-dependent quantities so
     that ``pfield_compute`` has static array shapes and can be JIT-compiled.
 
-    ``freq_start`` and ``freq_step`` are Python floats derived from
-    ``selected_freqs`` (needed as static values for JAX JIT). They must
-    be consistent with ``selected_freqs[0]`` and the uniform spacing.
     Use ``pfield_precompute`` to construct this; do not build manually.
 
     Attributes:
-        selected_freqs: Significant frequency samples in Hz.
+        selected_freqs: Significant frequency samples in Hz (uniformly spaced).
         pulse_spectrum: Pulse spectrum at selected frequencies (complex).
         probe_spectrum: Probe response at selected frequencies (real).
-        freq_start: ``float(selected_freqs[0])``. Python float for JIT.
-        freq_step: Uniform frequency spacing in Hz. Python float for JIT.
         n_sub: Number of sub-elements per transducer element.
         seg_length: Sub-element length in meters (element_width / n_sub).
         correction_factor: Scaling factor for the RMS integration
@@ -81,8 +76,6 @@ class PfieldPlan(NamedTuple):
     selected_freqs: Float[Array, " n_frequencies"]
     pulse_spectrum: Complex[Array, " n_frequencies"]
     probe_spectrum: Float[Array, " n_frequencies"]
-    freq_start: float
-    freq_step: float
     n_sub: int
     seg_length: float
     correction_factor: float
@@ -142,8 +135,13 @@ def _prepare_frequency_sweep(
     )
 
     obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
+
+    freq_start = plan.selected_freqs[0]
+    n_freqs = plan.selected_freqs.shape[0]
+    freq_step = (plan.selected_freqs[1] - plan.selected_freqs[0]) if n_freqs > 1 else xp.asarray(0.0)
+
     phase_decay_init, phase_decay_step = _init_exponentials(
-        plan.freq_start, speed_of_sound, attenuation, distances, obliquity_factor, plan.freq_step, xp
+        freq_start, speed_of_sound, attenuation, distances, obliquity_factor, freq_step, xp
     )
 
     if not full_frequency_directivity:
@@ -153,8 +151,8 @@ def _prepare_frequency_sweep(
 
     # Absorb delay+apodization into the geometric progression so loop
     # drivers don't need a per-frequency multiply for delays.
-    delay_apod_init = xp.exp(xp.asarray(1j * 2.0 * pi * plan.freq_start) * delays_clean) * tx_apodization
-    delay_apod_step = xp.exp(xp.asarray(1j * 2.0 * pi * plan.freq_step) * delays_clean)
+    delay_apod_init = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_start * delays_clean) * tx_apodization
+    delay_apod_step = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_step * delays_clean)
     phase_decay_init = phase_decay_init * delay_apod_init[:, None]
     phase_decay_step = phase_decay_step * delay_apod_step[:, None]
 
@@ -184,31 +182,6 @@ def _prepare_frequency_sweep(
         sin_theta=sin_theta,
         full_frequency_directivity=full_frequency_directivity,
     )
-
-
-def _validate_plan(plan: PfieldPlan, xp: _ArrayNamespace) -> None:
-    """Validate PfieldPlan consistency (freq_start/freq_step vs selected_freqs).
-
-    Skipped under JAX JIT (arrays are tracers). Uses rtol=1e-4 to
-    accommodate float32 backends (MLX).
-    """
-    rtol = 1e-4
-    try:
-        actual_start = float(plan.selected_freqs[0])
-    except Exception:
-        return
-    if abs(plan.freq_start - actual_start) > abs(actual_start) * rtol:
-        raise ValueError(
-            f"PfieldPlan.freq_start={plan.freq_start} inconsistent with "
-            f"selected_freqs[0]={actual_start}. Use pfield_precompute()."
-        )
-    if plan.selected_freqs.shape[0] > 1:
-        actual_step = float(plan.selected_freqs[1]) - actual_start
-        if abs(plan.freq_step - actual_step) > max(abs(actual_step), 1.0) * rtol:
-            raise ValueError(
-                f"PfieldPlan.freq_step={plan.freq_step} inconsistent with "
-                f"selected_freqs spacing={actual_step}. Use pfield_precompute()."
-            )
 
 
 def _metal_supported(params: TransducerParams, full_frequency_directivity: bool) -> bool:
@@ -319,8 +292,6 @@ def pfield_precompute(
         selected_freqs=freq_plan.selected_freqs,
         pulse_spectrum=freq_plan.pulse_spectrum,
         probe_spectrum=freq_plan.probe_spectrum,
-        freq_start=float(freq_plan.selected_freqs[0]),
-        freq_step=df,
         n_sub=n_sub,
         seg_length=seg_length,
         correction_factor=correction_factor,
@@ -360,8 +331,6 @@ def pfield_compute(
         RMS pressure field with shape ``(*grid_shape,)``.
     """
     xp = array_namespace(positions, delays, tx_apodization)
-
-    _validate_plan(plan, xp)
 
     if tx_apodization is None:
         tx_apodization = xp.ones(params.n_elements)

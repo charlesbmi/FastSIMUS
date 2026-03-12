@@ -201,12 +201,12 @@ def _obliquity_factor(
 
 @jaxtyped(typechecker=typechecker)
 def _init_exponentials(
-    freq_start: float,
+    freq_start: float | Float[Array, ""],
     speed_of_sound: float,
     attenuation: float,
     distances: Float[Array, "*batch n_elements n_sub"],
     obliquity_factor: Float[Array, "*batch n_elements n_sub"],
-    freq_step: float,
+    freq_step: float | Float[Array, ""],
     xp: _ArrayNamespace,
 ) -> tuple[
     Complex[Array, "*batch n_elements n_sub"],
@@ -215,12 +215,12 @@ def _init_exponentials(
     """Initialize exponential arrays for frequency loop.
 
     Args:
-        freq_start: Initial frequency in Hz.
+        freq_start: Initial frequency in Hz (scalar or 0-d array).
         speed_of_sound: Speed of sound in m/s.
         attenuation: Attenuation coefficient in dB/cm/MHz.
         distances: Distances.
         obliquity_factor: Obliquity factor.
-        freq_step: Frequency step in Hz.
+        freq_step: Frequency step in Hz (scalar or 0-d array).
         xp: Array namespace.
 
     Returns:
