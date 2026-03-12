@@ -240,6 +240,12 @@ def _select_strategy(
         return PfieldStrategy.SCAN
     if "mlx" in name:
         if grid_size > 150 * 150:
+            try:
+                from fast_simus.kernels.metal_pfield import pfield_metal  # noqa: F401
+
+                return PfieldStrategy.METAL
+            except ImportError:
+                pass
             return PfieldStrategy.FREQ_OUTER_MLX
         return PfieldStrategy.VECTORIZED
     return PfieldStrategy.FREQ_OUTER
@@ -423,7 +429,18 @@ def pfield_compute(
         xp=xp,
     )
 
-    if selected == PfieldStrategy.SCAN:
+    if selected == PfieldStrategy.METAL:
+        from fast_simus.kernels.metal_pfield import pfield_metal
+
+        pressure_accum = pfield_metal(
+            positions=positions,
+            params=params,
+            plan=plan,
+            medium=medium,
+            delays_clean=delays_clean,
+            tx_apodization=tx_apodization,
+        )
+    elif selected == PfieldStrategy.SCAN:
         from fast_simus._pfield_strategies import _freq_outer_scan
 
         pressure_accum = _freq_outer_scan(**inner_kwargs)

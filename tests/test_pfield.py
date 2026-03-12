@@ -482,6 +482,8 @@ class TestPfieldStrategyCrossBackend:
             pytest.skip("scan requires JAX")
         if strategy == PfieldStrategy.FREQ_OUTER_MLX and "mlx" not in name:
             pytest.skip("freq_outer_mlx requires MLX")
+        if strategy == PfieldStrategy.METAL and "mlx" not in name:
+            pytest.skip("metal requires MLX")
 
         params = P4_2v()
         positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=15)
@@ -493,3 +495,36 @@ class TestPfieldStrategyCrossBackend:
             strategy=strategy,
         )
         _assert_valid_pfield_output(rp, positions.shape[:-1])
+
+
+class TestMetalKernel:
+    """Tests for the Metal kernel strategy (MLX only)."""
+
+    @pytest.fixture(autouse=True)
+    def _require_mlx(self):
+        pytest.importorskip("mlx")
+
+    def test_metal_matches_reference(self, reference: ReferenceData):
+        """Metal kernel matches PyMUST reference within tolerance."""
+        import mlx.core as mx_
+
+        from fast_simus.backends.mlx import ensure_compat
+        from fast_simus.pfield import PfieldStrategy
+
+        ensure_compat(mx_)
+
+        preset_fn = _preset_for_probe(reference.probe)
+        params = preset_fn()
+
+        if params.radius != float("inf"):
+            pytest.skip("Metal kernel does not yet support convex arrays")
+
+        delays_mlx = mx_.array(np.asarray(reference.delays).flatten())
+        positions_mlx = mx_.array(np.asarray(reference.positions))
+
+        rp = pfield(positions_mlx, delays_mlx, params, strategy=PfieldStrategy.METAL)
+        rp_np = np.array(rp)
+
+        _assert_pfield_close(
+            rp_np, reference.rp, atol_peak=1e-3, desc=f"{reference.probe} Metal vs PyMUST"
+        )
