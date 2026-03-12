@@ -1,6 +1,7 @@
-______________________________________________________________________
-
-## name: mlx-metal-kernels description: Guide for writing custom Metal kernels using MLX's mx.fast.metal_kernel() API on Apple Silicon, plus comprehensive reference for MLX's internal kernel architecture patterns. Use when implementing GPU-accelerated compute kernels, fused operations, or performance-critical numerical code in MLX. Covers the complete API, complex number handling, threading patterns, memory strategies, and debugging. Triggers on "metal kernel", "custom kernel", "mx.fast", "GPU kernel", "apple silicon kernel", or performance-critical MLX code.
+---
+name: mlx-metal-kernels
+description: Guide for writing custom Metal kernels using MLX's mx.fast.metal_kernel() API on Apple Silicon, plus comprehensive reference for MLX's internal kernel architecture patterns. Use when implementing GPU-accelerated compute kernels, fused operations, or performance-critical numerical code in MLX. Covers the complete API, complex number handling, threading patterns, memory strategies, and debugging. Triggers on "metal kernel", "custom kernel", "mx.fast", "apple silicon kernel", or performance-critical MLX code.
+---
 
 # Writing Metal Kernels for MLX
 
