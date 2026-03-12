@@ -151,15 +151,12 @@ def _freq_outer_scan(
 
     grid_shape = phase_decay_init.shape[:-1]
     n_sources = phase_decay_init.shape[-1]
-    n_grid = 1
-    for d in grid_shape:
-        n_grid *= d
 
     # Flatten grid to (n_grid, n_sources) and (n_grid,)
-    init_flat = xp.reshape(phase_decay_init, (n_grid, n_sources))
-    step_flat = xp.reshape(phase_decay_step, (n_grid, n_sources))
-    is_out_flat = xp.reshape(is_out, (n_grid,))
-    sin_theta_flat = xp.reshape(sin_theta, (n_grid, n_sources))
+    init_flat = xp.reshape(phase_decay_init, (-1, n_sources))
+    step_flat = xp.reshape(phase_decay_step, (-1, n_sources))
+    is_out_flat = xp.reshape(is_out, (-1,))
+    sin_theta_flat = xp.reshape(sin_theta, (-1, n_sources))
 
     spectra = pulse_spect * probe_spect
 
