@@ -61,12 +61,17 @@ class PfieldPlan(NamedTuple):
     Contains all data-dependent quantities so
     that ``pfield_compute`` has static array shapes and can be JIT-compiled.
 
+    ``freq_start`` and ``freq_step`` are Python floats derived from
+    ``selected_freqs`` (needed as static values for JAX JIT). They must
+    be consistent with ``selected_freqs[0]`` and the uniform spacing.
+    Use ``pfield_precompute`` to construct this; do not build manually.
+
     Attributes:
         selected_freqs: Significant frequency samples in Hz.
         pulse_spectrum: Pulse spectrum at selected frequencies (complex).
         probe_spectrum: Probe response at selected frequencies (real).
-        freq_start: First selected frequency in Hz (Python float for JIT compatibility).
-        freq_step: Frequency step in Hz.
+        freq_start: ``float(selected_freqs[0])``. Python float for JIT.
+        freq_step: Uniform frequency spacing in Hz. Python float for JIT.
         n_sub: Number of sub-elements per transducer element.
         seg_length: Sub-element length in meters (element_width / n_sub).
         correction_factor: Scaling factor for the RMS integration
@@ -179,6 +184,31 @@ def _prepare_frequency_sweep(
         sin_theta=sin_theta,
         full_frequency_directivity=full_frequency_directivity,
     )
+
+
+def _validate_plan(plan: PfieldPlan, xp: _ArrayNamespace) -> None:
+    """Validate PfieldPlan consistency (freq_start/freq_step vs selected_freqs).
+
+    Skipped under JAX JIT (arrays are tracers). Uses rtol=1e-4 to
+    accommodate float32 backends (MLX).
+    """
+    rtol = 1e-4
+    try:
+        actual_start = float(plan.selected_freqs[0])
+    except Exception:
+        return
+    if abs(plan.freq_start - actual_start) > abs(actual_start) * rtol:
+        raise ValueError(
+            f"PfieldPlan.freq_start={plan.freq_start} inconsistent with "
+            f"selected_freqs[0]={actual_start}. Use pfield_precompute()."
+        )
+    if plan.selected_freqs.shape[0] > 1:
+        actual_step = float(plan.selected_freqs[1]) - actual_start
+        if abs(plan.freq_step - actual_step) > max(abs(actual_step), 1.0) * rtol:
+            raise ValueError(
+                f"PfieldPlan.freq_step={plan.freq_step} inconsistent with "
+                f"selected_freqs spacing={actual_step}. Use pfield_precompute()."
+            )
 
 
 def _metal_supported(params: TransducerParams, full_frequency_directivity: bool) -> bool:
@@ -330,6 +360,8 @@ def pfield_compute(
         RMS pressure field with shape ``(*grid_shape,)``.
     """
     xp = array_namespace(positions, delays, tx_apodization)
+
+    _validate_plan(plan, xp)
 
     if tx_apodization is None:
         tx_apodization = xp.ones(params.n_elements)
