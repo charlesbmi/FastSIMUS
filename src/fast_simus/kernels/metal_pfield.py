@@ -15,6 +15,7 @@ Limitations:
 from __future__ import annotations
 
 from math import inf, log, pi
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import mlx.core as mx
@@ -29,95 +30,16 @@ if TYPE_CHECKING:
 
 _NEPER_TO_DB = 20.0 / log(10.0)
 
-# Metal Shading Language source for the pfield kernel.
-# Uses metal::precise:: for geometry transcendentals to stay within rtol=1e-4.
-# Template constants N_ELEM, N_SUB, N_FREQ, N_ES are injected at compile time.
-_METAL_PFIELD_SOURCE = """
-    uint g = thread_position_in_grid.x;
+_metal_source_cache: str | None = None
 
-    float gx = grid_x[g];
-    float gz = grid_z[g];
 
-    float kw_init    = scalars[0];
-    float alpha_init = scalars[1];
-    float kw_step    = scalars[2];
-    float alpha_step = scalars[3];
-    float min_dist   = scalars[4];
-    float seg_len    = scalars[5];
-    float center_kw  = scalars[6];
-    float eff_corr   = scalars[7];
+def _load_kernel_source() -> str:
+    """Read the Metal kernel body from ``pfield.metal`` (cached)."""
+    global _metal_source_cache
+    if _metal_source_cache is None:
+        _metal_source_cache = (Path(__file__).parent / "pfield.metal").read_text()
+    return _metal_source_cache
 
-    float2 cur[N_ES];
-    float2 stp[N_ES];
-
-    for (int e = 0; e < N_ELEM; e++) {
-        float ex = elem_x[e];
-        float ez = elem_z[e];
-        float te = theta_e[e];
-        float di_re = da_init_re[e], di_im = da_init_im[e];
-        float ds_re = da_step_re[e], ds_im = da_step_im[e];
-
-        for (int s = 0; s < N_SUB; s++) {
-            int idx = e * N_SUB + s;
-
-            float dx = gx - ex - sub_dx[idx];
-            float dz = gz - ez - sub_dz[idx];
-            float r = metal::precise::sqrt(dx * dx + dz * dz);
-            float rc = max(r, min_dist);
-
-            // Angle relative to element normal (unclipped distance for angle)
-            float th = metal::precise::asin((dx + 1e-16f) / (r + 1e-16f)) - te;
-
-            // Soft baffle obliquity
-            float obliq = (fabs(th) >= M_PI_2_F) ? 1e-16f : metal::precise::cos(th);
-
-            // Phase init: obliq/sqrt(r) * exp(-alpha*r + j*wrap(k*r, 2pi))
-            float kwr = kw_init * rc;
-            float TWO_PI = 2.0f * M_PI_F;
-            float ph_wrap = kwr - TWO_PI * metal::precise::floor(kwr / TWO_PI);
-            float ai = obliq / metal::precise::sqrt(rc) * metal::precise::exp(-alpha_init * rc);
-            float2 pi_ = float2(ai * metal::precise::cos(ph_wrap),
-                                ai * metal::precise::sin(ph_wrap));
-
-            // Phase step: exp((-alpha_step + j*k_step) * r)
-            float as_ = metal::precise::exp(-alpha_step * rc);
-            float phs = kw_step * rc;
-            float2 ps_ = float2(as_ * metal::precise::cos(phs),
-                                as_ * metal::precise::sin(phs));
-
-            // Center-frequency sinc directivity
-            float sa = center_kw * seg_len * 0.5f * metal::precise::sin(th);
-            float sv = (fabs(sa) < 1e-8f) ? 1.0f : metal::precise::sin(sa) / sa;
-            pi_ *= sv;
-
-            // Absorb delay+apodization (complex multiply)
-            cur[idx] = float2(
-                pi_.x * di_re - pi_.y * di_im,
-                pi_.x * di_im + pi_.y * di_re
-            );
-            stp[idx] = float2(
-                ps_.x * ds_re - ps_.y * ds_im,
-                ps_.x * ds_im + ps_.y * ds_re
-            );
-        }
-    }
-
-    // Frequency sweep: accumulate sum_f |pulse_probe_f|^2 * |sum_es phase_es_f|^2
-    float acc = 0.0f;
-    for (int f = 0; f < N_FREQ; f++) {
-        float sr = 0.0f, si = 0.0f;
-        for (int j = 0; j < N_ES; j++) {
-            sr += cur[j].x;
-            si += cur[j].y;
-            float cr = cur[j].x, ci = cur[j].y;
-            float tr = stp[j].x, ti = stp[j].y;
-            cur[j] = float2(cr * tr - ci * ti, cr * ti + ci * tr);
-        }
-        acc += pp_mag_sq[f] * (sr * sr + si * si);
-    }
-
-    pressure[g] = (is_out[g] > 0.5f) ? 0.0f : acc * eff_corr;
-"""
 
 _kernel_cache: dict[tuple[int, int, int], Any] = {}
 
@@ -159,7 +81,7 @@ def build_pfield_kernel(n_elem: int, n_sub: int, n_freq: int) -> Any:
         ],
         output_names=["pressure"],
         header=header,
-        source=_METAL_PFIELD_SOURCE,
+        source=_load_kernel_source(),
     )
     _kernel_cache[key] = kernel
     return kernel
