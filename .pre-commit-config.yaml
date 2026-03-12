@@ -26,4 +26,4 @@ repos:
         additional_dependencies:
           - mdformat-gfm
         args: [--wrap, "120"]
-        exclude: ^\.github/
+        exclude: ^(\.github/|\.claude/skills/)
