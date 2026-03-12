@@ -10,11 +10,12 @@ import array_api_strict
 import numpy as np
 import pymust
 import pytest
+from array_api_compat import is_jax_namespace
 
-from fast_simus.pfield import pfield, pfield_compute, pfield_precompute
+from fast_simus.pfield import PfieldStrategy, pfield, pfield_compute, pfield_precompute
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
-from fast_simus.utils._array_api import _ArrayNamespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace, is_mlx_namespace
 
 # Array API backend for FastSIMUS calls
 xp = cast(_ArrayNamespace, array_api_strict)
@@ -401,3 +402,89 @@ class TestPfieldPrecomputeCompute:
             np.asarray(rp_split),
             err_msg=f"{probe}: precompute+compute != pfield",
         )
+
+
+class TestPfieldStrategy:
+    """Tests for strategy selection and the PfieldStrategy enum."""
+
+    def test_pfield_compute_accepts_strategy_param(self):
+        """pfield_compute accepts strategy kwarg without error."""
+        params = P4_2v()
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=10)
+        delays = np.zeros(params.n_elements)
+        positions_strict = xp.asarray(positions)
+        delays_strict = xp.asarray(delays)
+
+        plan = pfield_precompute(positions_strict, delays_strict, params)
+        rp = pfield_compute(
+            positions_strict,
+            delays_strict,
+            plan,
+            params,
+            strategy=PfieldStrategy.VECTORIZED,
+        )
+        _assert_valid_pfield_output(rp, positions.shape[:-1])
+
+    def test_pfield_accepts_strategy_param(self):
+        """Top-level pfield() accepts strategy kwarg."""
+        params = P4_2v()
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=10)
+        rp = pfield(
+            xp.asarray(positions),
+            xp.asarray(np.zeros(params.n_elements)),
+            params,
+            strategy=PfieldStrategy.VECTORIZED,
+        )
+        _assert_valid_pfield_output(rp, positions.shape[:-1])
+
+
+class TestPfieldStrategyCrossBackend:
+    """Test strategies across backends using the xp fixture."""
+
+    def test_strategy_on_backend(self, xp, strategy):
+        """Each strategy produces valid output on each backend."""
+        if strategy == PfieldStrategy.SCAN and not is_jax_namespace(xp):
+            pytest.skip("scan requires JAX")
+        if strategy == PfieldStrategy.METAL and not is_mlx_namespace(xp):
+            pytest.skip("metal requires MLX")
+
+        params = P4_2v()
+        positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=15)
+        delays = np.zeros(params.n_elements)
+        rp = pfield(
+            xp.asarray(positions),
+            xp.asarray(delays),
+            params,
+            strategy=strategy,
+        )
+        _assert_valid_pfield_output(rp, positions.shape[:-1])
+
+
+class TestMetalKernel:
+    """Tests for the Metal kernel strategy (MLX only)."""
+
+    @pytest.fixture(autouse=True)
+    def _require_mlx(self):
+        pytest.importorskip("mlx")
+
+    def test_metal_matches_reference(self, reference: ReferenceData):
+        """Metal kernel matches PyMUST reference within tolerance."""
+        import mlx.core as mx_
+
+        from fast_simus.backends.mlx import ensure_compat
+
+        ensure_compat(mx_)
+
+        preset_fn = _preset_for_probe(reference.probe)
+        params = preset_fn()
+
+        if params.radius != float("inf"):
+            pytest.skip("Metal kernel does not yet support convex arrays")
+
+        delays_mlx = cast(Array, mx_.array(np.asarray(reference.delays).flatten()))
+        positions_mlx = cast(Array, mx_.array(np.asarray(reference.positions)))
+
+        rp = pfield(positions_mlx, delays_mlx, params, strategy=PfieldStrategy.METAL)
+        rp_np = np.array(rp)
+
+        _assert_pfield_close(rp_np, reference.rp, atol_peak=1e-3, desc=f"{reference.probe} Metal vs PyMUST")

@@ -13,40 +13,46 @@ References:
 
 from __future__ import annotations
 
-from math import ceil, inf, log, pi
-from typing import NamedTuple
+from enum import StrEnum
+from math import ceil, inf, pi, prod
+from types import ModuleType
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 import array_api_extra as xpx
+from array_api_compat import is_jax_namespace
 from beartype import beartype as typechecker
 from jaxtyping import Bool, Complex, Float, jaxtyped
 
+from fast_simus._pfield_math import (
+    _distances_and_angles,
+    _init_exponentials,
+    _obliquity_factor,
+    _select_frequencies,
+    _subelement_centroids,
+)
 from fast_simus.medium_params import MediumParams
-from fast_simus.spectrum import probe_spectrum, pulse_spectrum
 from fast_simus.transducer_params import BaffleType, TransducerParams
-from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace, is_mlx_namespace
 from fast_simus.utils.geometry import element_positions
 
 _DEFAULT_MEDIUM = MediumParams()
 
-# Conversion factor: Nepers to dB
-# 20/log(10) ≈ 8.6859
-_NEPER_TO_DB = 20.0 / log(10.0)
 
+class PfieldStrategy(StrEnum):
+    """Backend strategy for the pfield frequency sweep.
 
-class _FrequencyPlan(NamedTuple):
-    """Frequency sampling plan for pfield computation.
+    The three-layer pfield architecture separates:
+    - Layer 1 (setup): geometry, phase init -- pure Array API, shared by all
+    - Layer 2 (step body): per-frequency math -- pure Array API function
+    - Layer 3 (loop driver): iteration mechanism -- backend-specific
 
-    Attributes:
-        selected_freqs: Selected frequencies, shape
-        pulse_spectrum: Pulse spectrum at selected frequencies, shape
-        probe_spectrum: Probe spectrum at selected frequencies, shape
-        freq_step: Frequency step in Hz
+    This enum selects the Layer 3 loop driver. When None is passed to
+    pfield_compute, the strategy is auto-selected based on the detected backend.
     """
 
-    selected_freqs: Float[Array, " n_frequencies"]
-    pulse_spectrum: Complex[Array, " n_frequencies"]
-    probe_spectrum: Float[Array, " n_frequencies"]
-    freq_step: float
+    VECTORIZED = "vectorized"
+    SCAN = "scan"
+    METAL = "metal"
 
 
 class PfieldPlan(NamedTuple):
@@ -55,12 +61,12 @@ class PfieldPlan(NamedTuple):
     Contains all data-dependent quantities so
     that ``pfield_compute`` has static array shapes and can be JIT-compiled.
 
+    Use ``pfield_precompute`` to construct this; do not build manually.
+
     Attributes:
-        selected_freqs: Significant frequency samples in Hz.
+        selected_freqs: Significant frequency samples in Hz (uniformly spaced).
         pulse_spectrum: Pulse spectrum at selected frequencies (complex).
         probe_spectrum: Probe response at selected frequencies (real).
-        freq_start: First selected frequency in Hz (Python float for JIT compatibility).
-        freq_step: Frequency step in Hz.
         n_sub: Number of sub-elements per transducer element.
         seg_length: Sub-element length in meters (element_width / n_sub).
         correction_factor: Scaling factor for the RMS integration
@@ -70,298 +76,148 @@ class PfieldPlan(NamedTuple):
     selected_freqs: Float[Array, " n_frequencies"]
     pulse_spectrum: Complex[Array, " n_frequencies"]
     probe_spectrum: Float[Array, " n_frequencies"]
-    freq_start: float
-    freq_step: float
     n_sub: int
     seg_length: float
     correction_factor: float
 
 
-@jaxtyped(typechecker=typechecker)
-def _subelement_centroids(
-    element_width: float,
-    n_sub: int,
-    theta_e: Float[Array, " n_elements"],
-    xp: _ArrayNamespace,
-) -> Float[Array, "n_elements n_sub 2"]:
-    """Compute sub-element centroid positions relative to element centers.
+class _SweepInputs(NamedTuple):
+    """Precomputed inputs for the Array API frequency-sweep strategies.
 
-    Args:
-        element_width: Element width in meters.
-        n_sub: Number of sub-elements per element.
-        theta_e: Element angular positions in radians.
-        xp: Array namespace.
-
-    Returns:
-        Sub-element offsets with shape (n_elements, n_sub, 2) where [..., 0]
-        is lateral (x) and [..., 1] is axial (z).
+    Source points are flattened: n_sources = n_elements * n_sub.
+    The 1/n_sub normalization is absorbed into phase_decay_init.
     """
-    seg_length = element_width / n_sub
-    seg_offsets = xp.asarray([-element_width / 2.0 + seg_length / 2.0 + i * seg_length for i in range(n_sub)])
-    # Broadcasting: (n_sub,) -> (1, n_sub), (n_elements,) -> (n_elements, 1)
-    seg_offsets_2d = xp.reshape(seg_offsets, (1, n_sub))
-    cos_theta = xp.cos(theta_e)[:, None]
-    sin_neg_theta = xp.sin(-theta_e)[:, None]
-    subelement_dx = seg_offsets_2d * cos_theta
-    subelement_dz = seg_offsets_2d * sin_neg_theta
-    return xp.stack([subelement_dx, subelement_dz], axis=-1)
+
+    phase_decay_init: Complex[Array, " *grid n_sources"]
+    phase_decay_step: Complex[Array, " *grid n_sources"]
+    is_out: Bool[Array, " *grid"]
+    wavenumbers: Float[Array, " n_freq"]
+    pulse_spect: Complex[Array, " n_freq"]
+    probe_spect: Float[Array, " n_freq"]
+    seg_length: float
+    sin_theta: Float[Array, " *grid n_sources"]
+    full_frequency_directivity: bool
 
 
-@jaxtyped(typechecker=typechecker)
-def _distances_and_angles(
-    points: Float[Array, "*batch 2"],
-    subelement_offsets: Float[Array, "n_elements n_sub 2"],
-    element_pos: Float[Array, "n_elements 2"],
-    theta_e: Float[Array, " n_elements"],
-    speed_of_sound: float,
-    freq_center: float,
-    xp: _ArrayNamespace,
-) -> tuple[
-    Float[Array, "*batch n_elements n_sub"],
-    Float[Array, "*batch n_elements n_sub"],
-    Float[Array, "*batch n_elements n_sub"],
-]:
-    """Compute distances and angles from grid points to sub-elements.
-
-    Args:
-        points: Grid point positions.
-        subelement_offsets: Sub-element offsets.
-        element_pos: Element positions.
-        theta_e: Element angular positions.
-        speed_of_sound: Speed of sound in m/s.
-        freq_center: Center frequency in Hz.
-        xp: Array namespace.
-
-    Returns:
-        Tuple of (distances, sin_theta, theta_arr):
-        - distances: Distances from grid points to sub-elements.
-        - sin_theta: Sine of angles relative to element normal.
-        - theta_arr: Angles relative to element normal.
-    """
-    delta: Float[Array, "*batch n_elements n_sub xz=2"] = (
-        points[..., None, None, :] - subelement_offsets - element_pos[:, None, :]
-    )
-    delta_x = delta[..., 0]
-    delta_z = delta[..., 1]
-    dist_squared = delta_x**2 + delta_z**2
-    distances = xp.sqrt(dist_squared)
-
-    # Distances with clipping (use unclipped sqrt for angle computation)
-    min_distance = xp.asarray(speed_of_sound / freq_center / 2.0)
-    distances_clipped = xp.where(distances < min_distance, min_distance, distances)
-
-    # Angle relative to element normal
-    _div_eps = xp.asarray(1e-16)  # Numerical stability for division
-    theta_arr = xp.asin((delta_x + _div_eps) / (distances + _div_eps)) - theta_e[:, None]
-    sin_theta = xp.sin(theta_arr)
-
-    return distances_clipped, sin_theta, theta_arr
-
-
-def _select_frequencies(
-    fc: float,
-    bandwidth: float,
-    tx_n_wavelengths: float,
-    db_thresh: float,
-    max_freq_step: float,
-    xp: _ArrayNamespace,
-) -> _FrequencyPlan:
-    """Select frequency samples for pfield computation.
-
-    Args:
-        fc: Center frequency in Hz.
-        bandwidth: Fractional bandwidth.
-        tx_n_wavelengths: Number of wavelengths in TX pulse.
-        db_thresh: Threshold in dB for frequency component selection.
-        max_freq_step: Upper bound for frequency step.
-        xp: Array namespace.
-
-    Returns:
-        FrequencyPlan with selected frequencies and spectra.
-    """
-    # Frequency samples
-    n_freq = int(2 * ceil(fc / max_freq_step) + 1)
-    frequencies = xp.linspace(0, 2 * fc, n_freq)
-    freq_step = float(frequencies[1])
-
-    # Keep only significant components (dB threshold)
-    angular_freqs_all = xp.asarray(2.0 * pi) * frequencies
-    spectrum_magnitude = xp.abs(
-        pulse_spectrum(angular_freqs_all, fc, tx_n_wavelengths) * probe_spectrum(angular_freqs_all, fc, bandwidth)
-    )
-    gain_db = 20.0 * xp.log10(xp.asarray(1e-200) + spectrum_magnitude / xp.max(spectrum_magnitude))
-    above_threshold = gain_db > db_thresh
-    idx_first, idx_last = _first_last_true(xp, above_threshold)
-
-    selected_freqs = frequencies[idx_first : idx_last + 1]
-
-    angular_freqs_sel = xp.asarray(2.0 * pi) * selected_freqs
-    pulse_spect = pulse_spectrum(angular_freqs_sel, fc, tx_n_wavelengths)
-    probe_spect = probe_spectrum(angular_freqs_sel, fc, bandwidth)
-
-    return _FrequencyPlan(selected_freqs, pulse_spect, probe_spect, freq_step)
-
-
-@jaxtyped(typechecker=typechecker)
-def _obliquity_factor(
-    theta_arr: Float[Array, "*batch n_elements n_sub"],
-    baffle: BaffleType | float,
-    xp: _ArrayNamespace,
-) -> Float[Array, "*batch n_elements n_sub"]:
-    """Compute obliquity factor based on baffle type.
-
-    Args:
-        theta_arr: Angles relative to element normal.
-        baffle: Baffle type or impedance ratio.
-        xp: Array namespace.
-
-    Returns:
-        Obliquity factor.
-    """
-    non_rigid_baffle = baffle != BaffleType.RIGID
-    _horizon_floor = xp.asarray(1e-16)  # Near-zero for beyond-hemisphere angles
-
-    if non_rigid_baffle:
-        if baffle == BaffleType.SOFT:
-            obliquity_factor = xp.cos(theta_arr)
-        else:
-            cos_th = xp.cos(theta_arr)
-            obliquity_factor = cos_th / (cos_th + float(baffle))
-    else:
-        obliquity_factor = xp.ones(theta_arr.shape)
-
-    obliquity_factor = xp.where(
-        xp.abs(theta_arr) >= xp.asarray(pi / 2),
-        _horizon_floor,
-        obliquity_factor,
-    )
-
-    return obliquity_factor
-
-
-@jaxtyped(typechecker=typechecker)
-def _init_exponentials(
-    freq_start: float,
-    speed_of_sound: float,
-    attenuation: float,
-    distances: Float[Array, "*batch n_elements n_sub"],
-    obliquity_factor: Float[Array, "*batch n_elements n_sub"],
-    freq_step: float,
-    xp: _ArrayNamespace,
-) -> tuple[
-    Complex[Array, "*batch n_elements n_sub"],
-    Complex[Array, "*batch n_elements n_sub"],
-]:
-    """Initialize exponential arrays for frequency loop.
-
-    Args:
-        freq_start: Initial frequency in Hz.
-        speed_of_sound: Speed of sound in m/s.
-        attenuation: Attenuation coefficient in dB/cm/MHz.
-        distances: Distances.
-        obliquity_factor: Obliquity factor.
-        freq_step: Frequency step in Hz.
-        xp: Array namespace.
-
-    Returns:
-        Tuple of (phase_decay, phase_decay_step):
-        - phase_decay: Initial complex exponential array.
-        - phase_decay_step: Complex exponential increment per frequency step.
-    """
-    wavenumber_init = 2.0 * pi * freq_start / speed_of_sound
-    attenuation_wavenum = attenuation / _NEPER_TO_DB * freq_start / 1e6 * 1e2
-
-    # exp(-kwa*distances + 1j*mod(kw*distances, 2pi))
-    kw0_r = xp.asarray(wavenumber_init) * distances
-    two_pi = xp.asarray(2.0 * pi)
-    phase_mod = kw0_r - two_pi * xp.floor(kw0_r / two_pi)
-    phase_decay = xp.exp(xp.asarray(-attenuation_wavenum) * distances + xp.asarray(1j) * phase_mod)
-
-    wavenumber_step = 2.0 * pi * freq_step / speed_of_sound
-    attenuation_step = attenuation / _NEPER_TO_DB * freq_step / 1e6 * 1e2
-    phase_decay_step = xp.exp(xp.asarray(-attenuation_step + 1j * wavenumber_step) * distances)
-
-    # Incorporate obliquity / sqrt(distances) (2D, no elevation)
-    phase_decay = phase_decay * obliquity_factor / xp.sqrt(distances)
-
-    return phase_decay, phase_decay_step
-
-
-@jaxtyped(typechecker=typechecker)
-def _pfield_freq_vectorized(
-    phase_decay_init: Complex[Array, "*grid n_elements n_sub"],
-    phase_decay_step: Complex[Array, "*grid n_elements n_sub"],
+def _prepare_frequency_sweep(
+    positions: Float[Array, "*grid_shape 2"],
     delays_clean: Float[Array, " n_elements"],
     tx_apodization: Float[Array, " n_elements"],
-    is_out: Bool[Array, " *grid"],
-    wavenumbers: Float[Array, " n_freq"],
-    speed_of_sound: float,
-    pulse_spect: Complex[Array, " n_freq"],
-    probe_spect: Float[Array, " n_freq"],
-    n_sub: int,
-    seg_length: float,
-    sin_theta: Float[Array, "*grid n_elements n_sub"],
+    plan: PfieldPlan,
+    params: TransducerParams,
+    medium: MediumParams,
+    *,
     full_frequency_directivity: bool,
     xp: _ArrayNamespace,
-) -> Float[Array, " *grid"]:
-    """Compute pressure field contribution for all frequencies at once.
+) -> _SweepInputs:
+    """Compute geometry, phases, and obliquity for Array API loop drivers.
 
-    Replaces the sequential frequency loop with vectorized tensor operations.
-    Uses the geometric progression: phase_decay[k] = init * step^k.
-
-    The sub-element loop (n_sub iterations) avoids materializing the full
-    (*grid, n_elements, n_sub, n_freq) tensor. Only (*grid, n_elements, n_freq)
-    is materialized per sub-element, then immediately contracted over elements.
-
-    Args:
-        phase_decay_init: Complex propagation at first frequency.
-        phase_decay_step: Complex multiplier per frequency step.
-        delays_clean: Transmit time delays (NaN replaced with 0).
-        tx_apodization: Transmit apodization weights.
-        is_out: Out-of-field mask.
-        wavenumbers: Angular wavenumbers for all frequencies (2*pi*f/c).
-        speed_of_sound: Speed of sound in m/s.
-        pulse_spect: Pulse spectrum at all selected frequencies.
-        probe_spect: Probe response at all selected frequencies.
-        n_sub: Number of sub-elements per element.
-        seg_length: Sub-element length (element_width / n_sub).
-        sin_theta: Sine of angles relative to element normal.
-        full_frequency_directivity: If True, compute frequency-dependent directivity.
-        xp: Array namespace.
-
-    Returns:
-        Sum of |P_k|^2 over all frequencies, shape (*grid,).
+    Shared setup for VECTORIZED and SCAN strategies. The Metal kernel
+    computes geometry on-the-fly and does not use this function.
     """
-    n_freq = wavenumbers.shape[0]
-    exponents = xp.arange(n_freq, dtype=wavenumbers.dtype)  # match float dtype of inputs
+    element_pos, theta_elements, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
+    if theta_elements is None:
+        theta_elements = xp.zeros(params.n_elements)
 
-    # Delay + apodization for all frequencies at once: (n_elements, n_freq)
-    delay_apod = xp.exp(xp.asarray(1j) * wavenumbers * speed_of_sound * delays_clean[:, None]) * tx_apodization[:, None]
+    speed_of_sound = medium.speed_of_sound
+    attenuation = medium.attenuation
 
-    # Accumulate over sub-elements to avoid materializing the 4D tensor
-    pressure_all = xp.asarray(0.0 + 0j)  # broadcasts to (*grid, n_freq)
+    subelement_offsets = _subelement_centroids(params.element_width, plan.n_sub, theta_elements, xp)
 
-    for i in range(n_sub):
-        # Phase at all frequencies for sub-element i: (*grid, n_elements, n_freq)
-        phase_k = phase_decay_init[..., i, None] * phase_decay_step[..., i, None] ** exponents
+    x = positions[..., 0]
+    z = positions[..., 1]
+    is_out = z < 0
+    if params.radius != inf:
+        is_out = is_out | ((x**2 + (z + apex_offset) ** 2) <= params.radius**2)
 
-        if full_frequency_directivity:
-            sinc_arg = wavenumbers * seg_length / 2.0 * sin_theta[..., i, None] / pi
-            phase_k = xpx.sinc(sinc_arg, xp=xp) * phase_k
+    distances, sin_theta, theta_arr = _distances_and_angles(
+        positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
+    )
 
-        # Contract over elements: (*grid, n_elements, n_freq) -> (*grid, n_freq)
-        pressure_all = pressure_all + xp.sum(phase_k * delay_apod, axis=-2)
+    obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
 
-    pressure_all = pressure_all / n_sub
+    freq_start = plan.selected_freqs[0]
+    n_freqs = plan.selected_freqs.shape[0]
+    freq_step = (plan.selected_freqs[1] - plan.selected_freqs[0]) if n_freqs > 1 else xp.asarray(0.0)
 
-    # Apply spectra: (n_freq,) broadcasts with (*grid, n_freq)
-    pressure_all = pulse_spect * probe_spect * pressure_all
+    phase_decay_init, phase_decay_step = _init_exponentials(
+        freq_start, speed_of_sound, attenuation, distances, obliquity_factor, freq_step, xp
+    )
 
-    # Zero out-of-field points
-    pressure_all = xp.where(is_out[..., None], xp.asarray(0.0 + 0j), pressure_all)
+    if not full_frequency_directivity:
+        center_wavenumber = 2.0 * pi * params.freq_center / speed_of_sound
+        sinc_arg = xp.asarray(center_wavenumber * plan.seg_length / 2.0) * sin_theta / pi
+        phase_decay_init = phase_decay_init * xpx.sinc(sinc_arg, xp=xp)
 
-    # Sum |P_k|^2 over frequencies -> (*grid,)
-    return xp.sum(xp.abs(pressure_all) ** 2, axis=-1)
+    # Absorb delay+apodization into the geometric progression so loop
+    # drivers don't need a per-frequency multiply for delays.
+    delay_apod_init = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_start * delays_clean) * tx_apodization
+    delay_apod_step = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_step * delays_clean)
+    phase_decay_init = phase_decay_init * delay_apod_init[:, None]
+    phase_decay_step = phase_decay_step * delay_apod_step[:, None]
+
+    # Absorb 1/n_sub normalization and flatten (n_elements, n_sub) -> (n_sources,).
+    # After this, sub-elements and elements are equivalent source points
+    # and all loop drivers use a single sum(axis=-1).
+    n_sub = plan.n_sub
+    phase_decay_init = phase_decay_init / n_sub
+
+    def _flatten_sources(arr: Array) -> Array:
+        return xp.reshape(arr, (*arr.shape[:-2], arr.shape[-2] * arr.shape[-1]))
+
+    phase_decay_init = _flatten_sources(phase_decay_init)
+    phase_decay_step = _flatten_sources(phase_decay_step)
+    sin_theta = _flatten_sources(sin_theta)
+
+    wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
+
+    return _SweepInputs(
+        phase_decay_init=phase_decay_init,
+        phase_decay_step=phase_decay_step,
+        is_out=is_out,
+        wavenumbers=wavenumbers,
+        pulse_spect=plan.pulse_spectrum,
+        probe_spect=plan.probe_spectrum,
+        seg_length=plan.seg_length,
+        sin_theta=sin_theta,
+        full_frequency_directivity=full_frequency_directivity,
+    )
+
+
+def _metal_supported(params: TransducerParams, full_frequency_directivity: bool) -> bool:
+    """Check whether the Metal kernel supports the given configuration."""
+    if full_frequency_directivity:
+        return False
+    if not isinstance(params.baffle, str | BaffleType):
+        return False
+    return params.baffle == BaffleType.SOFT
+
+
+def _select_strategy(
+    xp: _ArrayNamespace,
+    grid_size: int,
+    params: TransducerParams,
+    full_frequency_directivity: bool,
+    *,
+    strategy: PfieldStrategy | None = None,
+) -> PfieldStrategy:
+    """Auto-select the best pfield strategy for the detected backend."""
+    if strategy is not None:
+        if strategy == PfieldStrategy.METAL and not _metal_supported(params, full_frequency_directivity):
+            unsupported = []
+            if full_frequency_directivity:
+                unsupported.append("full_frequency_directivity=True")
+            if params.baffle != BaffleType.SOFT:
+                unsupported.append(f"baffle={params.baffle!r} (only SOFT supported)")
+            raise NotImplementedError(
+                f"Metal kernel does not support: {', '.join(unsupported)}. Use strategy=None for auto-selection."
+            )
+        return strategy
+    if is_jax_namespace(cast(ModuleType, xp)):
+        return PfieldStrategy.SCAN
+    if is_mlx_namespace(xp) and _metal_supported(params, full_frequency_directivity):
+        return PfieldStrategy.METAL
+    return PfieldStrategy.VECTORIZED
 
 
 def pfield_precompute(
@@ -436,8 +292,6 @@ def pfield_precompute(
         selected_freqs=freq_plan.selected_freqs,
         pulse_spectrum=freq_plan.pulse_spectrum,
         probe_spectrum=freq_plan.probe_spectrum,
-        freq_start=float(freq_plan.selected_freqs[0]),
-        freq_step=df,
         n_sub=n_sub,
         seg_length=seg_length,
         correction_factor=correction_factor,
@@ -453,6 +307,7 @@ def pfield_compute(
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
     full_frequency_directivity: bool = False,
+    strategy: PfieldStrategy | None = None,
 ) -> Float[Array, " *grid_shape"]:
     """Compute the RMS pressure field given a precomputed plan.
 
@@ -469,18 +324,13 @@ def pfield_compute(
             Elements with NaN delays are automatically zeroed.
         full_frequency_directivity: If True, compute element directivity at
             every frequency. If False, use center-frequency-only directivity.
+        strategy: Backend strategy for the frequency sweep. If None,
+            auto-selects based on the detected array backend.
 
     Returns:
         RMS pressure field with shape ``(*grid_shape,)``.
     """
     xp = array_namespace(positions, delays, tx_apodization)
-
-    element_pos, theta_elements, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
-    if theta_elements is None:
-        theta_elements = xp.zeros(params.n_elements)
-
-    speed_of_sound = medium.speed_of_sound
-    attenuation = medium.attenuation
 
     if tx_apodization is None:
         tx_apodization = xp.ones(params.n_elements)
@@ -489,46 +339,41 @@ def pfield_compute(
     tx_apodization = xp.where(nan_mask, xp.asarray(0.0), tx_apodization)
     delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
 
-    subelement_offsets = _subelement_centroids(params.element_width, plan.n_sub, theta_elements, xp)
+    grid_size = prod(positions.shape[:-1])
+    selected = _select_strategy(xp, grid_size, params, full_frequency_directivity, strategy=strategy)
 
-    x = positions[..., 0]
-    z = positions[..., 1]
-    is_out = z < 0
-    if params.radius != inf:
-        is_out = is_out | ((x**2 + (z + apex_offset) ** 2) <= params.radius**2)
+    if selected == PfieldStrategy.METAL:
+        from fast_simus.kernels.metal_pfield import pfield_metal  # noqa: PLC0415
 
-    distances, sin_theta, theta_arr = _distances_and_angles(
-        positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
-    )
+        if TYPE_CHECKING:
+            import mlx.core as mx  # noqa: PLC0415
 
-    obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
-    phase_decay_init, phase_decay_step = _init_exponentials(
-        plan.freq_start, speed_of_sound, attenuation, distances, obliquity_factor, plan.freq_step, xp
-    )
+        pressure_accum = cast(
+            Array,
+            pfield_metal(
+                positions=cast("mx.array", positions),
+                params=params,
+                plan=plan,
+                medium=medium,
+                delays_clean=cast("mx.array", delays_clean),
+                tx_apodization=cast("mx.array", tx_apodization),
+            ),
+        )
+    else:
+        from fast_simus._pfield_strategies import _freq_outer_python, _freq_outer_scan  # noqa: PLC0415
 
-    if not full_frequency_directivity:
-        center_wavenumber = 2.0 * pi * params.freq_center / speed_of_sound
-        sinc_arg = xp.asarray(center_wavenumber * plan.seg_length / 2.0) * sin_theta / pi
-        phase_decay_init = phase_decay_init * xpx.sinc(sinc_arg, xp=xp)
-
-    wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
-
-    pressure_accum = _pfield_freq_vectorized(
-        phase_decay_init=phase_decay_init,
-        phase_decay_step=phase_decay_step,
-        delays_clean=delays_clean,
-        tx_apodization=tx_apodization,
-        is_out=is_out,
-        wavenumbers=wavenumbers,
-        speed_of_sound=speed_of_sound,
-        pulse_spect=plan.pulse_spectrum,
-        probe_spect=plan.probe_spectrum,
-        n_sub=plan.n_sub,
-        seg_length=plan.seg_length,
-        sin_theta=sin_theta,
-        full_frequency_directivity=full_frequency_directivity,
-        xp=xp,
-    )
+        sweep = _prepare_frequency_sweep(
+            positions,
+            delays_clean,
+            tx_apodization,
+            plan,
+            params,
+            medium,
+            full_frequency_directivity=full_frequency_directivity,
+            xp=xp,
+        )
+        driver = _freq_outer_scan if selected == PfieldStrategy.SCAN else _freq_outer_python
+        pressure_accum = driver(**sweep._asdict(), xp=xp)
 
     return xp.sqrt(pressure_accum * plan.correction_factor)
 
@@ -546,6 +391,7 @@ def pfield(
     full_frequency_directivity: bool = False,
     element_splitting: int | None = None,
     frequency_step: float | int = 1.0,
+    strategy: PfieldStrategy | None = None,
 ) -> Float[Array, " *grid_shape"]:
     """Compute the RMS acoustic pressure field of a transducer array.
 
@@ -601,6 +447,8 @@ def pfield(
             If None, computed automatically as ceil(element_width / smallest_wavelength).
         frequency_step: Scaling factor for the frequency step.
             Values > 1 speed up computation; values < 1 give smoother results.
+        strategy: Backend strategy for the frequency sweep. If None,
+            auto-selects based on the detected array backend.
 
     Returns:
         RMS pressure field with shape ``(*grid_shape,)``.
@@ -623,18 +471,5 @@ def pfield(
         medium,
         tx_apodization=tx_apodization,
         full_frequency_directivity=full_frequency_directivity,
+        strategy=strategy,
     )
-
-
-def _first_last_true(xp: _ArrayNamespace, mask: Array) -> tuple[int, int]:
-    """Find first and last True index in 1D boolean array. JAX-compatible (no nonzero)."""
-    n = mask.shape[0]
-    if n == 0:
-        return 0, 0
-    # Cast to int: argmax on bool not allowed by array_api_strict
-    mask_int = xp.asarray(mask, dtype=xp.int32)
-    first = int(xp.argmax(mask_int))
-    if int(xp.max(mask_int)) == 0:
-        return 0, 0
-    last = n - 1 - int(xp.argmax(mask_int[::-1]))
-    return first, last

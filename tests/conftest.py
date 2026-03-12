@@ -5,6 +5,7 @@ from typing import cast
 
 import pytest
 
+from fast_simus.pfield import PfieldStrategy
 from fast_simus.utils._array_api import _ArrayNamespace
 
 # Try to import array backends
@@ -58,3 +59,16 @@ def xp(request) -> _ArrayNamespace:
     for Array API compliance testing.
     """
     return cast(_ArrayNamespace, request.param)
+
+
+@pytest.fixture(
+    params=[
+        pytest.param(None, id="auto"),
+        pytest.param(PfieldStrategy.VECTORIZED, id="vectorized"),
+        pytest.param(PfieldStrategy.SCAN, id="scan"),
+        pytest.param(PfieldStrategy.METAL, id="metal"),
+    ]
+)
+def strategy(request) -> PfieldStrategy | None:
+    """Fixture providing different pfield strategies."""
+    return request.param

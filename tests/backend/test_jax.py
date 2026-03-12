@@ -28,10 +28,10 @@ def test_jax_jit_pfield_compute():
 
     eqx.filter_jit automatically splits arguments into:
     - JAX arrays (traced): positions, delays, plan.selected_freqs, etc.
-    - Everything else (static): plan.n_sub, plan.freq_start, params fields, ...
+    - Everything else (static): plan.n_sub, params fields, ...
 
-    This means range(plan.n_sub) and params control flow (baffle type, radius
-    check) are evaluated once at trace time without any data-structure changes.
+    freq_start/freq_step are derived from plan.selected_freqs at compute time,
+    so they become traced scalars (fewer recompilations than static floats).
     """
     params = P4_2v()
     positions_np = _make_positions((-2e-2, 2e-2), (params.pitch, 5e-2), n=50)
