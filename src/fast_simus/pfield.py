@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from math import ceil, inf, pi, prod
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 import array_api_extra as xpx
 from beartype import beartype as typechecker
@@ -153,7 +153,7 @@ def _pfield_freq_vectorized(
 def _freq_step_body(
     phase: Complex[Array, "*grid n_elements n_sub"],
     phase_step: Complex[Array, "*grid n_elements n_sub"],
-    spectrum_k: complex,
+    spectrum_k: complex | Array,
     n_sub: int,
     xp: _ArrayNamespace,
     *,
@@ -413,45 +413,106 @@ def pfield_compute(
     grid_size = prod(positions.shape[:-1])
     selected = _select_strategy(xp, grid_size, strategy=strategy)
 
-    inner_kwargs = dict(
-        phase_decay_init=phase_decay_init,
-        phase_decay_step=phase_decay_step,
-        is_out=is_out,
-        wavenumbers=wavenumbers,
-        pulse_spect=plan.pulse_spectrum,
-        probe_spect=plan.probe_spectrum,
-        n_sub=plan.n_sub,
-        seg_length=plan.seg_length,
-        sin_theta=sin_theta,
-        full_frequency_directivity=full_frequency_directivity,
-        xp=xp,
-    )
+    # Common keyword arguments for all frequency-sweep strategies.
+    # Spelled out explicitly (rather than dict-unpacked) so that the
+    # type-checker can verify each parameter individually.
+    _pulse = plan.pulse_spectrum
+    _probe = plan.probe_spectrum
+    _nsub = plan.n_sub
+    _seg = plan.seg_length
 
     if selected == PfieldStrategy.METAL:
         from fast_simus.kernels.metal_pfield import pfield_metal  # noqa: PLC0415
 
-        pressure_accum = pfield_metal(
-            positions=positions,
-            params=params,
-            plan=plan,
-            medium=medium,
-            delays_clean=delays_clean,
-            tx_apodization=tx_apodization,
+        # Metal kernel uses mx.array types; cast at the boundary.
+        if TYPE_CHECKING:
+            import mlx.core as mx  # noqa: PLC0415
+
+        pressure_accum = cast(
+            Array,
+            pfield_metal(
+                positions=cast("mx.array", positions),
+                params=params,
+                plan=plan,
+                medium=medium,
+                delays_clean=cast("mx.array", delays_clean),
+                tx_apodization=cast("mx.array", tx_apodization),
+            ),
         )
     elif selected == PfieldStrategy.SCAN:
         from fast_simus._pfield_strategies import _freq_outer_scan  # noqa: PLC0415
 
-        pressure_accum = _freq_outer_scan(**inner_kwargs)
+        pressure_accum = _freq_outer_scan(
+            phase_decay_init=phase_decay_init,
+            phase_decay_step=phase_decay_step,
+            is_out=is_out,
+            wavenumbers=wavenumbers,
+            pulse_spect=_pulse,
+            probe_spect=_probe,
+            n_sub=_nsub,
+            seg_length=_seg,
+            sin_theta=sin_theta,
+            full_frequency_directivity=full_frequency_directivity,
+            xp=xp,
+        )
     elif selected == PfieldStrategy.FREQ_OUTER_MLX:
         from fast_simus._pfield_strategies import _freq_outer_mlx  # noqa: PLC0415
 
-        pressure_accum = _freq_outer_mlx(**inner_kwargs)
+        pressure_accum = _freq_outer_mlx(
+            phase_decay_init=phase_decay_init,
+            phase_decay_step=phase_decay_step,
+            is_out=is_out,
+            wavenumbers=wavenumbers,
+            pulse_spect=_pulse,
+            probe_spect=_probe,
+            n_sub=_nsub,
+            seg_length=_seg,
+            sin_theta=sin_theta,
+            full_frequency_directivity=full_frequency_directivity,
+            xp=xp,
+        )
     elif selected == PfieldStrategy.VECTORIZED:
-        pressure_accum = _pfield_freq_vectorized(**inner_kwargs)
+        pressure_accum = _pfield_freq_vectorized(
+            phase_decay_init=phase_decay_init,
+            phase_decay_step=phase_decay_step,
+            is_out=is_out,
+            wavenumbers=wavenumbers,
+            pulse_spect=_pulse,
+            probe_spect=_probe,
+            n_sub=_nsub,
+            seg_length=_seg,
+            sin_theta=sin_theta,
+            full_frequency_directivity=full_frequency_directivity,
+            xp=xp,
+        )
     elif selected == PfieldStrategy.FREQ_OUTER:
-        pressure_accum = _pfield_freq_outer(**inner_kwargs)
+        pressure_accum = _pfield_freq_outer(
+            phase_decay_init=phase_decay_init,
+            phase_decay_step=phase_decay_step,
+            is_out=is_out,
+            wavenumbers=wavenumbers,
+            pulse_spect=_pulse,
+            probe_spect=_probe,
+            n_sub=_nsub,
+            seg_length=_seg,
+            sin_theta=sin_theta,
+            full_frequency_directivity=full_frequency_directivity,
+            xp=xp,
+        )
     else:
-        pressure_accum = _pfield_freq_outer(**inner_kwargs)
+        pressure_accum = _pfield_freq_outer(
+            phase_decay_init=phase_decay_init,
+            phase_decay_step=phase_decay_step,
+            is_out=is_out,
+            wavenumbers=wavenumbers,
+            pulse_spect=_pulse,
+            probe_spect=_probe,
+            n_sub=_nsub,
+            seg_length=_seg,
+            sin_theta=sin_theta,
+            full_frequency_directivity=full_frequency_directivity,
+            xp=xp,
+        )
 
     return xp.sqrt(pressure_accum * plan.correction_factor)
 

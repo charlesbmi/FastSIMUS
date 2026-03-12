@@ -44,6 +44,7 @@ def _freq_outer_scan(
     import jax.numpy as jnp  # noqa: PLC0415
 
     spectra = pulse_spect * probe_spect
+    zero = xp.asarray(0.0)
 
     if full_frequency_directivity:
 
@@ -52,7 +53,7 @@ def _freq_outer_scan(
             sinc_arg = wavenumbers[k] * seg_length / 2.0 * sin_theta / pi
             directivity_k = xpx.sinc(sinc_arg, xp=xp)
             phase, rp_k = _freq_step_body(phase, phase_decay_step, spectra[k], n_sub, xp, directivity_k=directivity_k)
-            rp = rp + jnp.where(is_out, 0.0, rp_k)
+            rp = rp + xp.where(is_out, zero, rp_k)
             return (phase, rp), None
 
         (_, rp), _ = jax.lax.scan(
@@ -63,7 +64,7 @@ def _freq_outer_scan(
         def scan_fn_no_dir(carry, spectrum_k):
             phase, rp = carry
             phase, rp_k = _freq_step_body(phase, phase_decay_step, spectrum_k, n_sub, xp)
-            rp = rp + jnp.where(is_out, 0.0, rp_k)
+            rp = rp + xp.where(is_out, zero, rp_k)
             return (phase, rp), None
 
         (_, rp), _ = jax.lax.scan(scan_fn_no_dir, (phase_decay_init, jnp.zeros(phase_decay_init.shape[:-2])), spectra)

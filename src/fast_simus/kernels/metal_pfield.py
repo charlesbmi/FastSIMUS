@@ -15,12 +15,13 @@ Limitations:
 from __future__ import annotations
 
 from math import inf, log, pi
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import mlx.core as mx
 
 from fast_simus.medium_params import MediumParams
 from fast_simus.transducer_params import TransducerParams
+from fast_simus.utils._array_api import _ArrayNamespace
 from fast_simus.utils.geometry import element_positions
 
 if TYPE_CHECKING:
@@ -118,10 +119,10 @@ _METAL_PFIELD_SOURCE = """
     pressure[g] = (is_out[g] > 0.5f) ? 0.0f : acc * eff_corr;
 """
 
-_kernel_cache: dict[tuple[int, int, int], object] = {}
+_kernel_cache: dict[tuple[int, int, int], Any] = {}
 
 
-def build_pfield_kernel(n_elem: int, n_sub: int, n_freq: int) -> object:
+def build_pfield_kernel(n_elem: int, n_sub: int, n_freq: int) -> Any:
     """Build (or retrieve cached) Metal kernel for given dimensions.
 
     Args:
@@ -137,21 +138,24 @@ def build_pfield_kernel(n_elem: int, n_sub: int, n_freq: int) -> object:
         return _kernel_cache[key]
 
     n_es = n_elem * n_sub
-    header = (
-        f"#define N_ELEM {n_elem}\n"
-        f"#define N_SUB {n_sub}\n"
-        f"#define N_FREQ {n_freq}\n"
-        f"#define N_ES {n_es}\n"
-    )
+    header = f"#define N_ELEM {n_elem}\n#define N_SUB {n_sub}\n#define N_FREQ {n_freq}\n#define N_ES {n_es}\n"
     kernel = mx.fast.metal_kernel(
         name=f"pfield_{n_elem}_{n_sub}_{n_freq}",
         input_names=[
-            "grid_x", "grid_z",
-            "elem_x", "elem_z", "theta_e",
-            "sub_dx", "sub_dz",
-            "da_init_re", "da_init_im",
-            "da_step_re", "da_step_im",
-            "pp_mag_sq", "is_out", "scalars",
+            "grid_x",
+            "grid_z",
+            "elem_x",
+            "elem_z",
+            "theta_e",
+            "sub_dx",
+            "sub_dz",
+            "da_init_re",
+            "da_init_im",
+            "da_step_re",
+            "da_step_im",
+            "pp_mag_sq",
+            "is_out",
+            "scalars",
         ],
         output_names=["pressure"],
         header=header,
@@ -216,7 +220,10 @@ def pfield_metal(
 
     # Element geometry
     elem_pos, theta_e, apex_offset = element_positions(
-        n_elem, params.pitch, params.radius, mx,
+        n_elem,
+        params.pitch,
+        params.radius,
+        cast(_ArrayNamespace, mx),
     )
     if theta_e is None:
         theta_e = mx.zeros(n_elem, dtype=mx.float32)
@@ -242,10 +249,9 @@ def pfield_metal(
     da_step_im = mx.sin(ph_step).astype(mx.float32)
 
     # |pulse_spectrum * probe_spectrum|^2
-    pp_mag_sq = (
-        mx.abs(plan.pulse_spectrum).astype(mx.float32) ** 2
-        * plan.probe_spectrum.astype(mx.float32) ** 2
-    )
+    _pulse = cast(mx.array, plan.pulse_spectrum)
+    _probe = cast(mx.array, plan.probe_spectrum)
+    pp_mag_sq = mx.abs(_pulse).astype(mx.float32) ** 2 * _probe.astype(mx.float32) ** 2
 
     # Scalar physics parameters
     wavenumber_init = 2.0 * pi * plan.freq_start / c
@@ -258,12 +264,19 @@ def pfield_metal(
     # correction_factor is applied by the caller uniformly across all strategies.
     effective_correction = 1.0 / (n_sub**2)
 
-    scalars = mx.array([
-        wavenumber_init, attenuation_init,
-        wavenumber_step, attenuation_step,
-        min_distance, plan.seg_length,
-        center_wavenumber, effective_correction,
-    ], dtype=mx.float32)
+    scalars = mx.array(
+        [
+            wavenumber_init,
+            attenuation_init,
+            wavenumber_step,
+            attenuation_step,
+            min_distance,
+            plan.seg_length,
+            center_wavenumber,
+            effective_correction,
+        ],
+        dtype=mx.float32,
+    )
 
     # Build kernel and dispatch
     n_grid = int(x_flat.shape[0])
@@ -278,8 +291,10 @@ def pfield_metal(
             theta_e.astype(mx.float32),
             sub_dx.astype(mx.float32),
             sub_dz.astype(mx.float32),
-            da_init_re, da_init_im,
-            da_step_re, da_step_im,
+            da_init_re,
+            da_init_im,
+            da_step_re,
+            da_step_im,
             pp_mag_sq,
             is_out.astype(mx.float32),
             scalars,

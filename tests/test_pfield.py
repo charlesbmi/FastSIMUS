@@ -14,7 +14,7 @@ import pytest
 from fast_simus.pfield import pfield, pfield_compute, pfield_precompute
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
-from fast_simus.utils._array_api import _ArrayNamespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace
 
 # Array API backend for FastSIMUS calls
 xp = cast(_ArrayNamespace, array_api_strict)
@@ -458,16 +458,10 @@ class TestPfieldStrategy:
         delays_1d = xp.reshape(delays_strict, (-1,))
         positions_strict = xp.asarray(np.asarray(reference.positions))
 
-        rp_vec = np.asarray(
-            pfield(positions_strict, delays_1d, params, strategy=PfieldStrategy.VECTORIZED)
-        )
-        rp_freq = np.asarray(
-            pfield(positions_strict, delays_1d, params, strategy=PfieldStrategy.FREQ_OUTER)
-        )
+        rp_vec = np.asarray(pfield(positions_strict, delays_1d, params, strategy=PfieldStrategy.VECTORIZED))
+        rp_freq = np.asarray(pfield(positions_strict, delays_1d, params, strategy=PfieldStrategy.FREQ_OUTER))
 
-        _assert_pfield_close(
-            rp_freq, rp_vec, atol_peak=1e-5, desc=f"{reference.probe} freq_outer vs vectorized"
-        )
+        _assert_pfield_close(rp_freq, rp_vec, atol_peak=1e-5, desc=f"{reference.probe} freq_outer vs vectorized")
 
 
 class TestPfieldStrategyCrossBackend:
@@ -519,12 +513,10 @@ class TestMetalKernel:
         if params.radius != float("inf"):
             pytest.skip("Metal kernel does not yet support convex arrays")
 
-        delays_mlx = mx_.array(np.asarray(reference.delays).flatten())
-        positions_mlx = mx_.array(np.asarray(reference.positions))
+        delays_mlx = cast(Array, mx_.array(np.asarray(reference.delays).flatten()))
+        positions_mlx = cast(Array, mx_.array(np.asarray(reference.positions)))
 
         rp = pfield(positions_mlx, delays_mlx, params, strategy=PfieldStrategy.METAL)
         rp_np = np.array(rp)
 
-        _assert_pfield_close(
-            rp_np, reference.rp, atol_peak=1e-3, desc=f"{reference.probe} Metal vs PyMUST"
-        )
+        _assert_pfield_close(rp_np, reference.rp, atol_peak=1e-3, desc=f"{reference.probe} Metal vs PyMUST")
