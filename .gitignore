@@ -7,6 +7,7 @@ attic/
 .kash/
 prd.md
 .taskmaster/
+.agents/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
