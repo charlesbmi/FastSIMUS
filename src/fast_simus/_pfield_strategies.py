@@ -141,39 +141,63 @@ def _freq_outer_scan(
     full_frequency_directivity: bool,
     xp: _ArrayNamespace,
 ) -> Float[Array, " *grid"]:
-    """JAX lax.scan loop driver for pfield frequency sweep.
+    """JAX vmap+scan driver: per-grid-point kernel vmapped over the grid.
 
-    Compiles the frequency loop into XLA's while_loop, giving constant
-    compilation cost regardless of n_freq and enabling automatic
-    differentiation through the loop.
+    The scan carry is only (n_sources,) per grid point, matching the Metal
+    kernel's per-thread model. vmap handles parallelism across grid points.
     """
     import jax  # noqa: PLC0415
     import jax.numpy as jnp  # noqa: PLC0415
 
+    grid_shape = phase_decay_init.shape[:-1]
+    n_sources = phase_decay_init.shape[-1]
+    n_grid = 1
+    for d in grid_shape:
+        n_grid *= d
+
+    # Flatten grid to (n_grid, n_sources) and (n_grid,)
+    init_flat = xp.reshape(phase_decay_init, (n_grid, n_sources))
+    step_flat = xp.reshape(phase_decay_step, (n_grid, n_sources))
+    is_out_flat = xp.reshape(is_out, (n_grid,))
+    sin_theta_flat = xp.reshape(sin_theta, (n_grid, n_sources))
+
     spectra = pulse_spect * probe_spect
-    zero = xp.asarray(0.0)
 
     if full_frequency_directivity:
 
-        def scan_fn(carry, k):
-            phase, rp = carry
-            sinc_arg = wavenumbers[k] * seg_length / 2.0 * sin_theta / pi
-            directivity_k = xpx.sinc(sinc_arg, xp=xp)
-            phase, rp_k = _freq_step_body(phase, phase_decay_step, spectra[k], xp, directivity_k=directivity_k)
-            rp = rp + xp.where(is_out, zero, rp_k)
-            return (phase, rp), None
+        def _single_point_scan(
+            phase_init_g: jax.Array, phase_step_g: jax.Array, is_out_g: jax.Array, sin_theta_g: jax.Array
+        ) -> jax.Array:
+            def scan_fn(carry, k):
+                phase, rp = carry
+                sinc_arg = wavenumbers[k] * seg_length / 2.0 * sin_theta_g / pi
+                directivity_k = xpx.sinc(sinc_arg, xp=xp)
+                p_k = spectra[k] * xp.sum(phase * directivity_k)
+                rp_k = xp.real(p_k * xp.conj(p_k))
+                rp = rp + xp.where(is_out_g, xp.asarray(0.0), rp_k)
+                phase = phase * phase_step_g
+                return (phase, rp), None
 
-        (_, rp), _ = jax.lax.scan(
-            scan_fn, (phase_decay_init, jnp.zeros(phase_decay_init.shape[:-1])), jnp.arange(spectra.shape[0])
-        )
+            (_, rp), _ = jax.lax.scan(scan_fn, (phase_init_g, jnp.float32(0.0)), jnp.arange(spectra.shape[0]))
+            return rp
+
+        rp_flat = jax.vmap(_single_point_scan)(init_flat, step_flat, is_out_flat, sin_theta_flat)
     else:
 
-        def scan_fn_no_dir(carry, spectrum_k):
-            phase, rp = carry
-            phase, rp_k = _freq_step_body(phase, phase_decay_step, spectrum_k, xp)
-            rp = rp + xp.where(is_out, zero, rp_k)
-            return (phase, rp), None
+        def _single_point_scan_no_dir(
+            phase_init_g: jax.Array, phase_step_g: jax.Array, is_out_g: jax.Array
+        ) -> jax.Array:
+            def scan_fn(carry, spectrum_k):
+                phase, rp = carry
+                p_k = spectrum_k * jnp.sum(phase)
+                rp_k = jnp.real(p_k * jnp.conj(p_k))
+                rp = rp + jnp.where(is_out_g, 0.0, rp_k)
+                phase = phase * phase_step_g
+                return (phase, rp), None
 
-        (_, rp), _ = jax.lax.scan(scan_fn_no_dir, (phase_decay_init, jnp.zeros(phase_decay_init.shape[:-1])), spectra)
+            (_, rp), _ = jax.lax.scan(scan_fn, (phase_init_g, jnp.float32(0.0)), spectra)
+            return rp
 
-    return rp
+        rp_flat = jax.vmap(_single_point_scan_no_dir)(init_flat, step_flat, is_out_flat)
+
+    return xp.reshape(rp_flat, grid_shape)
