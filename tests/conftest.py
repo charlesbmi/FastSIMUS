@@ -65,9 +65,7 @@ def xp(request) -> _ArrayNamespace:
     params=[
         pytest.param(None, id="auto"),
         pytest.param(PfieldStrategy.VECTORIZED, id="vectorized"),
-        pytest.param(PfieldStrategy.FREQ_OUTER, id="freq_outer"),
         pytest.param(PfieldStrategy.SCAN, id="scan"),
-        pytest.param(PfieldStrategy.FREQ_OUTER_MLX, id="freq_outer_mlx"),
         pytest.param(PfieldStrategy.METAL, id="metal"),
     ]
 )

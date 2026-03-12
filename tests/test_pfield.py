@@ -411,7 +411,8 @@ class TestPfieldStrategy:
         from fast_simus.pfield import PfieldStrategy
 
         assert PfieldStrategy.VECTORIZED == "vectorized"
-        assert PfieldStrategy.FREQ_OUTER == "freq_outer"
+        assert PfieldStrategy.SCAN == "scan"
+        assert PfieldStrategy.METAL == "metal"
         assert isinstance(PfieldStrategy.VECTORIZED, str)
 
     def test_pfield_compute_accepts_strategy_param(self):
@@ -448,21 +449,6 @@ class TestPfieldStrategy:
         )
         _assert_valid_pfield_output(rp, positions.shape[:-1])
 
-    def test_freq_outer_matches_vectorized(self, reference: ReferenceData):
-        """freq_outer strategy matches vectorized to high precision."""
-        from fast_simus.pfield import PfieldStrategy
-
-        preset_fn = _preset_for_probe(reference.probe)
-        params = preset_fn()
-        delays_strict = xp.asarray(np.asarray(reference.delays))
-        delays_1d = xp.reshape(delays_strict, (-1,))
-        positions_strict = xp.asarray(np.asarray(reference.positions))
-
-        rp_vec = np.asarray(pfield(positions_strict, delays_1d, params, strategy=PfieldStrategy.VECTORIZED))
-        rp_freq = np.asarray(pfield(positions_strict, delays_1d, params, strategy=PfieldStrategy.FREQ_OUTER))
-
-        _assert_pfield_close(rp_freq, rp_vec, atol_peak=1e-5, desc=f"{reference.probe} freq_outer vs vectorized")
-
 
 class TestPfieldStrategyCrossBackend:
     """Test strategies across backends using the xp fixture."""
@@ -474,8 +460,6 @@ class TestPfieldStrategyCrossBackend:
         name = getattr(xp, "__name__", "")
         if strategy == PfieldStrategy.SCAN and "jax" not in name:
             pytest.skip("scan requires JAX")
-        if strategy == PfieldStrategy.FREQ_OUTER_MLX and "mlx" not in name:
-            pytest.skip("freq_outer_mlx requires MLX")
         if strategy == PfieldStrategy.METAL and "mlx" not in name:
             pytest.skip("metal requires MLX")
 
