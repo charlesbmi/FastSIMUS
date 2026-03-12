@@ -84,17 +84,20 @@ class PfieldPlan(NamedTuple):
 
 
 class _SweepInputs(NamedTuple):
-    """Precomputed inputs for the Array API frequency-sweep strategies."""
+    """Precomputed inputs for the Array API frequency-sweep strategies.
 
-    phase_decay_init: Complex[Array, "*grid n_elements n_sub"]
-    phase_decay_step: Complex[Array, "*grid n_elements n_sub"]
+    Source points are flattened: n_sources = n_elements * n_sub.
+    The 1/n_sub normalization is absorbed into phase_decay_init.
+    """
+
+    phase_decay_init: Complex[Array, " *grid n_sources"]
+    phase_decay_step: Complex[Array, " *grid n_sources"]
     is_out: Bool[Array, " *grid"]
     wavenumbers: Float[Array, " n_freq"]
     pulse_spect: Complex[Array, " n_freq"]
     probe_spect: Float[Array, " n_freq"]
-    n_sub: int
     seg_length: float
-    sin_theta: Float[Array, "*grid n_elements n_sub"]
+    sin_theta: Float[Array, " *grid n_sources"]
     full_frequency_directivity: bool
 
 
@@ -150,6 +153,19 @@ def _prepare_frequency_sweep(
     phase_decay_init = phase_decay_init * delay_apod_init[:, None]
     phase_decay_step = phase_decay_step * delay_apod_step[:, None]
 
+    # Absorb 1/n_sub normalization and flatten (n_elements, n_sub) -> (n_sources,).
+    # After this, sub-elements and elements are equivalent source points
+    # and all loop drivers use a single sum(axis=-1).
+    n_sub = plan.n_sub
+    phase_decay_init = phase_decay_init / n_sub
+
+    def _flatten_sources(arr: Array) -> Array:
+        return xp.reshape(arr, (*arr.shape[:-2], arr.shape[-2] * arr.shape[-1]))
+
+    phase_decay_init = _flatten_sources(phase_decay_init)
+    phase_decay_step = _flatten_sources(phase_decay_step)
+    sin_theta = _flatten_sources(sin_theta)
+
     wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
 
     return _SweepInputs(
@@ -159,7 +175,6 @@ def _prepare_frequency_sweep(
         wavenumbers=wavenumbers,
         pulse_spect=plan.pulse_spectrum,
         probe_spect=plan.probe_spectrum,
-        n_sub=plan.n_sub,
         seg_length=plan.seg_length,
         sin_theta=sin_theta,
         full_frequency_directivity=full_frequency_directivity,

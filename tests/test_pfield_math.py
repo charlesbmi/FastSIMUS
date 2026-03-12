@@ -240,37 +240,38 @@ class TestInitExponentials:
 
 
 class TestFreqStepBody:
-    """Tests for _freq_step_body."""
+    """Tests for _freq_step_body (flattened source-point interface)."""
 
     def test_phase_geometric_progression(self):
         """Output phase should equal input phase * phase_step."""
-        phase = xp.asarray([[[1.0 + 0.5j, 0.5 + 1.0j]]])
-        phase_step = xp.asarray([[[0.9 + 0.1j, 0.8 + 0.2j]]])
+        phase = xp.asarray([[1.0 + 0.5j, 0.5 + 1.0j]])
+        phase_step = xp.asarray([[0.9 + 0.1j, 0.8 + 0.2j]])
         spectrum_k = xp.asarray(1.0 + 0j)
 
-        new_phase, _ = _freq_step_body(phase, phase_step, spectrum_k, 2, xp)
+        new_phase, _ = _freq_step_body(phase, phase_step, spectrum_k, xp)
         expected = np.asarray(phase) * np.asarray(phase_step)
         np.testing.assert_allclose(np.asarray(new_phase), expected, rtol=1e-12)
 
     def test_rp_k_value(self):
-        """rp_k should be |spectrum * sum(mean(phase))|^2."""
-        phase = xp.asarray([[[1.0 + 0j, 1.0 + 0j]]])
-        phase_step = xp.asarray([[[1.0 + 0j, 1.0 + 0j]]])
+        """rp_k should be |spectrum * sum(phase)|^2 (1/n_sub pre-absorbed)."""
+        # Two source points with 1/n_sub=0.5 pre-absorbed: 0.5 each
+        phase = xp.asarray([[0.5 + 0j, 0.5 + 0j]])
+        phase_step = xp.asarray([[1.0 + 0j, 1.0 + 0j]])
         spectrum_k = xp.asarray(2.0 + 0j)
 
-        _, rp_k = _freq_step_body(phase, phase_step, spectrum_k, 2, xp)
-        # mean over n_sub: 1.0, sum over n_elements: 1.0, |2.0|^2 = 4.0
+        _, rp_k = _freq_step_body(phase, phase_step, spectrum_k, xp)
+        # sum: 1.0, spectrum*sum: 2.0, |2.0|^2 = 4.0
         np.testing.assert_allclose(np.asarray(rp_k), 4.0, rtol=1e-12)
 
     def test_with_directivity(self):
         """Directivity should weight phase before reduction."""
-        phase = xp.asarray([[[1.0 + 0j, 1.0 + 0j]]])
-        phase_step = xp.asarray([[[1.0 + 0j, 1.0 + 0j]]])
+        phase = xp.asarray([[0.5 + 0j, 0.5 + 0j]])
+        phase_step = xp.asarray([[1.0 + 0j, 1.0 + 0j]])
         spectrum_k = xp.asarray(1.0 + 0j)
-        directivity = xp.asarray([[[0.5, 0.5]]])
+        directivity = xp.asarray([[0.5, 0.5]])
 
-        _, rp_k = _freq_step_body(phase, phase_step, spectrum_k, 2, xp, directivity_k=directivity)
-        # phase * 0.5, mean: 0.5, sum: 0.5, |0.5|^2 = 0.25
+        _, rp_k = _freq_step_body(phase, phase_step, spectrum_k, xp, directivity_k=directivity)
+        # phase*0.5 = 0.25 each, sum: 0.5, |0.5|^2 = 0.25
         np.testing.assert_allclose(np.asarray(rp_k), 0.25, rtol=1e-12)
 
 
