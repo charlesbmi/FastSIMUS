@@ -190,3 +190,7 @@ __marimo__/
 # Claude
 .claude/settings.local.json
 .tmp/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
