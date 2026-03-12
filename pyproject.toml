@@ -224,6 +224,9 @@ extra-paths = ["stubs"]
 [tool.ty.analysis]
 allowed-unresolved-imports = ["mlx.**"]
 
+[tool.codespell]
+ignore-words-list = "te,nax"
+
 
 # ---- test settings ----
 [tool.pytest.ini_options]
