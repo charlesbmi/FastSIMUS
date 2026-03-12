@@ -20,9 +20,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 import mlx.core as mx
 
+from fast_simus._pfield_math import _subelement_centroids
 from fast_simus.medium_params import MediumParams
 from fast_simus.transducer_params import TransducerParams
-from fast_simus.utils._array_api import _ArrayNamespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace
 from fast_simus.utils.geometry import element_positions
 
 if TYPE_CHECKING:
@@ -87,25 +88,6 @@ def build_pfield_kernel(n_elem: int, n_sub: int, n_freq: int) -> Any:
     return kernel
 
 
-def _subelement_offsets_flat(
-    element_width: float,
-    n_sub: int,
-    theta_e: mx.array,
-) -> tuple[mx.array, mx.array]:
-    """Compute flattened subelement offsets (n_elem*n_sub,) for x and z."""
-    seg_length = element_width / n_sub
-    seg_offsets = mx.array(
-        [-element_width / 2.0 + seg_length / 2.0 + i * seg_length for i in range(n_sub)],
-        dtype=mx.float32,
-    )
-    seg_2d = mx.reshape(seg_offsets, (1, n_sub))
-    cos_th = mx.cos(theta_e)[:, None]
-    sin_neg_th = mx.sin(-theta_e)[:, None]
-    sub_dx = (seg_2d * cos_th).reshape(-1)
-    sub_dz = (seg_2d * sin_neg_th).reshape(-1)
-    return sub_dx, sub_dz
-
-
 def pfield_metal(
     positions: mx.array,
     params: TransducerParams,
@@ -150,8 +132,11 @@ def pfield_metal(
     if theta_e is None:
         theta_e = mx.zeros(n_elem, dtype=mx.float32)
 
-    # Subelement offsets
-    sub_dx, sub_dz = _subelement_offsets_flat(params.element_width, n_sub, theta_e)
+    # Subelement offsets -- reuse shared geometry, reshape to flat (n_elem*n_sub,)
+    xp_mx = cast(_ArrayNamespace, mx)
+    offsets = _subelement_centroids(params.element_width, n_sub, cast("Array", theta_e), xp_mx)
+    sub_dx = cast(mx.array, offsets[..., 0]).reshape(-1)
+    sub_dz = cast(mx.array, offsets[..., 1]).reshape(-1)
 
     # is_out mask (float32: 1.0=out, 0.0=in)
     x_flat = positions[..., 0].reshape(-1)
