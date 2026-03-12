@@ -103,6 +103,9 @@ def _pfield_freq_vectorized(
 ) -> Float[Array, " *grid"]:
     """Vectorized frequency sweep: broadcast all frequencies at once.
 
+    Reference implementation kept for testing and small-grid use cases.
+    Production code uses _freq_outer_python (constant memory) instead.
+
     Uses the geometric progression: phase_decay[k] = init * step^k.
     Source points are pre-flattened with 1/n_sub absorbed.
 
@@ -186,9 +189,9 @@ def _freq_outer_scan(
         ) -> jax.Array:
             def scan_fn(carry, spectrum_k):
                 phase, rp = carry
-                p_k = spectrum_k * jnp.sum(phase)
-                rp_k = jnp.real(p_k * jnp.conj(p_k))
-                rp = rp + jnp.where(is_out_g, 0.0, rp_k)
+                p_k = spectrum_k * xp.sum(phase)
+                rp_k = xp.real(p_k * xp.conj(p_k))
+                rp = rp + xp.where(is_out_g, xp.asarray(0.0), rp_k)
                 phase = phase * phase_step_g
                 return (phase, rp), None
 

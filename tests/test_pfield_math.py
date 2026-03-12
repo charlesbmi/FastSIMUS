@@ -21,7 +21,7 @@ from fast_simus._pfield_math import (
     _select_frequencies,
     _subelement_centroids,
 )
-from fast_simus._pfield_strategies import _freq_step_body
+from fast_simus._pfield_strategies import _freq_outer_python, _freq_step_body, _pfield_freq_vectorized
 from fast_simus.transducer_params import BaffleType
 from fast_simus.utils._array_api import _ArrayNamespace
 
@@ -344,3 +344,41 @@ class TestFirstLastTrue:
         first, last = _first_last_true(xp, mask)
         assert first == 1
         assert last == 3
+
+
+# ---------------------------------------------------------------------------
+# TestPfieldFreqVectorized
+# ---------------------------------------------------------------------------
+
+
+class TestPfieldFreqVectorized:
+    """Tests for _pfield_freq_vectorized (reference implementation)."""
+
+    def test_matches_iterative_driver(self):
+        """Vectorized driver should match the iterative Python driver."""
+        rng = np.random.default_rng(42)
+        n_grid, n_sources, n_freq = 5, 3, 4
+
+        phase_init = xp.asarray(rng.standard_normal((n_grid, n_sources)) + 1j * rng.standard_normal((n_grid, n_sources)))
+        phase_step = xp.asarray(np.exp(1j * rng.uniform(-0.1, 0.1, (n_grid, n_sources))))
+        is_out = xp.asarray(np.array([False, False, True, False, False]))
+        wavenumbers = xp.asarray(np.linspace(100, 200, n_freq))
+        pulse_spect = xp.asarray(rng.standard_normal(n_freq) + 1j * rng.standard_normal(n_freq))
+        probe_spect = xp.asarray(rng.standard_normal(n_freq).astype(np.float64))
+
+        kwargs = dict(
+            phase_decay_init=phase_init,
+            phase_decay_step=phase_step,
+            is_out=is_out,
+            wavenumbers=wavenumbers,
+            pulse_spect=pulse_spect,
+            probe_spect=probe_spect,
+            seg_length=1e-4,
+            sin_theta=xp.asarray(rng.standard_normal((n_grid, n_sources))),
+            full_frequency_directivity=False,
+            xp=xp,
+        )
+        rp_vectorized = np.asarray(_pfield_freq_vectorized(**kwargs))
+        rp_iterative = np.asarray(_freq_outer_python(**kwargs))
+
+        np.testing.assert_allclose(rp_vectorized, rp_iterative, rtol=1e-10)
