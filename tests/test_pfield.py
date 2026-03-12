@@ -12,7 +12,7 @@ import pymust
 import pytest
 from array_api_compat import is_jax_namespace
 
-from fast_simus.pfield import pfield, pfield_compute, pfield_precompute
+from fast_simus.pfield import PfieldStrategy, pfield, pfield_compute, pfield_precompute
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
 from fast_simus.utils._array_api import Array, _ArrayNamespace, is_mlx_namespace
@@ -409,8 +409,6 @@ class TestPfieldStrategy:
 
     def test_pfield_compute_accepts_strategy_param(self):
         """pfield_compute accepts strategy kwarg without error."""
-        from fast_simus.pfield import PfieldStrategy
-
         params = P4_2v()
         positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=10)
         delays = np.zeros(params.n_elements)
@@ -429,8 +427,6 @@ class TestPfieldStrategy:
 
     def test_pfield_accepts_strategy_param(self):
         """Top-level pfield() accepts strategy kwarg."""
-        from fast_simus.pfield import PfieldStrategy
-
         params = P4_2v()
         positions = _make_positions((-2e-2, 2e-2), (params.pitch, 3e-2), n=10)
         rp = pfield(
@@ -447,8 +443,6 @@ class TestPfieldStrategyCrossBackend:
 
     def test_strategy_on_backend(self, xp, strategy):
         """Each strategy produces valid output on each backend."""
-        from fast_simus.pfield import PfieldStrategy
-
         if strategy == PfieldStrategy.SCAN and not is_jax_namespace(xp):
             pytest.skip("scan requires JAX")
         if strategy == PfieldStrategy.METAL and not is_mlx_namespace(xp):
@@ -478,7 +472,6 @@ class TestMetalKernel:
         import mlx.core as mx_
 
         from fast_simus.backends.mlx import ensure_compat
-        from fast_simus.pfield import PfieldStrategy
 
         ensure_compat(mx_)
 
