@@ -359,26 +359,25 @@ class TestPfieldFreqVectorized:
         rng = np.random.default_rng(42)
         n_grid, n_sources, n_freq = 5, 3, 4
 
-        phase_init = xp.asarray(rng.standard_normal((n_grid, n_sources)) + 1j * rng.standard_normal((n_grid, n_sources)))
+        phase_init = xp.asarray(
+            rng.standard_normal((n_grid, n_sources)) + 1j * rng.standard_normal((n_grid, n_sources))
+        )
         phase_step = xp.asarray(np.exp(1j * rng.uniform(-0.1, 0.1, (n_grid, n_sources))))
         is_out = xp.asarray(np.array([False, False, True, False, False]))
         wavenumbers = xp.asarray(np.linspace(100, 200, n_freq))
         pulse_spect = xp.asarray(rng.standard_normal(n_freq) + 1j * rng.standard_normal(n_freq))
         probe_spect = xp.asarray(rng.standard_normal(n_freq).astype(np.float64))
+        sin_theta = xp.asarray(rng.standard_normal((n_grid, n_sources)))
 
-        kwargs = dict(
-            phase_decay_init=phase_init,
-            phase_decay_step=phase_step,
-            is_out=is_out,
-            wavenumbers=wavenumbers,
-            pulse_spect=pulse_spect,
-            probe_spect=probe_spect,
-            seg_length=1e-4,
-            sin_theta=xp.asarray(rng.standard_normal((n_grid, n_sources))),
-            full_frequency_directivity=False,
-            xp=xp,
+        rp_vectorized = np.asarray(
+            _pfield_freq_vectorized(
+                phase_init, phase_step, is_out, wavenumbers, pulse_spect, probe_spect, 1e-4, sin_theta, False, xp
+            )
         )
-        rp_vectorized = np.asarray(_pfield_freq_vectorized(**kwargs))
-        rp_iterative = np.asarray(_freq_outer_python(**kwargs))
+        rp_iterative = np.asarray(
+            _freq_outer_python(
+                phase_init, phase_step, is_out, wavenumbers, pulse_spect, probe_spect, 1e-4, sin_theta, False, xp
+            )
+        )
 
         np.testing.assert_allclose(rp_vectorized, rp_iterative, rtol=1e-10)
