@@ -14,13 +14,13 @@ Limitations:
 
 from __future__ import annotations
 
-from math import inf, log, pi
+from math import inf, pi
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import mlx.core as mx
 
-from fast_simus._pfield_math import _subelement_centroids
+from fast_simus._pfield_math import NEPER_TO_DB, _subelement_centroids
 from fast_simus.medium_params import MediumParams
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.utils._array_api import Array, _ArrayNamespace
@@ -28,8 +28,6 @@ from fast_simus.utils.geometry import element_positions
 
 if TYPE_CHECKING:
     from fast_simus.pfield import PfieldPlan
-
-_NEPER_TO_DB = 20.0 / log(10.0)
 
 _metal_source_cache: str | None = None
 
@@ -162,9 +160,9 @@ def pfield_metal(
 
     # Scalar physics parameters
     wavenumber_init = 2.0 * pi * plan.freq_start / c
-    attenuation_init = alpha / _NEPER_TO_DB * plan.freq_start / 1e6 * 1e2
+    attenuation_init = alpha / NEPER_TO_DB * plan.freq_start / 1e6 * 1e2
     wavenumber_step = 2.0 * pi * plan.freq_step / c
-    attenuation_step = alpha / _NEPER_TO_DB * plan.freq_step / 1e6 * 1e2
+    attenuation_step = alpha / NEPER_TO_DB * plan.freq_step / 1e6 * 1e2
     min_distance = c / params.freq_center / 2.0
     center_wavenumber = 2.0 * pi * params.freq_center / c
     # 1/n_sub^2 because kernel sums (not means) over sub-elements.

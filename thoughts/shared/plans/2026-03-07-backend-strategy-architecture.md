@@ -1,57 +1,49 @@
----
-date: 2026-03-07
-author: Charles Guan + AI
-branch: feature/vmap-batch
-repository: FastSIMUS
-topic: "architecture: Array API portability + backend-specific optimizations"
-tags: [design, architecture, array-api, metal, jax, mlx, pfield, strategy-pattern]
-status: approved
-depends_on:
-  - thoughts/shared/research/2026-03-05-pfield-performance-strategies-brainstorm.md
-  - thoughts/shared/research/2026-03-03-pfield-memory-strategies.md
----
+______________________________________________________________________
+
+date: 2026-03-07 author: Charles Guan + AI branch: feature/vmap-batch repository: FastSIMUS topic: "architecture: Array
+API portability + backend-specific optimizations" tags: \[design, architecture, array-api, metal, jax, mlx, pfield,
+strategy-pattern\] status: approved depends_on:
+
+- thoughts/shared/research/2026-03-05-pfield-performance-strategies-brainstorm.md
+- thoughts/shared/research/2026-03-03-pfield-memory-strategies.md
+
+______________________________________________________________________
 
 # Design: Backend Strategy Architecture
 
 ## Problem
 
-FastSIMUS must be both Array API-portable (NumPy/JAX/CuPy/MLX via `xp`
-namespace) AND support backend-specific optimizations that the Array API
-cannot express:
+FastSIMUS must be both Array API-portable (NumPy/JAX/CuPy/MLX via `xp` namespace) AND support backend-specific
+optimizations that the Array API cannot express:
 
 - JAX `lax.scan` for O(1) compilation cost frequency loops
-- MLX computation triggers (`mx` evaluate calls) inside loops to bound
-  lazy graph memory
-- Custom Metal kernels via `mx.fast.metal_kernel()` for fused on-the-fly
-  geometry computation
+- MLX computation triggers (`mx` evaluate calls) inside loops to bound lazy graph memory
+- Custom Metal kernels via `mx.fast.metal_kernel()` for fused on-the-fly geometry computation
 - Future: JAX Pallas/Triton for NVIDIA GPU fused kernels
 
-The tension: Array API gives portability, but the performance-critical
-inner loop of `pfield` needs backend-specific loop control and (optionally)
-entirely different algorithms for maximum throughput.
+The tension: Array API gives portability, but the performance-critical inner loop of `pfield` needs backend-specific
+loop control and (optionally) entirely different algorithms for maximum throughput.
 
 ## Decision
 
-**Modified Strategy Pattern (Approach B)**: shared Array API math with
-narrow backend-specific loop drivers and separate fused kernel modules.
+**Modified Strategy Pattern (Approach B)**: shared Array API math with narrow backend-specific loop drivers and separate
+fused kernel modules.
 
 Evaluated against two alternatives:
 
-| Property | A (Inline) | **B (Strategy + Kernel)** | C (Backend Modules) |
-|----------|:---:|:---:|:---:|
-| Duplicated lines | ~20 | ~20 | ~900 |
-| New files | 0 | 3 | 4+ |
-| Simus replication cost | High (monolith) | Low (copy pattern) | Medium (boilerplate) |
-| YAGNI compliance | Medium | **High** | Low |
-| Scientist readability | Poor (1000+ lines) | **Good** | Poor (scattered) |
-| Senior engineer score | 45/80 | **67/80** | 44/80 |
+| Property               |     A (Inline)     | **B (Strategy + Kernel)** | C (Backend Modules)  |
+| ---------------------- | :----------------: | :-----------------------: | :------------------: |
+| Duplicated lines       |        ~20         |            ~20            |         ~900         |
+| New files              |         0          |             3             |          4+          |
+| Simus replication cost |  High (monolith)   |    Low (copy pattern)     | Medium (boilerplate) |
+| YAGNI compliance       |       Medium       |         **High**          |         Low          |
+| Scientist readability  | Poor (1000+ lines) |         **Good**          |   Poor (scattered)   |
+| Senior engineer score  |       45/80        |         **67/80**         |        44/80         |
 
-Validated by industry precedent: SciPy, scikit-learn, and array-api-extra
-all use simple `if/elif` namespace checks with direct function calls. No
-surveyed library uses a plugin/registry system.
+Validated by industry precedent: SciPy, scikit-learn, and array-api-extra all use simple `if/elif` namespace checks with
+direct function calls. No surveyed library uses a plugin/registry system.
 
-Diffrax's separation of `step()` (pure math) from loop control (`scan_kind`)
-is the closest architectural parallel.
+Diffrax's separation of `step()` (pure math) from loop control (`scan_kind`) is the closest architectural parallel.
 
 ## Architecture
 
@@ -93,12 +85,12 @@ src/fast_simus/
     geometry.py             # Existing (unchanged)
 ```
 
-| Module | Responsibility | Est. lines |
-|---|---|---|
-| `pfield.py` | Public API (`pfield`, `pfield_precompute`, `pfield_compute`), `PfieldPlan`, `PfieldStrategy` enum, `_select_strategy`, `_pfield_freq_vectorized`, `_pfield_freq_outer`, `_freq_step_body` | ~450 |
-| `_pfield_math.py` | `_subelement_centroids`, `_distances_and_angles`, `_obliquity_factor`, `_init_exponentials`, `_select_frequencies`, `_first_last_true` | ~250 |
-| `_pfield_strategies.py` | `_freq_outer_scan` (JAX), `_freq_outer_mlx` (MLX + triggered computation) | ~60 |
-| `kernels/metal_pfield.py` | `PFIELD_KERNEL_SOURCE`, `build_pfield_kernel`, `pfield_metal` | ~200 |
+| Module                    | Responsibility                                                                                                                                                                            | Est. lines |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `pfield.py`               | Public API (`pfield`, `pfield_precompute`, `pfield_compute`), `PfieldPlan`, `PfieldStrategy` enum, `_select_strategy`, `_pfield_freq_vectorized`, `_pfield_freq_outer`, `_freq_step_body` | ~450       |
+| `_pfield_math.py`         | `_subelement_centroids`, `_distances_and_angles`, `_obliquity_factor`, `_init_exponentials`, `_select_frequencies`, `_first_last_true`                                                    | ~250       |
+| `_pfield_strategies.py`   | `_freq_outer_scan` (JAX), `_freq_outer_mlx` (MLX + triggered computation)                                                                                                                 | ~60        |
+| `kernels/metal_pfield.py` | `PFIELD_KERNEL_SOURCE`, `build_pfield_kernel`, `pfield_metal`                                                                                                                             | ~200       |
 
 ### Strategy Enum
 
@@ -116,8 +108,8 @@ class PfieldStrategy(StrEnum):
     # Future: PALLAS = "pallas"
 ```
 
-The public API exposes `strategy: PfieldStrategy | None = None` on
-`pfield_compute` (and `pfield`). `None` means auto-select.
+The public API exposes `strategy: PfieldStrategy | None = None` on `pfield_compute` (and `pfield`). `None` means
+auto-select.
 
 ### The Frequency Step Body
 
@@ -177,8 +169,7 @@ def _freq_outer_scan(phase_init, phase_step, spectra, n_sub, is_out, xp, **kw):
     return rp
 ```
 
-**MLX** -- Python loop with per-iteration computation trigger in
-`_pfield_strategies.py`:
+**MLX** -- Python loop with per-iteration computation trigger in `_pfield_strategies.py`:
 
 ```python
 def _freq_outer_mlx(phase_init, phase_step, spectra, n_sub, is_out, xp, **kw):
@@ -195,9 +186,8 @@ def _freq_outer_mlx(phase_init, phase_step, spectra, n_sub, is_out, xp, **kw):
     return rp
 ```
 
-The MLX loop is identical to the default except for the synchronization
-call. This is intentional -- a separate function makes the "why" explicit
-(H2 memory finding) without a conditional in the hot path.
+The MLX loop is identical to the default except for the synchronization call. This is intentional -- a separate function
+makes the "why" explicit (H2 memory finding) without a conditional in the hot path.
 
 ### Strategy Dispatch
 
@@ -247,18 +237,16 @@ All deferred imports -- JAX and MLX are never imported unless detected.
 
 ### Metal Kernel Boundary
 
-The Metal kernel is a **different algorithm**, not a backend variant of the
-Array API loop. It computes geometry on-the-fly (no precomputed distance
-arrays) and fuses the entire frequency sweep into one GPU kernel.
+The Metal kernel is a **different algorithm**, not a backend variant of the Array API loop. It computes geometry
+on-the-fly (no precomputed distance arrays) and fuses the entire frequency sweep into one GPU kernel.
 
 ```
 Array API path:    precompute geometry -> loop over frequencies -> accumulate
 Metal path:        per-thread: compute geometry -> sweep frequencies -> output scalar
 ```
 
-The Metal kernel shares `PfieldPlan` (frequency selection, spectra) and
-`TransducerParams` (element geometry) with the Array API path, but does NOT
-use `_distances_and_angles`, `_init_exponentials`, or `_obliquity_factor`.
+The Metal kernel shares `PfieldPlan` (frequency selection, spectra) and `TransducerParams` (element geometry) with the
+Array API path, but does NOT use `_distances_and_angles`, `_init_exponentials`, or `_obliquity_factor`.
 
 Interface in `kernels/metal_pfield.py`:
 
@@ -274,19 +262,17 @@ def pfield_metal(
     """Fused Metal kernel for pfield computation on Apple Silicon."""
 ```
 
-The Metal kernel source uses `float2` for complex numbers (more register-
-efficient than `complex64_t`), flat 1D thread grid (one thread per grid
-point), and compile-time template constants for `N_FREQ` and `N_ELEM`.
+The Metal kernel source uses `float2` for complex numbers (more register- efficient than `complex64_t`), flat 1D thread
+grid (one thread per grid point), and compile-time template constants for `N_FREQ` and `N_ELEM`.
 
-Precision: the kernel must stay within rtol=1e-4 vs the Array API reference.
-Current max error is ~2.5e-4 (float32 geometry). Improvement path: use
-`metal::precise::sqrt/asin` instead of `metal::fast::`, or mixed-precision
-geometry (float32 accumulation, higher-precision distance computation).
+Precision: the kernel must stay within rtol=1e-4 vs the Array API reference. Current max error is ~2.5e-4 (float32
+geometry). Improvement path: use `metal::precise::sqrt/asin` instead of `metal::fast::`, or mixed-precision geometry
+(float32 accumulation, higher-precision distance computation).
 
 ## Testing Strategy
 
-All strategies run through the same `pfield()` / `pfield_compute()` entry
-point. The test suite parametrizes over strategies:
+All strategies run through the same `pfield()` / `pfield_compute()` entry point. The test suite parametrizes over
+strategies:
 
 ```python
 @pytest.fixture(params=[None, PfieldStrategy.VECTORIZED, PfieldStrategy.FREQ_OUTER,
@@ -300,13 +286,10 @@ def strategy(request, xp):
     return s
 ```
 
-All existing PyMUST reference tests pass unchanged for every strategy.
-Cross-strategy numerical agreement is validated: all Array API strategies
-match to ~5e-6 (float32) or machine epsilon (float64). Metal matches to
-rtol=1e-4.
+All existing PyMUST reference tests pass unchanged for every strategy. Cross-strategy numerical agreement is validated:
+all Array API strategies match to ~5e-6 (float32) or machine epsilon (float64). Metal matches to rtol=1e-4.
 
-`_freq_step_body` is independently testable with `array_api_strict` as
-a pure Array API function.
+`_freq_step_body` is independently testable with `array_api_strict` as a pure Array API function.
 
 ## Extensibility: The "simus" Pattern
 
@@ -320,33 +303,29 @@ src/fast_simus/
     metal_simus.py         # Metal kernel for simus
 ```
 
-Three new files, each following the established pattern. No framework
-changes needed.
+Three new files, each following the established pattern. No framework changes needed.
 
 ## Performance Expectations
 
 From Phase 2 experiments (P4-2v, 64 elements):
 
-| Backend | Grid | Strategy | Time | Memory |
-|---------|------|----------|------|--------|
-| NumPy | 512 | freq_outer | 6.0s (6.6x faster) | 2 GB (37x less) |
-| JAX | 512 | scan | 0.35s (11.2x faster) | ~55 MB (37x less) |
-| MLX | 512 | metal | 83ms (1.2x faster) | 6 MB (3000x less) |
-| MLX | 100 | vectorized | 9ms (fastest at small grid) | 712 MB |
+| Backend | Grid | Strategy   | Time                        | Memory            |
+| ------- | ---- | ---------- | --------------------------- | ----------------- |
+| NumPy   | 512  | freq_outer | 6.0s (6.6x faster)          | 2 GB (37x less)   |
+| JAX     | 512  | scan       | 0.35s (11.2x faster)        | ~55 MB (37x less) |
+| MLX     | 512  | metal      | 83ms (1.2x faster)          | 6 MB (3000x less) |
+| MLX     | 100  | vectorized | 9ms (fastest at small grid) | 712 MB            |
 
 ## Open Questions
 
-1. **Grid size threshold for Metal vs vectorized on MLX**: Currently 150x150.
-   Should this be configurable or auto-tuned based on available memory?
-   Recommendation: hardcode for now, revisit if users hit edge cases.
+1. **Grid size threshold for Metal vs vectorized on MLX**: Currently 150x150. Should this be configurable or auto-tuned
+   based on available memory? Recommendation: hardcode for now, revisit if users hit edge cases.
 
-2. **Metal kernel precision improvement**: Need `metal::precise::` for
-   geometry ops to get headroom below rtol=1e-4. Cost: ~10-20% slower
-   for transcendentals. Worth it for correctness guarantee.
+1. **Metal kernel precision improvement**: Need `metal::precise::` for geometry ops to get headroom below rtol=1e-4.
+   Cost: ~10-20% slower for transcendentals. Worth it for correctness guarantee.
 
-3. **`full_frequency_directivity` in Metal kernel**: Not yet implemented.
-   The sinc directivity per frequency requires passing the full wavenumber
-   array and sin_theta per element. Adds ~10 lines to the kernel.
+1. **`full_frequency_directivity` in Metal kernel**: Not yet implemented. The sinc directivity per frequency requires
+   passing the full wavenumber array and sin_theta per element. Adds ~10 lines to the kernel.
 
 ## References
 

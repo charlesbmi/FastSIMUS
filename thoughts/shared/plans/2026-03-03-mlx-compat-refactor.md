@@ -2,26 +2,34 @@
 
 ## Overview
 
-Refactor the MLX compatibility patches from inline code in `_array_api.py` into a dedicated `src/fast_simus/backends/mlx.py` module. This separates concerns (protocols vs backend compat), fixes re-wrapping bugs in the current stashed implementation, and makes the MLX shim easy to remove when `array_api_compat` gains native MLX support (tracking: https://github.com/data-apis/array-api-compat/issues/162).
+Refactor the MLX compatibility patches from inline code in `_array_api.py` into a dedicated
+`src/fast_simus/backends/mlx.py` module. This separates concerns (protocols vs backend compat), fixes re-wrapping bugs
+in the current stashed implementation, and makes the MLX shim easy to remove when `array_api_compat` gains native MLX
+support (tracking: https://github.com/data-apis/array-api-compat/issues/162).
 
 ## Current State
 
 **Branch:** `feature/mlx` (2 commits ahead of `origin/main`)
 
 **Already committed:**
+
 - `pyproject.toml`: `mlx>=0.31` added to test deps (Darwin/Linux gated)
 - `pfield.py`: `freq_mask` removed from `_FrequencyPlan`, boolean indexing replaced with slice indexing (MLX compat)
 - `test_pfield_helpers.py`: `freq_mask` assertion removed
 
 **Stashed (uncommitted WIP):**
+
 - `_array_api.py`: ~100 lines of MLX patching code mixed into the protocol/namespace file
 - `tests/backend/test_mlx.py`: MLX compile test
 
 **Problems with stashed implementation:**
+
 1. `asarray` gets re-wrapped on every `array_namespace()` call (no idempotency guard)
-2. Top-level imports of `array_api_compat.common._helpers` and `array_api_extra._lib._utils._compat` execute even when MLX is never used
-3. Protocols and MLX compat are mixed in one 366-line file
-4. `_ArrayNamespace` protocol was trimmed (removed `complex128`, `empty`, `empty_like`, `acos`, `vecdot`, `nonzero`) and `Array` protocol was trimmed (`__pos__`, `__index__`) -- these removals need to be preserved
+1. Top-level imports of `array_api_compat.common._helpers` and `array_api_extra._lib._utils._compat` execute even when
+   MLX is never used
+1. Protocols and MLX compat are mixed in one 366-line file
+1. `_ArrayNamespace` protocol was trimmed (removed `complex128`, `empty`, `empty_like`, `acos`, `vecdot`, `nonzero`) and
+   `Array` protocol was trimmed (`__pos__`, `__index__`) -- these removals need to be preserved
 
 ## Desired End State
 
@@ -33,6 +41,7 @@ Refactor the MLX compatibility patches from inline code in `_array_api.py` into 
 - Lint clean (`poe lint`)
 
 ### Verification:
+
 ```bash
 poe test      # all tests pass
 poe lint      # no lint/type errors
@@ -47,23 +56,27 @@ poe lint      # no lint/type errors
 
 ## Implementation Approach
 
-Extract-and-improve: take the stashed `_array_api.py` MLX code, move it to `backends/mlx.py` with bug fixes, then slim `_array_api.py` back down. The test file from the stash is reused as-is.
+Extract-and-improve: take the stashed `_array_api.py` MLX code, move it to `backends/mlx.py` with bug fixes, then slim
+`_array_api.py` back down. The test file from the stash is reused as-is.
 
----
+______________________________________________________________________
 
 ## Phase 1: Create `backends/mlx.py`
 
 ### Overview
+
 Create the dedicated MLX compatibility module with all patching logic, lazy imports, and sentinel-based idempotency.
 
 ### Changes Required:
 
 #### 1. New file: `src/fast_simus/backends/__init__.py`
+
 Empty package init.
 
 #### 2. New file: `src/fast_simus/backends/mlx.py`
 
 All MLX compatibility code in one place. Key improvements over stashed version:
+
 - All `array_api_compat` / `array_api_extra` private-API imports are **lazy** (inside function body)
 - `asarray` wrapping uses a `_fastsimus_wrapped` sentinel to prevent stacking
 - `device()` patching uses a `_fastsimus_mlx` sentinel to prevent stacking
@@ -170,27 +183,32 @@ def ensure_compat(xp: Any) -> None:
 ### Success Criteria:
 
 #### Automated:
+
 - [x] `ruff check src/fast_simus/backends/mlx.py` passes
 - [x] `ty check` passes (may need `# ty: ignore` on sentinel assignments)
 - [x] Module is importable: `python -c "from fast_simus.backends.mlx import ensure_compat"`
 
----
+______________________________________________________________________
 
 ## Phase 2: Update `_array_api.py`
 
 ### Overview
-Remove all MLX patching code. Trim protocols (same removals as stashed version). Add 3-line MLX detection in `array_namespace()`.
+
+Remove all MLX patching code. Trim protocols (same removals as stashed version). Add 3-line MLX detection in
+`array_namespace()`.
 
 ### Changes Required:
 
 #### 1. `src/fast_simus/utils/_array_api.py`
 
 **Remove from top-level imports:**
+
 - `import array_api_compat`
 - `import array_api_compat.common._helpers as _apc_helpers`
 - `import array_api_extra._lib._utils._compat as _xpx_compat`
 
 **Remove from `_ArrayNamespace` protocol:**
+
 - `complex128` (MLX doesn't support it)
 - `empty`, `empty_like` (not used in codebase)
 - `acos` (not used in codebase; `arccos` alias handled by backend)
@@ -198,10 +216,12 @@ Remove all MLX patching code. Trim protocols (same removals as stashed version).
 - `nonzero` (not used in codebase, breaks JAX JIT)
 
 **Remove from `Array` protocol:**
+
 - `__pos__` (MLX arrays lack it, not used)
 - `__index__` (MLX arrays lack it, not used)
 
 **Remove entirely:**
+
 - `_MLX_COMPAT_REGISTERED` flag
 - `_register_mlx_with_array_api_compat()`
 - `_MLX_ARRAY_API_ALIASES` dict
@@ -210,6 +230,7 @@ Remove all MLX patching code. Trim protocols (same removals as stashed version).
 - `_patch_mlx_namespace()`
 
 **Modify `array_namespace()`:**
+
 ```python
 def array_namespace(*arrays):
     xp = xpc_array_namespace(*arrays)
@@ -222,16 +243,18 @@ def array_namespace(*arrays):
 ### Success Criteria:
 
 #### Automated:
+
 - [x] `_array_api.py` is ~240 lines (down from 366 stashed) - now 268 lines
 - [x] `ruff check src/fast_simus/utils/_array_api.py` passes
 - [x] `ty check` passes
 - [x] No top-level imports of `array_api_compat.common._helpers` or `array_api_extra._lib._utils._compat`
 
----
+______________________________________________________________________
 
 ## Phase 3: Add MLX test and verify
 
 ### Overview
+
 Create `tests/backend/test_mlx.py` (same as stashed version) and run the full test suite.
 
 ### Changes Required:
@@ -243,30 +266,35 @@ Reuse the stashed test file as-is. It tests `pfield_precompute` + `mx.compile(pf
 ### Success Criteria:
 
 #### Automated:
+
 - [x] `poe test` -- all tests pass (76+)
 - [x] `poe lint` -- clean
 - [x] MLX test specifically: `pytest tests/backend/test_mlx.py -v` passes
 
 #### Manual:
+
 - [ ] Review that `_array_api.py` contains zero MLX-specific code
 - [ ] Review that `backends/mlx.py` has no top-level `array_api_compat` imports
 
----
+______________________________________________________________________
 
 ## Phase 4: Commit
 
 ### Overview
+
 Stage all changes and commit with a descriptive message.
 
 ### Changes Required:
 
 Single commit covering all files:
+
 - `src/fast_simus/backends/__init__.py` (new)
 - `src/fast_simus/backends/mlx.py` (new)
 - `src/fast_simus/utils/_array_api.py` (modified)
 - `tests/backend/test_mlx.py` (new)
 
 Commit message:
+
 ```
 feat: add MLX backend support with dedicated compat module
 
@@ -278,23 +306,27 @@ re-wrapping bug and makes array_api_compat imports lazy.
 ### Success Criteria:
 
 #### Automated:
+
 - [x] `poe test` passes post-commit
 - [x] `poe lint` passes post-commit
 
----
+______________________________________________________________________
 
 ## Testing Strategy
 
 ### Existing tests (must not regress):
+
 - `tests/test_pfield.py` -- NumPy pfield correctness vs PyMUST
 - `tests/test_pfield_helpers.py` -- array-api-strict unit tests
 - `tests/backend/test_jax.py` -- JAX JIT compilation
 - All other tests in `tests/`
 
 ### New test:
+
 - `tests/backend/test_mlx.py` -- `mx.compile` + full pfield pipeline
 
 ### What's covered by the test:
+
 - MLX arrays flow through `array_namespace()` and trigger `ensure_compat()`
 - `pfield_precompute` works with MLX arrays (frequencies, spectra, slice indexing)
 - `pfield_compute` works under `mx.compile` (complex arithmetic, sinc, exp, sum)
@@ -302,12 +334,12 @@ re-wrapping bug and makes array_api_compat imports lazy.
 
 ## File Summary
 
-| File | Action | Lines (approx) |
-|------|--------|----------------|
-| `src/fast_simus/backends/__init__.py` | Create | 1 |
-| `src/fast_simus/backends/mlx.py` | Create | ~80 |
-| `src/fast_simus/utils/_array_api.py` | Modify (slim down) | ~240 |
-| `tests/backend/test_mlx.py` | Create | ~45 |
+| File                                  | Action             | Lines (approx) |
+| ------------------------------------- | ------------------ | -------------- |
+| `src/fast_simus/backends/__init__.py` | Create             | 1              |
+| `src/fast_simus/backends/mlx.py`      | Create             | ~80            |
+| `src/fast_simus/utils/_array_api.py`  | Modify (slim down) | ~240           |
+| `tests/backend/test_mlx.py`           | Create             | ~45            |
 
 ## References
 

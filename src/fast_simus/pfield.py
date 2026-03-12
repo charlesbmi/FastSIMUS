@@ -31,7 +31,7 @@ from fast_simus._pfield_math import (
     _subelement_centroids,
 )
 from fast_simus.medium_params import MediumParams
-from fast_simus.transducer_params import TransducerParams
+from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace, is_mlx_namespace
 from fast_simus.utils.geometry import element_positions
 
@@ -150,18 +150,38 @@ def _pfield_freq_vectorized(
     return xp.sum(xp.abs(pressure_all) ** 2, axis=-1)
 
 
+def _metal_supported(params: TransducerParams, full_frequency_directivity: bool) -> bool:
+    """Check whether the Metal kernel supports the given configuration."""
+    if full_frequency_directivity:
+        return False
+    if not isinstance(params.baffle, str | BaffleType):
+        return False
+    return params.baffle == BaffleType.SOFT
+
+
 def _select_strategy(
     xp: _ArrayNamespace,
     grid_size: int,
+    params: TransducerParams,
+    full_frequency_directivity: bool,
     *,
     strategy: PfieldStrategy | None = None,
 ) -> PfieldStrategy:
     """Auto-select the best pfield strategy for the detected backend."""
     if strategy is not None:
+        if strategy == PfieldStrategy.METAL and not _metal_supported(params, full_frequency_directivity):
+            unsupported = []
+            if full_frequency_directivity:
+                unsupported.append("full_frequency_directivity=True")
+            if params.baffle != BaffleType.SOFT:
+                unsupported.append(f"baffle={params.baffle!r} (only SOFT supported)")
+            raise NotImplementedError(
+                f"Metal kernel does not support: {', '.join(unsupported)}. Use strategy=None for auto-selection."
+            )
         return strategy
     if is_jax_namespace(cast(ModuleType, xp)):
         return PfieldStrategy.SCAN
-    if is_mlx_namespace(xp):
+    if is_mlx_namespace(xp) and _metal_supported(params, full_frequency_directivity):
         return PfieldStrategy.METAL
     return PfieldStrategy.VECTORIZED
 
@@ -328,7 +348,7 @@ def pfield_compute(
     wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
 
     grid_size = prod(positions.shape[:-1])
-    selected = _select_strategy(xp, grid_size, strategy=strategy)
+    selected = _select_strategy(xp, grid_size, params, full_frequency_directivity, strategy=strategy)
 
     # Common keyword arguments for all frequency-sweep strategies.
     # Spelled out explicitly (rather than dict-unpacked) so that the

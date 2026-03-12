@@ -16,9 +16,9 @@ from fast_simus.spectrum import probe_spectrum, pulse_spectrum
 from fast_simus.transducer_params import BaffleType
 from fast_simus.utils._array_api import Array, _ArrayNamespace
 
-# Conversion factor: Nepers to dB
-# 20/log(10) ≈ 8.6859
-_NEPER_TO_DB = 20.0 / log(10.0)
+# Conversion factor: Nepers to dB -- 20/log(10) ≈ 8.6859
+# Shared by Array API path and Metal kernel wrapper.
+NEPER_TO_DB = 20.0 / log(10.0)
 
 
 class _FrequencyPlan(NamedTuple):
@@ -229,7 +229,7 @@ def _init_exponentials(
         - phase_decay_step: Complex exponential increment per frequency step.
     """
     wavenumber_init = 2.0 * pi * freq_start / speed_of_sound
-    attenuation_wavenum = attenuation / _NEPER_TO_DB * freq_start / 1e6 * 1e2
+    attenuation_wavenum = attenuation / NEPER_TO_DB * freq_start / 1e6 * 1e2
 
     # exp(-kwa*distances + 1j*mod(kw*distances, 2pi))
     kw0_r = xp.asarray(wavenumber_init) * distances
@@ -238,7 +238,7 @@ def _init_exponentials(
     phase_decay = xp.exp(xp.asarray(-attenuation_wavenum) * distances + xp.asarray(1j) * phase_mod)
 
     wavenumber_step = 2.0 * pi * freq_step / speed_of_sound
-    attenuation_step = attenuation / _NEPER_TO_DB * freq_step / 1e6 * 1e2
+    attenuation_step = attenuation / NEPER_TO_DB * freq_step / 1e6 * 1e2
     phase_decay_step = xp.exp(xp.asarray(-attenuation_step + 1j * wavenumber_step) * distances)
 
     # Incorporate obliquity / sqrt(distances) (2D, no elevation)
