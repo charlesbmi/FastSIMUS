@@ -359,7 +359,7 @@ def pfield_compute(
             ),
         )
     else:
-        from fast_simus._pfield_strategies import _freq_outer_scan, _pfield_freq_vectorized  # noqa: PLC0415
+        from fast_simus._pfield_strategies import _freq_outer_python, _freq_outer_scan  # noqa: PLC0415
 
         sweep = _prepare_frequency_sweep(
             positions,
@@ -371,7 +371,7 @@ def pfield_compute(
             full_frequency_directivity=full_frequency_directivity,
             xp=xp,
         )
-        driver = _freq_outer_scan if selected == PfieldStrategy.SCAN else _pfield_freq_vectorized
+        driver = _freq_outer_scan if selected == PfieldStrategy.SCAN else _freq_outer_python
         pressure_accum = driver(**sweep._asdict(), xp=xp)
 
     return xp.sqrt(pressure_accum * plan.correction_factor)

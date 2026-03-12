@@ -2,7 +2,8 @@
 
 Each driver iterates the same _freq_step_body() using a different mechanism:
 
-- _pfield_freq_vectorized: tensor broadcast (NumPy/CuPy small grids, MLX)
+- _freq_outer_python: Python for-loop (NumPy/CuPy, constant memory)
+- _pfield_freq_vectorized: tensor broadcast (small grids only)
 - _freq_outer_scan: JAX lax.scan for O(1) compilation cost
 """
 
@@ -47,6 +48,44 @@ def _freq_step_body(
     pressure_k = spectrum_k * xp.sum(phase_weighted, axis=-1)
     phase = phase * phase_step
     return phase, xp.real(pressure_k * xp.conj(pressure_k))
+
+
+def _freq_outer_python(
+    phase_decay_init: Complex[Array, " *grid n_sources"],
+    phase_decay_step: Complex[Array, " *grid n_sources"],
+    is_out: Bool[Array, " *grid"],
+    wavenumbers: Float[Array, " n_freq"],
+    pulse_spect: Complex[Array, " n_freq"],
+    probe_spect: Float[Array, " n_freq"],
+    seg_length: float,
+    sin_theta: Float[Array, " *grid n_sources"],
+    full_frequency_directivity: bool,
+    xp: _ArrayNamespace,
+) -> Float[Array, " *grid"]:
+    """Python for-loop driver for NumPy/CuPy: constant O(grid * sources) memory.
+
+    Iterates one frequency at a time using _freq_step_body, accumulating
+    |P_k|^2 into the result. Peak memory is independent of n_freq.
+    """
+    spectra = pulse_spect * probe_spect
+    n_freq = int(wavenumbers.shape[0])
+    zero = xp.asarray(0.0)
+
+    phase = phase_decay_init
+    rp = xp.zeros(phase.shape[:-1])
+
+    if full_frequency_directivity:
+        for k in range(n_freq):
+            sinc_arg = wavenumbers[k] * seg_length / 2.0 * sin_theta / pi
+            directivity_k = xpx.sinc(sinc_arg, xp=xp)
+            phase, rp_k = _freq_step_body(phase, phase_decay_step, spectra[k], xp, directivity_k=directivity_k)
+            rp = rp + xp.where(is_out, zero, rp_k)
+    else:
+        for k in range(n_freq):
+            phase, rp_k = _freq_step_body(phase, phase_decay_step, spectra[k], xp)
+            rp = rp + xp.where(is_out, zero, rp_k)
+
+    return rp
 
 
 @jaxtyped(typechecker=typechecker)
