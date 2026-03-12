@@ -1,9 +1,8 @@
-"""Backend-specific loop drivers for pfield frequency sweep.
+"""Loop drivers for pfield frequency sweep (Layer 3).
 
-These functions implement Layer 3 (loop driver) of the three-layer pfield
-architecture. Each wraps the same _freq_step_body() but uses a
-backend-specific iteration mechanism:
+Each driver iterates the same _freq_step_body() using a different mechanism:
 
+- _pfield_freq_vectorized: tensor broadcast (NumPy/CuPy small grids, MLX)
 - _freq_outer_scan: JAX lax.scan for O(1) compilation cost
 """
 
@@ -12,7 +11,8 @@ from __future__ import annotations
 from math import pi
 
 import array_api_extra as xpx
-from jaxtyping import Bool, Complex, Float
+from beartype import beartype as typechecker
+from jaxtyping import Bool, Complex, Float, jaxtyped
 
 from fast_simus.utils._array_api import Array, _ArrayNamespace
 
@@ -51,6 +51,52 @@ def _freq_step_body(
     pressure_k = spectrum_k * xp.sum(xp.mean(phase_weighted, axis=-1), axis=-1)
     phase = phase * phase_step
     return phase, xp.real(pressure_k * xp.conj(pressure_k))
+
+
+@jaxtyped(typechecker=typechecker)
+def _pfield_freq_vectorized(
+    phase_decay_init: Complex[Array, "*grid n_elements n_sub"],
+    phase_decay_step: Complex[Array, "*grid n_elements n_sub"],
+    is_out: Bool[Array, " *grid"],
+    wavenumbers: Float[Array, " n_freq"],
+    pulse_spect: Complex[Array, " n_freq"],
+    probe_spect: Float[Array, " n_freq"],
+    n_sub: int,
+    seg_length: float,
+    sin_theta: Float[Array, "*grid n_elements n_sub"],
+    full_frequency_directivity: bool,
+    xp: _ArrayNamespace,
+) -> Float[Array, " *grid"]:
+    """Vectorized frequency sweep: broadcast all frequencies at once.
+
+    Uses the geometric progression: phase_decay[k] = init * step^k.
+    The sub-element loop (n_sub iterations) avoids materializing the full
+    (*grid, n_elements, n_sub, n_freq) tensor.
+
+    Best for small grids where the (*grid, n_elements, n_freq) tensor fits
+    in memory. For large grids, use an iterative driver instead.
+    """
+    n_freq = wavenumbers.shape[0]
+    exponents = xp.arange(n_freq, dtype=wavenumbers.dtype)
+
+    pressure_all = xp.asarray(0.0 + 0j)
+
+    for i in range(n_sub):
+        phase_k = phase_decay_init[..., i, None] * phase_decay_step[..., i, None] ** exponents
+
+        if full_frequency_directivity:
+            sinc_arg = wavenumbers * seg_length / 2.0 * sin_theta[..., i, None] / pi
+            phase_k = xpx.sinc(sinc_arg, xp=xp) * phase_k
+
+        pressure_all = pressure_all + xp.sum(phase_k, axis=-2)
+
+    pressure_all = pressure_all / n_sub
+
+    pressure_all = pulse_spect * probe_spect * pressure_all
+
+    pressure_all = xp.where(is_out[..., None], xp.asarray(0.0 + 0j), pressure_all)
+
+    return xp.sum(xp.abs(pressure_all) ** 2, axis=-1)
 
 
 def _freq_outer_scan(

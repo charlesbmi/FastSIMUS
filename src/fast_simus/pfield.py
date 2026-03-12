@@ -83,71 +83,87 @@ class PfieldPlan(NamedTuple):
     correction_factor: float
 
 
-@jaxtyped(typechecker=typechecker)
-def _pfield_freq_vectorized(
-    phase_decay_init: Complex[Array, "*grid n_elements n_sub"],
-    phase_decay_step: Complex[Array, "*grid n_elements n_sub"],
-    is_out: Bool[Array, " *grid"],
-    wavenumbers: Float[Array, " n_freq"],
-    pulse_spect: Complex[Array, " n_freq"],
-    probe_spect: Float[Array, " n_freq"],
-    n_sub: int,
-    seg_length: float,
-    sin_theta: Float[Array, "*grid n_elements n_sub"],
+class _SweepInputs(NamedTuple):
+    """Precomputed inputs for the Array API frequency-sweep strategies."""
+
+    phase_decay_init: Complex[Array, "*grid n_elements n_sub"]
+    phase_decay_step: Complex[Array, "*grid n_elements n_sub"]
+    is_out: Bool[Array, " *grid"]
+    wavenumbers: Float[Array, " n_freq"]
+    pulse_spect: Complex[Array, " n_freq"]
+    probe_spect: Float[Array, " n_freq"]
+    n_sub: int
+    seg_length: float
+    sin_theta: Float[Array, "*grid n_elements n_sub"]
+    full_frequency_directivity: bool
+
+
+def _prepare_frequency_sweep(
+    positions: Float[Array, "*grid_shape 2"],
+    delays_clean: Float[Array, " n_elements"],
+    tx_apodization: Float[Array, " n_elements"],
+    plan: PfieldPlan,
+    params: TransducerParams,
+    medium: MediumParams,
+    *,
     full_frequency_directivity: bool,
     xp: _ArrayNamespace,
-) -> Float[Array, " *grid"]:
-    """Compute pressure field contribution for all frequencies at once.
+) -> _SweepInputs:
+    """Compute geometry, phases, and obliquity for Array API loop drivers.
 
-    Uses the geometric progression: phase_decay[k] = init * step^k.
-    Delay+apodization terms are pre-absorbed into phase_decay_init/step
-    by the caller, so the element contraction is a plain sum.
-
-    The sub-element loop (n_sub iterations) avoids materializing the full
-    (*grid, n_elements, n_sub, n_freq) tensor. Only (*grid, n_elements, n_freq)
-    is materialized per sub-element, then immediately contracted over elements.
-
-    Args:
-        phase_decay_init: Complex propagation at first frequency, with
-            delay+apodization already absorbed.
-        phase_decay_step: Complex multiplier per frequency step, with
-            delay step already absorbed.
-        is_out: Out-of-field mask.
-        wavenumbers: Angular wavenumbers for all frequencies (2*pi*f/c).
-        pulse_spect: Pulse spectrum at all selected frequencies.
-        probe_spect: Probe response at all selected frequencies.
-        n_sub: Number of sub-elements per element.
-        seg_length: Sub-element length (element_width / n_sub).
-        sin_theta: Sine of angles relative to element normal.
-        full_frequency_directivity: If True, compute frequency-dependent directivity.
-        xp: Array namespace.
-
-    Returns:
-        Sum of |P_k|^2 over all frequencies, shape (*grid,).
+    Shared setup for VECTORIZED and SCAN strategies. The Metal kernel
+    computes geometry on-the-fly and does not use this function.
     """
-    n_freq = wavenumbers.shape[0]
-    exponents = xp.arange(n_freq, dtype=wavenumbers.dtype)
+    element_pos, theta_elements, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
+    if theta_elements is None:
+        theta_elements = xp.zeros(params.n_elements)
 
-    pressure_all = xp.asarray(0.0 + 0j)  # broadcasts to (*grid, n_freq)
+    speed_of_sound = medium.speed_of_sound
+    attenuation = medium.attenuation
 
-    for i in range(n_sub):
-        # Phase at all frequencies for sub-element i: (*grid, n_elements, n_freq)
-        phase_k = phase_decay_init[..., i, None] * phase_decay_step[..., i, None] ** exponents
+    subelement_offsets = _subelement_centroids(params.element_width, plan.n_sub, theta_elements, xp)
 
-        if full_frequency_directivity:
-            sinc_arg = wavenumbers * seg_length / 2.0 * sin_theta[..., i, None] / pi
-            phase_k = xpx.sinc(sinc_arg, xp=xp) * phase_k
+    x = positions[..., 0]
+    z = positions[..., 1]
+    is_out = z < 0
+    if params.radius != inf:
+        is_out = is_out | ((x**2 + (z + apex_offset) ** 2) <= params.radius**2)
 
-        # Contract over elements: (*grid, n_elements, n_freq) -> (*grid, n_freq)
-        pressure_all = pressure_all + xp.sum(phase_k, axis=-2)
+    distances, sin_theta, theta_arr = _distances_and_angles(
+        positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
+    )
 
-    pressure_all = pressure_all / n_sub
+    obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
+    phase_decay_init, phase_decay_step = _init_exponentials(
+        plan.freq_start, speed_of_sound, attenuation, distances, obliquity_factor, plan.freq_step, xp
+    )
 
-    pressure_all = pulse_spect * probe_spect * pressure_all
+    if not full_frequency_directivity:
+        center_wavenumber = 2.0 * pi * params.freq_center / speed_of_sound
+        sinc_arg = xp.asarray(center_wavenumber * plan.seg_length / 2.0) * sin_theta / pi
+        phase_decay_init = phase_decay_init * xpx.sinc(sinc_arg, xp=xp)
 
-    pressure_all = xp.where(is_out[..., None], xp.asarray(0.0 + 0j), pressure_all)
+    # Absorb delay+apodization into the geometric progression so loop
+    # drivers don't need a per-frequency multiply for delays.
+    delay_apod_init = xp.exp(xp.asarray(1j * 2.0 * pi * plan.freq_start) * delays_clean) * tx_apodization
+    delay_apod_step = xp.exp(xp.asarray(1j * 2.0 * pi * plan.freq_step) * delays_clean)
+    phase_decay_init = phase_decay_init * delay_apod_init[:, None]
+    phase_decay_step = phase_decay_step * delay_apod_step[:, None]
 
-    return xp.sum(xp.abs(pressure_all) ** 2, axis=-1)
+    wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
+
+    return _SweepInputs(
+        phase_decay_init=phase_decay_init,
+        phase_decay_step=phase_decay_step,
+        is_out=is_out,
+        wavenumbers=wavenumbers,
+        pulse_spect=plan.pulse_spectrum,
+        probe_spect=plan.probe_spectrum,
+        n_sub=plan.n_sub,
+        seg_length=plan.seg_length,
+        sin_theta=sin_theta,
+        full_frequency_directivity=full_frequency_directivity,
+    )
 
 
 def _metal_supported(params: TransducerParams, full_frequency_directivity: bool) -> bool:
@@ -300,13 +316,6 @@ def pfield_compute(
     """
     xp = array_namespace(positions, delays, tx_apodization)
 
-    element_pos, theta_elements, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
-    if theta_elements is None:
-        theta_elements = xp.zeros(params.n_elements)
-
-    speed_of_sound = medium.speed_of_sound
-    attenuation = medium.attenuation
-
     if tx_apodization is None:
         tx_apodization = xp.ones(params.n_elements)
 
@@ -314,54 +323,12 @@ def pfield_compute(
     tx_apodization = xp.where(nan_mask, xp.asarray(0.0), tx_apodization)
     delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
 
-    subelement_offsets = _subelement_centroids(params.element_width, plan.n_sub, theta_elements, xp)
-
-    x = positions[..., 0]
-    z = positions[..., 1]
-    is_out = z < 0
-    if params.radius != inf:
-        is_out = is_out | ((x**2 + (z + apex_offset) ** 2) <= params.radius**2)
-
-    distances, sin_theta, theta_arr = _distances_and_angles(
-        positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
-    )
-
-    obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
-    phase_decay_init, phase_decay_step = _init_exponentials(
-        plan.freq_start, speed_of_sound, attenuation, distances, obliquity_factor, plan.freq_step, xp
-    )
-
-    if not full_frequency_directivity:
-        center_wavenumber = 2.0 * pi * params.freq_center / speed_of_sound
-        sinc_arg = xp.asarray(center_wavenumber * plan.seg_length / 2.0) * sin_theta / pi
-        phase_decay_init = phase_decay_init * xpx.sinc(sinc_arg, xp=xp)
-
-    # Absorb delay+apodization into phase geometric progression.
-    # delay_apod[e,f] = exp(j*2pi*f*delay_e)*apod_e is geometric in f,
-    # so we merge it into phase_decay_init/step to eliminate a
-    # (*grid, n_elements, n_freq) multiply per sub-element iteration.
-    delay_apod_init = xp.exp(xp.asarray(1j * 2.0 * pi * plan.freq_start) * delays_clean) * tx_apodization
-    delay_apod_step = xp.exp(xp.asarray(1j * 2.0 * pi * plan.freq_step) * delays_clean)
-    phase_decay_init = phase_decay_init * delay_apod_init[:, None]
-    phase_decay_step = phase_decay_step * delay_apod_step[:, None]
-
-    wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
-
     grid_size = prod(positions.shape[:-1])
     selected = _select_strategy(xp, grid_size, params, full_frequency_directivity, strategy=strategy)
-
-    # Common keyword arguments for all frequency-sweep strategies.
-    # Spelled out explicitly (rather than dict-unpacked) so that the
-    # type-checker can verify each parameter individually.
-    _pulse = plan.pulse_spectrum
-    _probe = plan.probe_spectrum
-    _nsub = plan.n_sub
-    _seg = plan.seg_length
 
     if selected == PfieldStrategy.METAL:
         from fast_simus.kernels.metal_pfield import pfield_metal  # noqa: PLC0415
 
-        # Metal kernel uses mx.array types; cast at the boundary.
         if TYPE_CHECKING:
             import mlx.core as mx  # noqa: PLC0415
 
@@ -376,36 +343,21 @@ def pfield_compute(
                 tx_apodization=cast("mx.array", tx_apodization),
             ),
         )
-    elif selected == PfieldStrategy.SCAN:
-        from fast_simus._pfield_strategies import _freq_outer_scan  # noqa: PLC0415
+    else:
+        from fast_simus._pfield_strategies import _freq_outer_scan, _pfield_freq_vectorized  # noqa: PLC0415
 
-        pressure_accum = _freq_outer_scan(
-            phase_decay_init=phase_decay_init,
-            phase_decay_step=phase_decay_step,
-            is_out=is_out,
-            wavenumbers=wavenumbers,
-            pulse_spect=_pulse,
-            probe_spect=_probe,
-            n_sub=_nsub,
-            seg_length=_seg,
-            sin_theta=sin_theta,
+        sweep = _prepare_frequency_sweep(
+            positions,
+            delays_clean,
+            tx_apodization,
+            plan,
+            params,
+            medium,
             full_frequency_directivity=full_frequency_directivity,
             xp=xp,
         )
-    else:  # VECTORIZED (default fallback)
-        pressure_accum = _pfield_freq_vectorized(
-            phase_decay_init=phase_decay_init,
-            phase_decay_step=phase_decay_step,
-            is_out=is_out,
-            wavenumbers=wavenumbers,
-            pulse_spect=_pulse,
-            probe_spect=_probe,
-            n_sub=_nsub,
-            seg_length=_seg,
-            sin_theta=sin_theta,
-            full_frequency_directivity=full_frequency_directivity,
-            xp=xp,
-        )
+        driver = _freq_outer_scan if selected == PfieldStrategy.SCAN else _pfield_freq_vectorized
+        pressure_accum = driver(**sweep._asdict(), xp=xp)
 
     return xp.sqrt(pressure_accum * plan.correction_factor)
 
