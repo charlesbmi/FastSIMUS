@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 
 from fast_simus.pfield import PfieldStrategy
+from fast_simus.simus import SimusStrategy
 from fast_simus.utils._array_api import _ArrayNamespace
 
 # Try to import array backends
@@ -71,4 +72,16 @@ def xp(request) -> _ArrayNamespace:
 )
 def strategy(request) -> PfieldStrategy | None:
     """Fixture providing different pfield strategies."""
+    return request.param
+
+
+@pytest.fixture(
+    params=[
+        pytest.param(None, id="auto"),
+        pytest.param(SimusStrategy.PYTHON, id="python"),
+        pytest.param(SimusStrategy.SCAN, id="scan"),
+    ]
+)
+def simus_strategy(request) -> SimusStrategy | None:
+    """Fixture providing different simus strategies."""
     return request.param

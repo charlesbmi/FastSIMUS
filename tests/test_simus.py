@@ -10,9 +10,10 @@ import array_api_strict
 import numpy as np
 import pymust
 import pytest
+from array_api_compat import is_jax_namespace
 
 from fast_simus.medium_params import MediumParams
-from fast_simus.simus import SimusResult, simus, simus_compute, simus_precompute
+from fast_simus.simus import SimusResult, SimusStrategy, simus, simus_compute, simus_precompute
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
 from fast_simus.utils._array_api import _ArrayNamespace
 
@@ -351,3 +352,63 @@ class TestSimusEdgeCases:
         power_no = np.sum(np.asarray(result_no.rf) ** 2)
         power_yes = np.sum(np.asarray(result_yes.rf) ** 2)
         assert power_yes < power_no
+
+
+# ---------------------------------------------------------------------------
+# Cross-backend strategy tests
+# ---------------------------------------------------------------------------
+
+
+class TestSimusStrategyCrossBackend:
+    """Test strategies across backends using the xp fixture."""
+
+    def test_strategy_on_backend(self, xp, simus_strategy):
+        """Each strategy produces valid output on each backend."""
+        if simus_strategy == SimusStrategy.SCAN and not is_jax_namespace(xp):
+            pytest.skip("scan requires JAX")
+
+        params = P4_2v()
+        scatterers = np.stack([np.zeros(3), np.linspace(1e-2, 5e-2, 3)], axis=-1)
+        rc = np.ones(3)
+        delays = np.zeros(params.n_elements)
+
+        result = simus(
+            xp.asarray(scatterers),
+            xp.asarray(rc),
+            xp.asarray(delays),
+            params,
+            strategy=simus_strategy,
+        )
+        rf_np = np.asarray(result.rf)
+        assert rf_np.ndim == 2
+        assert rf_np.shape[1] == params.n_elements
+        assert np.max(np.abs(rf_np)) > 0
+
+
+class TestSimusStrategy:
+    """Tests for SimusStrategy enum and dispatch."""
+
+    def test_explicit_python_strategy(self):
+        """Explicit PYTHON strategy produces valid output."""
+        params = P4_2v()
+        scatterers = np.stack([np.zeros(3), np.linspace(1e-2, 5e-2, 3)], axis=-1)
+        rc = np.ones(3)
+        delays = np.zeros(params.n_elements)
+        result = simus(
+            xp.asarray(scatterers), xp.asarray(rc), xp.asarray(delays), params, strategy=SimusStrategy.PYTHON
+        )
+        assert np.max(np.abs(np.asarray(result.rf))) > 0
+
+    def test_simus_compute_accepts_strategy(self):
+        """simus_compute accepts strategy kwarg."""
+        params = P4_2v()
+        scatterers = np.stack([np.zeros(3), np.linspace(1e-2, 5e-2, 3)], axis=-1)
+        rc = np.ones(3)
+        delays = np.zeros(params.n_elements)
+        scatterers_strict = xp.asarray(scatterers)
+        rc_strict = xp.asarray(rc)
+        delays_strict = xp.asarray(delays)
+
+        plan = simus_precompute(scatterers_strict, rc_strict, delays_strict, params)
+        result = simus_compute(scatterers_strict, rc_strict, delays_strict, plan, params, strategy=SimusStrategy.PYTHON)
+        assert np.max(np.abs(np.asarray(result.rf))) > 0

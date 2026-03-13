@@ -3,6 +3,7 @@
 Each driver iterates _simus_freq_step_body() using a different mechanism:
 
 - _simus_freq_outer_python: Python for-loop (NumPy/CuPy, constant memory)
+- _simus_freq_outer_scan: JAX lax.scan for O(1) compilation cost
 
 The simus step body differs from pfield's: instead of accumulating |P_k|^2
 per grid point, it computes the full TX->scatter->RX chain and accumulates
@@ -149,3 +150,64 @@ def _set_row(
 ) -> Complex[Array, "n_freq n_elem"]:
     """Set row k of arr to row, Array API compatible."""
     return xpx.at(arr)[k, :].set(row)  # type: ignore[attr-defined]
+
+
+def _simus_freq_outer_scan(
+    phase_init: Complex[Array, "n_scat n_elem n_sub"],
+    phase_step: Complex[Array, "n_scat n_elem n_sub"],
+    delay_apod_init: Complex[Array, " n_elem"],
+    delay_apod_step: Complex[Array, " n_elem"],
+    rc: Float[Array, " n_scat"],
+    is_out: Bool[Array, " n_scat"],
+    wavenumbers: Float[Array, " n_freq"],
+    pulse_spect: Complex[Array, " n_freq"],
+    probe_spect: Float[Array, " n_freq"],
+    seg_length: float,
+    sin_theta: Float[Array, "n_scat n_elem n_sub"],
+    full_frequency_directivity: bool,
+    xp: _ArrayNamespace,
+) -> Complex[Array, "n_freq n_elem"]:
+    """JAX lax.scan driver: scan over frequencies with full tensor carry.
+
+    The carry holds (phase, delay_apod_phase) with shapes
+    (n_scat, n_elem, n_sub) and (n_elem,). Each step outputs
+    spect_k with shape (n_elem,), stacked by scan into (n_freq, n_elem).
+    """
+    import jax  # noqa: PLC0415
+
+    spectra = pulse_spect * probe_spect
+
+    if full_frequency_directivity:
+
+        def scan_fn(carry, xs):
+            phase, delay_apod = carry
+            spectrum_k, probe_k, wavenum_k = xs
+            sinc_arg = wavenum_k * seg_length / 2.0 * sin_theta / pi
+            directivity_k = xpx.sinc(sinc_arg, xp=xp)
+            rp_mono = xp.mean(phase * directivity_k, axis=-1)
+            p_k = spectrum_k * (rp_mono @ delay_apod[..., None])[..., 0]
+            p_k = xp.where(is_out, xp.asarray(0.0 + 0j), p_k)
+            spect_k = probe_k * (rc * p_k) @ rp_mono
+            phase = phase * phase_step
+            delay_apod = delay_apod * delay_apod_step
+            return (phase, delay_apod), spect_k
+
+        init_carry = (phase_init, delay_apod_init)
+        _, spect_all = jax.lax.scan(scan_fn, init_carry, (spectra, probe_spect, wavenumbers))
+    else:
+
+        def scan_fn_no_dir(carry, xs):
+            phase, delay_apod = carry
+            spectrum_k, probe_k = xs
+            rp_mono = xp.mean(phase, axis=-1)
+            p_k = spectrum_k * (rp_mono @ delay_apod[..., None])[..., 0]
+            p_k = xp.where(is_out, xp.asarray(0.0 + 0j), p_k)
+            spect_k = probe_k * (rc * p_k) @ rp_mono
+            phase = phase * phase_step
+            delay_apod = delay_apod * delay_apod_step
+            return (phase, delay_apod), spect_k
+
+        init_carry = (phase_init, delay_apod_init)
+        _, spect_all = jax.lax.scan(scan_fn_no_dir, init_carry, (spectra, probe_spect))
+
+    return spect_all

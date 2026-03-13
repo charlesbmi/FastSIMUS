@@ -14,8 +14,9 @@ References:
 
 from __future__ import annotations
 
+from enum import StrEnum
 from math import ceil, inf, pi
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from jaxtyping import Complex, Float
 
@@ -82,6 +83,18 @@ def _two_way_pulse_duration(
     trim_idx = min(idx1 + 1, 2 * n_fft - 1 - idx2 - 1)
     pulse_trimmed = pulse[-trim_idx : trim_idx - 2 : -1]
     return float(len(pulse_trimmed) * dt)
+
+
+class SimusStrategy(StrEnum):
+    """Backend strategy for the simus frequency sweep.
+
+    Attributes:
+        PYTHON: Python for-loop (NumPy/CuPy, constant memory).
+        SCAN: JAX lax.scan for O(1) compilation cost.
+    """
+
+    PYTHON = "python"
+    SCAN = "scan"
 
 
 class SimusResult(NamedTuple):
@@ -307,28 +320,57 @@ def _irfft_and_threshold(
 ) -> tuple[Float[Array, "n_samples n_elem"], Complex[Array, "n_freq_full n_elem"]]:
     """Place selected spectrum, IFFT to time domain, apply smooth thresholding.
 
-    Uses numpy internally for irfft (not in Array API standard).
+    Backend-aware: uses jax.numpy.fft when xp is JAX, else numpy.fft.
     """
-    import numpy as _np  # noqa: PLC0415
+    import array_api_extra as xpx  # noqa: PLC0415
 
     n_freq_sel = spect_selected.shape[0]
-    spect_np = _np.asarray(spect_selected)
-    full_spectrum = _np.zeros((plan.n_freq_full, n_elements), dtype=_np.complex128)
-    full_spectrum[plan.freq_idx_start : plan.freq_idx_start + n_freq_sel, :] = spect_np
+    full_spectrum = xp.zeros((plan.n_freq_full, n_elements), dtype=spect_selected.dtype)
+    full_spectrum = xpx.at(full_spectrum)[plan.freq_idx_start : plan.freq_idx_start + n_freq_sel, :].set(  # type: ignore[attr-defined]
+        spect_selected
+    )
 
-    rf = _np.fft.irfft(_np.conj(full_spectrum), plan.n_fft, axis=0)
-    rf = rf[: (plan.n_fft + 1) // 2]
+    from types import ModuleType  # noqa: PLC0415
+
+    from array_api_compat import is_jax_namespace  # noqa: PLC0415
+
+    if is_jax_namespace(cast(ModuleType, xp)):
+        import jax.numpy as jnp  # noqa: PLC0415
+
+        rf = jnp.fft.irfft(jnp.conj(full_spectrum), plan.n_fft, axis=0)
+    else:
+        import numpy as _np  # noqa: PLC0415
+
+        full_np = _np.asarray(full_spectrum)
+        rf_np = _np.fft.irfft(_np.conj(full_np), plan.n_fft, axis=0)
+        rf = xp.asarray(rf_np)
+
+    n_keep = (plan.n_fft + 1) // 2
+    rf = rf[:n_keep, ...]
 
     # Smooth thresholding of small values (-100 dB)
     rel_thresh = 1e-5
-    rf_peak = _np.max(_np.abs(rf))
-    if rf_peak > 0:
-        rel_rf = _np.abs(rf) / rf_peak
-        smooth_gate = 0.5 * (1.0 + _np.tanh((rel_rf - rel_thresh) / (rel_thresh / 10.0)))
-        smooth_gate = _np.round(smooth_gate / (rel_thresh / 10.0)) * (rel_thresh / 10.0)
-        rf = rf * smooth_gate
+    rf_peak = xp.max(xp.abs(rf))
+    rel_rf = xp.abs(rf) / (rf_peak + xp.asarray(1e-30))
+    smooth_gate = 0.5 * (1.0 + xp.tanh((rel_rf - rel_thresh) / (rel_thresh / 10.0)))  # type: ignore[attr-defined]
 
-    return xp.asarray(rf), xp.asarray(full_spectrum)
+    rf = rf * smooth_gate
+
+    return rf, full_spectrum
+
+
+def _select_simus_strategy(xp: _ArrayNamespace, strategy: SimusStrategy | None) -> SimusStrategy:
+    """Auto-select simus strategy based on array backend."""
+    if strategy is not None:
+        return strategy
+
+    from types import ModuleType  # noqa: PLC0415
+
+    from array_api_compat import is_jax_namespace  # noqa: PLC0415
+
+    if is_jax_namespace(cast(ModuleType, xp)):
+        return SimusStrategy.SCAN
+    return SimusStrategy.PYTHON
 
 
 def simus_compute(
@@ -341,6 +383,7 @@ def simus_compute(
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
     full_frequency_directivity: bool = False,
+    strategy: SimusStrategy | None = None,
 ) -> SimusResult:
     """Compute RF signals given a precomputed plan.
 
@@ -354,6 +397,8 @@ def simus_compute(
         tx_apodization: Transmit apodization weights. Shape ``(n_elements,)``.
         full_frequency_directivity: If True, compute element directivity at
             every frequency.
+        strategy: Backend strategy for the frequency sweep. If None,
+            auto-selects based on the detected array backend.
 
     Returns:
         SimusResult with RF signals and complex spectrum.
@@ -383,9 +428,16 @@ def simus_compute(
         xp=xp,
     )
 
-    from fast_simus._simus_strategies import _simus_freq_outer_python  # noqa: PLC0415
+    selected = _select_simus_strategy(xp, strategy)
 
-    spect_selected = _simus_freq_outer_python(rc=rc_flat, xp=xp, **sweep)
+    if selected == SimusStrategy.SCAN:
+        from fast_simus._simus_strategies import _simus_freq_outer_scan  # noqa: PLC0415
+
+        spect_selected = _simus_freq_outer_scan(rc=rc_flat, xp=xp, **sweep)
+    else:
+        from fast_simus._simus_strategies import _simus_freq_outer_python  # noqa: PLC0415
+
+        spect_selected = _simus_freq_outer_python(rc=rc_flat, xp=xp, **sweep)
 
     # Apply correction factor
     spect_selected = spect_selected * xp.asarray(plan.correction_factor)
@@ -409,6 +461,7 @@ def simus(
     full_frequency_directivity: bool = False,
     element_splitting: int | None = None,
     frequency_step: float | int = 1.0,
+    strategy: SimusStrategy | None = None,
 ) -> SimusResult:
     """Simulate ultrasound RF signals for a linear or convex array.
 
@@ -433,6 +486,8 @@ def simus(
             every frequency. If False, use center-frequency-only directivity.
         element_splitting: Number of sub-elements per element (None = auto).
         frequency_step: Scaling factor for the frequency step.
+        strategy: Backend strategy for the frequency sweep. If None,
+            auto-selects based on the detected array backend.
 
     Returns:
         SimusResult with:
@@ -460,4 +515,5 @@ def simus(
         medium,
         tx_apodization=tx_apodization,
         full_frequency_directivity=full_frequency_directivity,
+        strategy=strategy,
     )
