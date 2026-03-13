@@ -467,6 +467,45 @@ class TestSimusMetal:
             desc=f"Metal vs PyMUST ({simus_reference.probe})",
         )
 
+    def test_metal_chunked_matches_python(self):
+        """Chunked Metal (>chunk_size scatterers) must match Python strategy."""
+        import mlx.core as _mx
+
+        from fast_simus.backends.mlx import ensure_compat
+
+        ensure_compat(_mx)
+
+        n_scat = 10_000
+        params = P4_2v()
+        np.random.seed(42)
+        scatterers_np = np.stack(
+            [np.random.uniform(-2e-2, 2e-2, n_scat), np.random.uniform(1e-3, 5e-2, n_scat)],
+            axis=-1,
+        ).astype(np.float32)
+        rc_np = np.random.uniform(0.5, 1.5, n_scat).astype(np.float32)
+        delays_np = np.zeros(params.n_elements, dtype=np.float32)
+
+        result_python = simus(
+            xp.asarray(scatterers_np), xp.asarray(rc_np), xp.asarray(delays_np), params, strategy=SimusStrategy.PYTHON
+        )
+        result_metal = simus(
+            cast("Array", _mx.array(scatterers_np)),
+            cast("Array", _mx.array(rc_np)),
+            cast("Array", _mx.array(delays_np)),
+            params,
+            strategy=SimusStrategy.METAL,
+        )
+
+        rf_python = np.asarray(result_python.rf)
+        rf_metal = np.asarray(result_metal.rf)
+
+        _assert_simus_rf_close(
+            rf_metal,
+            rf_python,
+            atol_peak=0.02,
+            desc="Metal chunked (10K) vs Python",
+        )
+
     def test_metal_auto_selected_for_mlx(self):
         """Auto strategy selects METAL when arrays are MLX."""
         import mlx.core as _mx

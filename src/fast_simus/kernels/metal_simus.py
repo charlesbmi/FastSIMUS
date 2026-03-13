@@ -7,8 +7,11 @@ Two-kernel architecture for optimal GPU occupancy:
     contribution using precomputed TX pressure. Lightweight registers, high
     occupancy, uses threadgroup=256.
 
-Falls back to a single fused kernel when the TX intermediate would exceed
-``MAX_TX_INTERMEDIATE_BYTES``.
+For large scatterer counts, scatterers are processed in chunks that fit
+within ``MAX_TX_INTERMEDIATE_BYTES``, with the split-path spectrum
+accumulated across chunks via simple addition.
+
+Falls back to a single fused kernel only when explicitly requested.
 
 Requires: MLX (mlx package) on Apple Silicon.
 
@@ -42,6 +45,16 @@ MAX_TX_INTERMEDIATE_BYTES = 256 * 1024 * 1024  # 256 MB
 _FUSED_THREADGROUP = 64
 _TX_THREADGROUP = 64
 _RX_THREADGROUP = 256
+
+# TX kernel throughput-optimal chunk sizes, empirically determined.
+# The TX kernel uses ~24 * n_elem bytes of registers per thread (cur + stp + da
+# as float2 arrays). Beyond these chunk sizes, register spills thrash L2 cache
+# and per-scatterer throughput degrades significantly.
+_TX_OPTIMAL_CHUNK: dict[int, int] = {
+    64: 5_000,  # P4-2v class (64 elem, ~1.5KB registers/thread)
+    128: 2_500,  # L11-5v class (128 elem, ~3KB registers/thread)
+}
+_TX_DEFAULT_CHUNK = 5_000
 
 # ---------------------------------------------------------------------------
 # Source caching
@@ -305,64 +318,80 @@ def _dispatch_fused(d: dict[str, Any]) -> mx.array:
 
 
 def _dispatch_split(d: dict[str, Any]) -> mx.array:
-    """Two-kernel path (TX then RX). Higher memory, much better GPU occupancy."""
+    """Two-kernel path with automatic chunking for large scatterer counts.
+
+    Scatterers are processed in chunks that fit the TX intermediate buffer
+    within ``MAX_TX_INTERMEDIATE_BYTES``. Each chunk runs TX then RX, and
+    the per-chunk spectra are summed on the host.
+    """
     n_elem, n_sub, n_freq, n_scat = d["n_elem"], d["n_sub"], d["n_freq"], d["n_scat"]
-
-    # Kernel A: TX pressure per scatterer per frequency
-    k_tx = _build_tx(n_elem, n_sub, n_freq, n_scat)
-    tx_size = n_scat * n_freq
-    tx_out = k_tx(
-        inputs=[
-            d["x_flat"],
-            d["z_flat"],
-            d["elem_x"],
-            d["elem_z"],
-            d["theta_e"],
-            d["sub_dx"],
-            d["sub_dz"],
-            d["da_init_re"],
-            d["da_init_im"],
-            d["da_step_re"],
-            d["da_step_im"],
-            d["pp_re"],
-            d["pp_im"],
-            d["is_out"],
-            d["scalars"],
-        ],
-        output_shapes=[(tx_size,), (tx_size,)],
-        output_dtypes=[mx.float32, mx.float32],
-        grid=(n_scat, 1, 1),
-        threadgroup=(min(_TX_THREADGROUP, n_scat), 1, 1),
-    )
-
-    # Kernel B: RX contribution per (scatterer, element) pair
-    k_rx = _build_rx(n_elem, n_sub, n_freq, n_scat)
     spect_size = n_freq * n_elem
-    rx_grid = n_scat * n_elem
-    rx_out = k_rx(
-        inputs=[
-            d["x_flat"],
-            d["z_flat"],
-            d["elem_x"],
-            d["elem_z"],
-            d["theta_e"],
-            d["sub_dx"],
-            d["sub_dz"],
-            tx_out[0],
-            tx_out[1],
-            d["probe_real"],
-            d["rc"],
-            d["scalars"],
-        ],
-        output_shapes=[(spect_size,), (spect_size,)],
-        output_dtypes=[mx.float32, mx.float32],
-        grid=(rx_grid, 1, 1),
-        threadgroup=(min(_RX_THREADGROUP, rx_grid), 1, 1),
-        init_value=0.0,
-    )
 
-    spect_re = rx_out[0].reshape(n_freq, n_elem)
-    spect_im = rx_out[1].reshape(n_freq, n_elem)
+    # Use TX-throughput-optimal chunk sizes, capped by memory budget
+    bytes_per_scat = n_freq * 4 * 2  # float32 re + im
+    mem_chunk = max(1, MAX_TX_INTERMEDIATE_BYTES // bytes_per_scat)
+    perf_chunk = _TX_OPTIMAL_CHUNK.get(n_elem, _TX_DEFAULT_CHUNK)
+    chunk_size = min(mem_chunk, perf_chunk)
+
+    # Geometry arrays shared across all chunks
+    geom_tx = [
+        d["elem_x"],
+        d["elem_z"],
+        d["theta_e"],
+        d["sub_dx"],
+        d["sub_dz"],
+        d["da_init_re"],
+        d["da_init_im"],
+        d["da_step_re"],
+        d["da_step_im"],
+        d["pp_re"],
+        d["pp_im"],
+    ]
+    geom_rx = [d["elem_x"], d["elem_z"], d["theta_e"], d["sub_dx"], d["sub_dz"]]
+    probe = d["probe_real"]
+    scalars = d["scalars"]
+
+    # Build kernels for the standard chunk size (cached, compiled once per probe)
+    k_tx = _build_tx(n_elem, n_sub, n_freq, chunk_size)
+    k_rx = _build_rx(n_elem, n_sub, n_freq, chunk_size)
+
+    total_re = mx.zeros(spect_size, dtype=mx.float32)
+    total_im = mx.zeros(spect_size, dtype=mx.float32)
+
+    for start in range(0, n_scat, chunk_size):
+        end = min(start + chunk_size, n_scat)
+        cn = end - start
+
+        cx = d["x_flat"][start:end]
+        cz = d["z_flat"][start:end]
+        crc = d["rc"][start:end]
+        c_out = d["is_out"][start:end]
+
+        # TX kernel: one thread per scatterer in this chunk
+        tx_out = k_tx(
+            inputs=[cx, cz, *geom_tx, c_out, scalars],
+            output_shapes=[(cn * n_freq,), (cn * n_freq,)],
+            output_dtypes=[mx.float32, mx.float32],
+            grid=(cn, 1, 1),
+            threadgroup=(min(_TX_THREADGROUP, cn), 1, 1),
+        )
+
+        # RX kernel: one thread per (scatterer, element) pair
+        rx_grid = cn * n_elem
+        rx_out = k_rx(
+            inputs=[cx, cz, *geom_rx, tx_out[0], tx_out[1], probe, crc, scalars],
+            output_shapes=[(spect_size,), (spect_size,)],
+            output_dtypes=[mx.float32, mx.float32],
+            grid=(rx_grid, 1, 1),
+            threadgroup=(min(_RX_THREADGROUP, rx_grid), 1, 1),
+            init_value=0.0,
+        )
+
+        total_re = total_re + rx_out[0]
+        total_im = total_im + rx_out[1]
+
+    spect_re = total_re.reshape(n_freq, n_elem)
+    spect_im = total_im.reshape(n_freq, n_elem)
     return (spect_re + 1j * spect_im).astype(mx.complex64)
 
 
@@ -380,9 +409,9 @@ def simus_metal(
 ) -> mx.array:
     """Compute simus RF spectrum using custom Metal kernels.
 
-    Automatically selects between a two-kernel TX/RX split (better GPU
-    occupancy, 2-5x faster) and a single fused kernel based on the TX
-    intermediate memory requirement.
+    Uses a two-kernel TX/RX split with automatic chunking for large
+    scatterer counts. Each chunk fits within the TX intermediate memory
+    budget, and chunk spectra are accumulated via simple addition.
 
     Args:
         scatterers: Scatterer positions (x, z) in meters. Shape ``(n_scat, 2)``.
@@ -397,8 +426,4 @@ def simus_metal(
         Complex RF spectrum, shape ``(n_freq, n_elements)``.
     """
     d = _prepare_common(scatterers, rc, params, plan, medium, delays_clean, tx_apodization)
-
-    tx_intermediate_bytes = d["n_scat"] * d["n_freq"] * 4 * 2  # float32 re + im
-    if tx_intermediate_bytes <= MAX_TX_INTERMEDIATE_BYTES:
-        return _dispatch_split(d)
-    return _dispatch_fused(d)
+    return _dispatch_split(d)
