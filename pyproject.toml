@@ -140,9 +140,13 @@ executor = { group = "test-parallel" }
 
 [tool.poe.tasks.benchmark]
 help = "Run performance benchmarks"
-cmd = "pytest tests/benchmarks/ --benchmark-only --benchmark-autosave -p no:xdist"
+cmd = "pytest tests/benchmarks/ --benchmark-only --benchmark-autosave -p no:xdist -m 'not scaling'"
 executor = { group = "bench" }
 
+[tool.poe.tasks.benchmark-scaling]
+help = "Run scaling benchmarks (1K-1M scatterers, slow)"
+cmd = "pytest tests/benchmarks/ --benchmark-only --benchmark-autosave -p no:xdist -m scaling"
+executor = { group = "bench" }
 
 [tool.poe.tasks.build]
 help = "Build wheel file"
@@ -253,6 +257,7 @@ testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "scaling: large scatterer-count benchmarks (run with '-m scaling')",
 ]
 
 [tool.coverage.report]
