@@ -91,10 +91,12 @@ class SimusStrategy(StrEnum):
     Attributes:
         PYTHON: Python for-loop (NumPy/CuPy, constant memory).
         SCAN: JAX lax.scan for O(1) compilation cost.
+        METAL: Custom Metal kernel on Apple Silicon (MLX).
     """
 
     PYTHON = "python"
     SCAN = "scan"
+    METAL = "metal"
 
 
 class SimusResult(NamedTuple):
@@ -370,6 +372,15 @@ def _select_simus_strategy(xp: _ArrayNamespace, strategy: SimusStrategy | None) 
 
     if is_jax_namespace(cast(ModuleType, xp)):
         return SimusStrategy.SCAN
+
+    try:
+        import mlx.core  # noqa: PLC0415
+
+        if xp is mlx.core:
+            return SimusStrategy.METAL
+    except ImportError:
+        pass
+
     return SimusStrategy.PYTHON
 
 
@@ -430,7 +441,25 @@ def simus_compute(
 
     selected = _select_simus_strategy(xp, strategy)
 
-    if selected == SimusStrategy.SCAN:
+    if selected == SimusStrategy.METAL:
+        from fast_simus.kernels.metal_simus import simus_metal  # noqa: PLC0415
+
+        if TYPE_CHECKING:
+            import mlx.core as mx  # noqa: PLC0415
+
+        spect_selected = cast(
+            Array,
+            simus_metal(
+                scatterers=cast("mx.array", scatterers_flat),
+                rc=cast("mx.array", rc_flat),
+                params=params,
+                plan=plan,
+                medium=medium,
+                delays_clean=cast("mx.array", delays_clean),
+                tx_apodization=cast("mx.array", tx_apodization),
+            ),
+        )
+    elif selected == SimusStrategy.SCAN:
         from fast_simus._simus_strategies import _simus_freq_outer_scan  # noqa: PLC0415
 
         spect_selected = _simus_freq_outer_scan(rc=rc_flat, xp=xp, **sweep)

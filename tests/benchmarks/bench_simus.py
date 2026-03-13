@@ -51,6 +51,14 @@ def _sync(result, xp: _ArrayNamespace) -> None:
     if is_jax_namespace(cast(ModuleType, xp)):
         assert _jax is not None
         _jax.block_until_ready(result)
+        return
+    try:
+        import mlx.core as _mx
+
+        if xp is _mx:
+            _mx.eval(result.rf)
+    except ImportError:
+        pass
 
 
 @pytest.mark.benchmark(

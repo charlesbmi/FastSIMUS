@@ -80,6 +80,7 @@ def strategy(request) -> PfieldStrategy | None:
         pytest.param(None, id="auto"),
         pytest.param(SimusStrategy.PYTHON, id="python"),
         pytest.param(SimusStrategy.SCAN, id="scan"),
+        pytest.param(SimusStrategy.METAL, id="metal"),
     ]
 )
 def simus_strategy(request) -> SimusStrategy | None:

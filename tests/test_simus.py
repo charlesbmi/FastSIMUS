@@ -15,7 +15,7 @@ from array_api_compat import is_jax_namespace
 from fast_simus.medium_params import MediumParams
 from fast_simus.simus import SimusResult, SimusStrategy, simus, simus_compute, simus_precompute
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
-from fast_simus.utils._array_api import _ArrayNamespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace
 
 xp = cast(_ArrayNamespace, array_api_strict)
 
@@ -367,6 +367,17 @@ class TestSimusStrategyCrossBackend:
         if simus_strategy == SimusStrategy.SCAN and not is_jax_namespace(xp):
             pytest.skip("scan requires JAX")
 
+        _is_mlx = False
+        try:
+            import mlx.core as _mx
+
+            _is_mlx = xp is _mx
+        except ImportError:
+            pass
+
+        if simus_strategy == SimusStrategy.METAL and not _is_mlx:
+            pytest.skip("metal requires MLX")
+
         params = P4_2v()
         scatterers = np.stack([np.zeros(3), np.linspace(1e-2, 5e-2, 3)], axis=-1)
         rc = np.ones(3)
@@ -383,6 +394,90 @@ class TestSimusStrategyCrossBackend:
         assert rf_np.ndim == 2
         assert rf_np.shape[1] == params.n_elements
         assert np.max(np.abs(rf_np)) > 0
+
+
+class TestSimusMetal:
+    """Metal-specific tests: validate Metal kernel matches Python strategy."""
+
+    @pytest.fixture(autouse=True)
+    def _require_mlx(self):
+        pytest.importorskip("mlx")
+
+    def test_metal_matches_python(self):
+        """Metal strategy must match Python strategy (peak-normalized)."""
+        import mlx.core as _mx
+
+        from fast_simus.backends.mlx import ensure_compat
+
+        ensure_compat(_mx)
+
+        params = P4_2v()
+        scatterers_np = np.stack([np.zeros(N_SCATTERERS), np.linspace(1e-2, 5e-2, N_SCATTERERS)], axis=-1)
+        rc_np = np.ones(N_SCATTERERS)
+        delays_np = np.zeros(params.n_elements)
+
+        result_python = simus(
+            xp.asarray(scatterers_np), xp.asarray(rc_np), xp.asarray(delays_np), params, strategy=SimusStrategy.PYTHON
+        )
+
+        result_metal = simus(
+            cast("Array", _mx.array(scatterers_np)),
+            cast("Array", _mx.array(rc_np)),
+            cast("Array", _mx.array(delays_np.astype(np.float32))),
+            params,
+            strategy=SimusStrategy.METAL,
+        )
+
+        rf_python = np.asarray(result_python.rf)
+        rf_metal = np.asarray(result_metal.rf)
+
+        _assert_simus_rf_close(
+            rf_metal,
+            rf_python,
+            atol_peak=0.02,
+            desc="Metal vs Python",
+        )
+
+    def test_metal_matches_pymust(self, simus_reference: SimusReferenceData):
+        """Metal strategy must match PyMUST reference (peak-normalized)."""
+        import mlx.core as _mx
+
+        from fast_simus.backends.mlx import ensure_compat
+
+        ensure_compat(_mx)
+
+        preset_fn = _preset_for_probe(simus_reference.probe)
+        params = preset_fn()
+        scatterers = np.stack([simus_reference.scatterers_x, simus_reference.scatterers_z], axis=-1)
+
+        result = simus(
+            cast("Array", _mx.array(scatterers)),
+            cast("Array", _mx.array(simus_reference.rc)),
+            cast("Array", _mx.array(simus_reference.delays.astype(np.float32).ravel())),
+            params,
+            fs=simus_reference.fs,
+            strategy=SimusStrategy.METAL,
+        )
+
+        rf_metal = np.asarray(result.rf)
+        _assert_simus_rf_close(
+            rf_metal,
+            simus_reference.rf,
+            atol_peak=0.02,
+            desc=f"Metal vs PyMUST ({simus_reference.probe})",
+        )
+
+    def test_metal_auto_selected_for_mlx(self):
+        """Auto strategy selects METAL when arrays are MLX."""
+        import mlx.core as _mx
+
+        from fast_simus.backends.mlx import ensure_compat
+        from fast_simus.simus import _select_simus_strategy
+
+        ensure_compat(_mx)
+
+        strategy = _select_simus_strategy(cast(_ArrayNamespace, _mx), None)
+        assert strategy == SimusStrategy.METAL
 
 
 class TestSimusStrategy:
