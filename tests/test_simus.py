@@ -47,11 +47,14 @@ def _pymust_simus(
     rc: np.ndarray,
     delays: np.ndarray,
     fs: float,
+    db_thresh: float = -60.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Run PyMUST simus and return (RF, spectrum)."""
     param = pymust.getparam(probe_name)
     param.fs = fs
-    rf, spectrum = pymust.simus(x, z, rc, delays, param)
+    options = pymust.utils.Options()
+    options.dBThresh = db_thresh
+    rf, spectrum = pymust.simus(x, z, rc, delays, param, options)
     return rf, spectrum
 
 
@@ -189,6 +192,7 @@ def _fastsimus_simus(
     rc: np.ndarray,
     delays: np.ndarray,
     fs: float,
+    db_thresh: float = -60.0,
 ) -> SimusResult:
     """Call FastSIMUS simus and return SimusResult."""
     params = preset_fn()
@@ -196,7 +200,7 @@ def _fastsimus_simus(
     scatterers_strict = xp.asarray(scatterers)
     rc_strict = xp.asarray(rc)
     delays_1d = xp.reshape(xp.asarray(delays), (-1,))
-    return simus(scatterers_strict, rc_strict, delays_1d, params, fs=fs)
+    return simus(scatterers_strict, rc_strict, delays_1d, params, fs=fs, db_thresh=db_thresh)
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +315,73 @@ class TestSimusAPI:
 
         np.testing.assert_array_equal(np.asarray(result_direct.rf), np.asarray(result_split.rf))
         np.testing.assert_array_equal(np.asarray(result_direct.spectrum), np.asarray(result_split.spectrum))
+
+
+class TestSimusFrequencyCount:
+    """Validate frequency counts under different db_thresh settings."""
+
+    def test_default_db_thresh_frequency_count(self, simus_reference: SimusReferenceData):
+        """Default db_thresh=-60 produces fewer frequencies than PyMUST's -100."""
+        preset_fn = _preset_for_probe(simus_reference.probe)
+        params = preset_fn()
+        scatterers = np.stack([simus_reference.scatterers_x, simus_reference.scatterers_z], axis=-1)
+        delays_1d = xp.reshape(xp.asarray(simus_reference.delays), (-1,))
+
+        plan_60 = simus_precompute(
+            xp.asarray(scatterers),
+            xp.asarray(simus_reference.rc),
+            delays_1d,
+            params,
+            fs=simus_reference.fs,
+            db_thresh=-60.0,
+        )
+        plan_100 = simus_precompute(
+            xp.asarray(scatterers),
+            xp.asarray(simus_reference.rc),
+            delays_1d,
+            params,
+            fs=simus_reference.fs,
+            db_thresh=-100.0,
+        )
+        n_freq_60 = plan_60.selected_freqs.shape[0]
+        n_freq_100 = plan_100.selected_freqs.shape[0]
+
+        print(f"\n{simus_reference.probe}: n_freq at -60dB={n_freq_60}, -100dB={n_freq_100}")
+        assert n_freq_60 < n_freq_100, "-60dB should select fewer frequencies than -100dB"
+        assert n_freq_60 > 0
+
+    @pytest.mark.parametrize(
+        "probe_name,expected_n_freq_approx",
+        [
+            ("P4-2v", 812),
+        ],
+    )
+    def test_p4_2v_frequency_count_at_80mm(self, probe_name: str, expected_n_freq_approx: int):
+        """P4-2v at 80mm depth with db_thresh=-60 should produce ~812 frequencies."""
+        preset_fn = _preset_for_probe(probe_name)
+        params = preset_fn()
+        n_scat = 6
+        scatterers = np.stack([np.zeros(n_scat), np.linspace(1e-2, 8e-2, n_scat)], axis=-1)
+        rc = np.ones(n_scat)
+        param_pymust = pymust.getparam(probe_name)
+        x0, z0 = 0.0, 0.03
+        delays = pymust.txdelayFocused(param_pymust, x0, z0)
+        assert param_pymust.fc is not None
+        fs = 4.0 * float(param_pymust.fc)
+
+        plan = simus_precompute(
+            xp.asarray(scatterers),
+            xp.asarray(rc),
+            xp.reshape(xp.asarray(delays), (-1,)),
+            params,
+            fs=fs,
+            db_thresh=-60.0,
+        )
+        n_freq = plan.selected_freqs.shape[0]
+        print(f"\n{probe_name} at 80mm: n_freq={n_freq} (expected ~{expected_n_freq_approx})")
+        assert abs(n_freq - expected_n_freq_approx) < 20, (
+            f"Expected ~{expected_n_freq_approx} frequencies, got {n_freq}"
+        )
 
 
 class TestSimusEdgeCases:

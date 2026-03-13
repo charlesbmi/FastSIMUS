@@ -150,7 +150,7 @@ def simus_precompute(
     *,
     fs: float | None = None,
     tx_n_wavelengths: float | int = 1.0,
-    db_thresh: float | int = -100.0,
+    db_thresh: float | int = -60.0,
     element_splitting: int | None = None,
     frequency_step: float | int = 1.0,
 ) -> SimusPlan:
@@ -486,7 +486,7 @@ def simus(
     fs: float | None = None,
     tx_apodization: Float[Array, " n_elements"] | None = None,
     tx_n_wavelengths: float | int = 1.0,
-    db_thresh: float | int = -100.0,
+    db_thresh: float | int = -60.0,
     full_frequency_directivity: bool = False,
     element_splitting: int | None = None,
     frequency_step: float | int = 1.0,
