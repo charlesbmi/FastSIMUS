@@ -1,8 +1,14 @@
 """Custom Metal kernel for simus RF spectrum on Apple Silicon.
 
-Fuses geometry, phase initialization, and frequency sweep into a single GPU
-kernel. One thread per scatterer computes the full TX->scatter->RX chain,
-accumulating the complex RF spectrum via atomic adds to the output.
+Two-kernel architecture for optimal GPU occupancy:
+  - Kernel A (TX): One thread per scatterer, computes TX pressure at each
+    frequency. Register-heavy (geometric progressions), uses threadgroup=64.
+  - Kernel B (RX): One thread per (scatterer, element) pair, computes RX
+    contribution using precomputed TX pressure. Lightweight registers, high
+    occupancy, uses threadgroup=256.
+
+Falls back to a single fused kernel when the TX intermediate would exceed
+``MAX_TX_INTERMEDIATE_BYTES``.
 
 Requires: MLX (mlx package) on Apple Silicon.
 
@@ -29,75 +35,134 @@ from fast_simus.utils.geometry import element_positions
 if TYPE_CHECKING:
     from fast_simus.simus import SimusPlan
 
-_metal_source_cache: str | None = None
+_KERNELS_DIR = Path(__file__).parent
+
+MAX_TX_INTERMEDIATE_BYTES = 256 * 1024 * 1024  # 256 MB
+
+_FUSED_THREADGROUP = 64
+_TX_THREADGROUP = 64
+_RX_THREADGROUP = 256
+
+# ---------------------------------------------------------------------------
+# Source caching
+# ---------------------------------------------------------------------------
+_source_cache: dict[str, str] = {}
 
 
-def _load_kernel_source() -> str:
-    """Read the Metal kernel body from ``simus.metal`` (cached)."""
-    global _metal_source_cache
-    if _metal_source_cache is None:
-        _metal_source_cache = (Path(__file__).parent / "simus.metal").read_text()
-    return _metal_source_cache
+def _load_source(filename: str) -> str:
+    if filename not in _source_cache:
+        _source_cache[filename] = (_KERNELS_DIR / filename).read_text()
+    return _source_cache[filename]
 
 
-_kernel_cache: dict[tuple[int, int, int, int], Any] = {}
+# ---------------------------------------------------------------------------
+# Kernel builders (cached by dimension tuple)
+# ---------------------------------------------------------------------------
+_kernel_cache: dict[tuple[str, int, int, int, int], Any] = {}
 
 
-def build_simus_kernel(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
-    """Build (or retrieve cached) Metal kernel for given dimensions.
-
-    Args:
-        n_elem: Number of transducer elements.
-        n_sub: Number of sub-elements per element.
-        n_freq: Number of selected frequency samples.
-        n_scat: Number of scatterers.
-
-    Returns:
-        Compiled Metal kernel callable.
-    """
-    key = (n_elem, n_sub, n_freq, n_scat)
-    if key in _kernel_cache:
-        return _kernel_cache[key]
-
-    n_es = n_elem * n_sub
-    header = (
+def _make_header(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> str:
+    return (
         f"#define N_ELEM {n_elem}\n"
         f"#define N_SUB {n_sub}\n"
         f"#define N_FREQ {n_freq}\n"
-        f"#define N_ES {n_es}\n"
+        f"#define N_ES {n_elem * n_sub}\n"
         f"#define N_SCAT {n_scat}\n"
     )
-    kernel = mx.fast.metal_kernel(
-        name=f"simus_{n_elem}_{n_sub}_{n_freq}_{n_scat}",
-        input_names=[
-            "scat_x",
-            "scat_z",
-            "elem_x",
-            "elem_z",
-            "theta_e",
-            "sub_dx",
-            "sub_dz",
-            "da_init_re",
-            "da_init_im",
-            "da_step_re",
-            "da_step_im",
-            "pp_re",
-            "pp_im",
-            "probe",
-            "rc",
-            "is_out",
-            "scalars",
-        ],
-        output_names=["spect_re", "spect_im"],
-        header=header,
-        source=_load_kernel_source(),
-        atomic_outputs=True,
-    )
-    _kernel_cache[key] = kernel
-    return kernel
 
 
-def simus_metal(
+def _build_fused(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
+    key = ("fused", n_elem, n_sub, n_freq, n_scat)
+    if key not in _kernel_cache:
+        _kernel_cache[key] = mx.fast.metal_kernel(
+            name=f"simus_{n_elem}_{n_sub}_{n_freq}_{n_scat}",
+            input_names=[
+                "scat_x",
+                "scat_z",
+                "elem_x",
+                "elem_z",
+                "theta_e",
+                "sub_dx",
+                "sub_dz",
+                "da_init_re",
+                "da_init_im",
+                "da_step_re",
+                "da_step_im",
+                "pp_re",
+                "pp_im",
+                "probe",
+                "rc",
+                "is_out",
+                "scalars",
+            ],
+            output_names=["spect_re", "spect_im"],
+            header=_make_header(n_elem, n_sub, n_freq, n_scat),
+            source=_load_source("simus.metal"),
+            atomic_outputs=True,
+        )
+    return _kernel_cache[key]
+
+
+def _build_tx(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
+    key = ("tx", n_elem, n_sub, n_freq, n_scat)
+    if key not in _kernel_cache:
+        _kernel_cache[key] = mx.fast.metal_kernel(
+            name=f"simus_tx_{n_elem}_{n_sub}_{n_freq}_{n_scat}",
+            input_names=[
+                "scat_x",
+                "scat_z",
+                "elem_x",
+                "elem_z",
+                "theta_e",
+                "sub_dx",
+                "sub_dz",
+                "da_init_re",
+                "da_init_im",
+                "da_step_re",
+                "da_step_im",
+                "pp_re",
+                "pp_im",
+                "is_out",
+                "scalars",
+            ],
+            output_names=["tx_re", "tx_im"],
+            header=_make_header(n_elem, n_sub, n_freq, n_scat),
+            source=_load_source("simus_tx.metal"),
+        )
+    return _kernel_cache[key]
+
+
+def _build_rx(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
+    key = ("rx", n_elem, n_sub, n_freq, n_scat)
+    if key not in _kernel_cache:
+        _kernel_cache[key] = mx.fast.metal_kernel(
+            name=f"simus_rx_{n_elem}_{n_sub}_{n_freq}_{n_scat}",
+            input_names=[
+                "scat_x",
+                "scat_z",
+                "elem_x",
+                "elem_z",
+                "theta_e",
+                "sub_dx",
+                "sub_dz",
+                "tx_re",
+                "tx_im",
+                "probe",
+                "rc",
+                "scalars",
+            ],
+            output_names=["spect_re", "spect_im"],
+            header=_make_header(n_elem, n_sub, n_freq, n_scat),
+            source=_load_source("simus_rx.metal"),
+            atomic_outputs=True,
+        )
+    return _kernel_cache[key]
+
+
+# ---------------------------------------------------------------------------
+# Input preparation (shared by both paths)
+# ---------------------------------------------------------------------------
+def _prepare_common(
     scatterers: mx.array,
     rc: mx.array,
     params: TransducerParams,
@@ -105,25 +170,8 @@ def simus_metal(
     medium: MediumParams,
     delays_clean: mx.array,
     tx_apodization: mx.array,
-) -> mx.array:
-    """Compute simus RF spectrum using a custom Metal kernel.
-
-    Computes geometry on-the-fly per scatterer, avoiding large intermediate
-    arrays. Returns the complex RF spectrum (n_freq, n_elements) corresponding
-    to the selected frequency band.
-
-    Args:
-        scatterers: Scatterer positions (x, z) in meters. Shape ``(n_scat, 2)``.
-        rc: Reflection coefficients. Shape ``(n_scat,)``.
-        params: Transducer parameters.
-        plan: Precomputed frequency plan from ``simus_precompute``.
-        medium: Medium parameters.
-        delays_clean: NaN-cleaned delays. Shape ``(n_elements,)``.
-        tx_apodization: Per-element apodization (NaN-zeroed). Shape ``(n_elements,)``.
-
-    Returns:
-        Complex RF spectrum, shape ``(n_freq, n_elements)``.
-    """
+) -> dict[str, Any]:
+    """Prepare all GPU-side inputs from plan and params."""
     c = medium.speed_of_sound
     alpha = medium.attenuation
     n_elem = params.n_elements
@@ -145,7 +193,6 @@ def simus_metal(
     sub_dx = cast(mx.array, offsets[..., 0]).reshape(-1)
     sub_dz = cast(mx.array, offsets[..., 1]).reshape(-1)
 
-    # is_out mask (float32: 1.0=out, 0.0=in)
     x_flat = scatterers[:, 0]
     z_flat = scatterers[:, 1]
     is_out = (z_flat < 0).astype(mx.float32)
@@ -156,7 +203,6 @@ def simus_metal(
     freq_start = float(plan.selected_freqs[0])
     freq_step = float(plan.selected_freqs[1] - plan.selected_freqs[0]) if n_freq > 1 else 0.0
 
-    # Delay+apodization geometric progression (complex)
     ph_init = mx.array(2.0 * pi * freq_start, dtype=mx.float32) * delays_clean
     da_init_re = (mx.cos(ph_init) * tx_apodization).astype(mx.float32)
     da_init_im = (mx.sin(ph_init) * tx_apodization).astype(mx.float32)
@@ -165,7 +211,6 @@ def simus_metal(
     da_step_re = mx.cos(ph_step).astype(mx.float32)
     da_step_im = mx.sin(ph_step).astype(mx.float32)
 
-    # Pulse * probe spectrum (complex) and probe-only (real)
     _pulse = cast(mx.array, plan.pulse_spectrum)
     _probe = cast(mx.array, plan.probe_spectrum)
     pp_complex = _pulse * _probe
@@ -173,7 +218,6 @@ def simus_metal(
     pp_im = mx.imag(pp_complex).astype(mx.float32)
     probe_real = _probe.astype(mx.float32)
 
-    # Scalar physics parameters
     wavenumber_init = 2.0 * pi * freq_start / c
     attenuation_init = alpha / NEPER_TO_DB * freq_start / 1e6 * 1e2
     wavenumber_step = 2.0 * pi * freq_step / c
@@ -196,37 +240,165 @@ def simus_metal(
         dtype=mx.float32,
     )
 
-    kernel = build_simus_kernel(n_elem, n_sub, n_freq, n_scat)
+    return {
+        "x_flat": x_flat.astype(mx.float32),
+        "z_flat": z_flat.astype(mx.float32),
+        "elem_x": elem_pos[:, 0].astype(mx.float32),
+        "elem_z": elem_pos[:, 1].astype(mx.float32),
+        "theta_e": theta_e.astype(mx.float32),
+        "sub_dx": sub_dx.astype(mx.float32),
+        "sub_dz": sub_dz.astype(mx.float32),
+        "da_init_re": da_init_re,
+        "da_init_im": da_init_im,
+        "da_step_re": da_step_re,
+        "da_step_im": da_step_im,
+        "pp_re": pp_re,
+        "pp_im": pp_im,
+        "probe_real": probe_real,
+        "rc": rc.astype(mx.float32),
+        "is_out": is_out,
+        "scalars": scalars,
+        "n_elem": n_elem,
+        "n_sub": n_sub,
+        "n_freq": n_freq,
+        "n_scat": n_scat,
+    }
 
+
+# ---------------------------------------------------------------------------
+# Dispatch paths
+# ---------------------------------------------------------------------------
+def _dispatch_fused(d: dict[str, Any]) -> mx.array:
+    """Single-kernel path (fused TX+RX). Lower memory, higher register pressure."""
+    n_elem, n_sub, n_freq, n_scat = d["n_elem"], d["n_sub"], d["n_freq"], d["n_scat"]
+    kernel = _build_fused(n_elem, n_sub, n_freq, n_scat)
     output_size = n_freq * n_elem
     outputs = kernel(
         inputs=[
-            scatterers[:, 0].astype(mx.float32),
-            scatterers[:, 1].astype(mx.float32),
-            elem_pos[:, 0].astype(mx.float32),
-            elem_pos[:, 1].astype(mx.float32),
-            theta_e.astype(mx.float32),
-            sub_dx.astype(mx.float32),
-            sub_dz.astype(mx.float32),
-            da_init_re,
-            da_init_im,
-            da_step_re,
-            da_step_im,
-            pp_re,
-            pp_im,
-            probe_real,
-            rc.astype(mx.float32),
-            is_out.astype(mx.float32),
-            scalars,
+            d["x_flat"],
+            d["z_flat"],
+            d["elem_x"],
+            d["elem_z"],
+            d["theta_e"],
+            d["sub_dx"],
+            d["sub_dz"],
+            d["da_init_re"],
+            d["da_init_im"],
+            d["da_step_re"],
+            d["da_step_im"],
+            d["pp_re"],
+            d["pp_im"],
+            d["probe_real"],
+            d["rc"],
+            d["is_out"],
+            d["scalars"],
         ],
         output_shapes=[(output_size,), (output_size,)],
         output_dtypes=[mx.float32, mx.float32],
         grid=(n_scat, 1, 1),
-        threadgroup=(min(256, n_scat), 1, 1),
+        threadgroup=(min(_FUSED_THREADGROUP, n_scat), 1, 1),
+        init_value=0.0,
+    )
+    spect_re = outputs[0].reshape(n_freq, n_elem)
+    spect_im = outputs[1].reshape(n_freq, n_elem)
+    return (spect_re + 1j * spect_im).astype(mx.complex64)
+
+
+def _dispatch_split(d: dict[str, Any]) -> mx.array:
+    """Two-kernel path (TX then RX). Higher memory, much better GPU occupancy."""
+    n_elem, n_sub, n_freq, n_scat = d["n_elem"], d["n_sub"], d["n_freq"], d["n_scat"]
+
+    # Kernel A: TX pressure per scatterer per frequency
+    k_tx = _build_tx(n_elem, n_sub, n_freq, n_scat)
+    tx_size = n_scat * n_freq
+    tx_out = k_tx(
+        inputs=[
+            d["x_flat"],
+            d["z_flat"],
+            d["elem_x"],
+            d["elem_z"],
+            d["theta_e"],
+            d["sub_dx"],
+            d["sub_dz"],
+            d["da_init_re"],
+            d["da_init_im"],
+            d["da_step_re"],
+            d["da_step_im"],
+            d["pp_re"],
+            d["pp_im"],
+            d["is_out"],
+            d["scalars"],
+        ],
+        output_shapes=[(tx_size,), (tx_size,)],
+        output_dtypes=[mx.float32, mx.float32],
+        grid=(n_scat, 1, 1),
+        threadgroup=(min(_TX_THREADGROUP, n_scat), 1, 1),
+    )
+
+    # Kernel B: RX contribution per (scatterer, element) pair
+    k_rx = _build_rx(n_elem, n_sub, n_freq, n_scat)
+    spect_size = n_freq * n_elem
+    rx_grid = n_scat * n_elem
+    rx_out = k_rx(
+        inputs=[
+            d["x_flat"],
+            d["z_flat"],
+            d["elem_x"],
+            d["elem_z"],
+            d["theta_e"],
+            d["sub_dx"],
+            d["sub_dz"],
+            tx_out[0],
+            tx_out[1],
+            d["probe_real"],
+            d["rc"],
+            d["scalars"],
+        ],
+        output_shapes=[(spect_size,), (spect_size,)],
+        output_dtypes=[mx.float32, mx.float32],
+        grid=(rx_grid, 1, 1),
+        threadgroup=(min(_RX_THREADGROUP, rx_grid), 1, 1),
         init_value=0.0,
     )
 
-    spect_re = outputs[0].reshape(n_freq, n_elem)
-    spect_im = outputs[1].reshape(n_freq, n_elem)
-
+    spect_re = rx_out[0].reshape(n_freq, n_elem)
+    spect_im = rx_out[1].reshape(n_freq, n_elem)
     return (spect_re + 1j * spect_im).astype(mx.complex64)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+def simus_metal(
+    scatterers: mx.array,
+    rc: mx.array,
+    params: TransducerParams,
+    plan: SimusPlan,
+    medium: MediumParams,
+    delays_clean: mx.array,
+    tx_apodization: mx.array,
+) -> mx.array:
+    """Compute simus RF spectrum using custom Metal kernels.
+
+    Automatically selects between a two-kernel TX/RX split (better GPU
+    occupancy, 2-5x faster) and a single fused kernel based on the TX
+    intermediate memory requirement.
+
+    Args:
+        scatterers: Scatterer positions (x, z) in meters. Shape ``(n_scat, 2)``.
+        rc: Reflection coefficients. Shape ``(n_scat,)``.
+        params: Transducer parameters.
+        plan: Precomputed frequency plan from ``simus_precompute``.
+        medium: Medium parameters.
+        delays_clean: NaN-cleaned delays. Shape ``(n_elements,)``.
+        tx_apodization: Per-element apodization (NaN-zeroed). Shape ``(n_elements,)``.
+
+    Returns:
+        Complex RF spectrum, shape ``(n_freq, n_elements)``.
+    """
+    d = _prepare_common(scatterers, rc, params, plan, medium, delays_clean, tx_apodization)
+
+    tx_intermediate_bytes = d["n_scat"] * d["n_freq"] * 4 * 2  # float32 re + im
+    if tx_intermediate_bytes <= MAX_TX_INTERMEDIATE_BYTES:
+        return _dispatch_split(d)
+    return _dispatch_fused(d)
