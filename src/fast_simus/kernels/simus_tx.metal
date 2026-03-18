@@ -1,6 +1,7 @@
 // Kernel A: TX phase -- one thread per scatterer.
 // Computes TX pressure at each scatterer for each frequency.
-// No RX computation -> no rp[N_ELEM] needed, saves 1KB registers.
+// Delay+apodization (da) absorbed into cur/stp at init (pfield-style),
+// eliminating da[N_ELEM] from registers and 12 flops/elem/freq from the sweep.
 //
 // Output: tx_re[N_SCAT * N_FREQ], tx_im[N_SCAT * N_FREQ]
 //
@@ -25,11 +26,11 @@
 
     float2 cur[N_ES];
     float2 stp[N_ES];
-    float2 da[N_ELEM];
 
-    // Phase 1: Geometry + init
+    // Phase 1: Geometry + init with da absorption
     for (int e = 0; e < N_ELEM; e++) {
-        da[e] = float2(da_init_re[e], da_init_im[e]);
+        float di_re = da_init_re[e], di_im = da_init_im[e];
+        float ds_re = da_step_re[e], ds_im = da_step_im[e];
         float ex = elem_x[e];
         float ez = elem_z[e];
         float te = theta_e[e];
@@ -60,12 +61,19 @@
             float sv = (fabs(sa) < 1e-8f) ? 1.0f : metal::precise::sin(sa) / sa;
             pi_ *= sv;
 
-            cur[idx] = pi_;
-            stp[idx] = ps_;
+            // Absorb delay+apodization into geometric progression
+            cur[idx] = float2(
+                pi_.x * di_re - pi_.y * di_im,
+                pi_.x * di_im + pi_.y * di_re
+            );
+            stp[idx] = float2(
+                ps_.x * ds_re - ps_.y * ds_im,
+                ps_.x * ds_im + ps_.y * ds_re
+            );
         }
     }
 
-    // Phase 2: Frequency sweep -- TX only
+    // Phase 2: Frequency sweep -- TX only (da already in cur/stp)
     for (int f = 0; f < N_FREQ; f++) {
         float tx_re_acc = 0.0f, tx_im_acc = 0.0f;
 
@@ -79,18 +87,10 @@
                 float tr = stp[idx].x, ti = stp[idx].y;
                 cur[idx] = float2(cr * tr - ci * ti, cr * ti + ci * tr);
             }
-            float rp_re = sr * inv_nsub;
-            float rp_im = si * inv_nsub;
-
-            tx_re_acc += rp_re * da[e].x - rp_im * da[e].y;
-            tx_im_acc += rp_re * da[e].y + rp_im * da[e].x;
-
-            float dr = da[e].x, di = da[e].y;
-            float dsr = da_step_re[e], dsi = da_step_im[e];
-            da[e] = float2(dr * dsr - di * dsi, dr * dsi + di * dsr);
+            tx_re_acc += sr * inv_nsub;
+            tx_im_acc += si * inv_nsub;
         }
 
-        // TX pressure: pulse_probe * tx_sum (zero if out-of-field)
         float pp_re_f = pp_re[f], pp_im_f = pp_im[f];
         float pk_re = pp_re_f * tx_re_acc - pp_im_f * tx_im_acc;
         float pk_im = pp_re_f * tx_im_acc + pp_im_f * tx_re_acc;

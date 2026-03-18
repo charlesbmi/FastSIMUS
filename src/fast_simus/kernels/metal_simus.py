@@ -2,7 +2,8 @@
 
 Two-kernel architecture for optimal GPU occupancy:
   - Kernel A (TX): One thread per scatterer, computes TX pressure at each
-    frequency. Register-heavy (geometric progressions), uses threadgroup=64.
+    frequency. Delay+apodization (da) absorbed into cur/stp at init
+    (pfield-style), eliminating da[N_ELEM] from registers. Uses threadgroup=64.
   - Kernel B (RX): One thread per (scatterer, element) pair, computes RX
     contribution using precomputed TX pressure. Lightweight registers, high
     occupancy, uses threadgroup=256.
@@ -47,12 +48,13 @@ _TX_THREADGROUP = 64
 _RX_THREADGROUP = 256
 
 # TX kernel throughput-optimal chunk sizes, empirically determined.
-# The TX kernel uses ~24 * n_elem bytes of registers per thread (cur + stp + da
-# as float2 arrays). Beyond these chunk sizes, register spills thrash L2 cache
-# and per-scatterer throughput degrades significantly.
+# After da absorption, the TX kernel uses ~16 * n_elem bytes of registers per
+# thread (cur + stp as float2 arrays; da eliminated by absorption into cur/stp).
+# Beyond these chunk sizes, register spills thrash L2 cache and per-scatterer
+# throughput degrades significantly.
 _TX_OPTIMAL_CHUNK: dict[int, int] = {
-    64: 5_000,  # P4-2v class (64 elem, ~1.5KB registers/thread)
-    128: 2_500,  # L11-5v class (128 elem, ~3KB registers/thread)
+    64: 5_000,  # P4-2v class (64 elem, ~1KB registers/thread)
+    128: 2_500,  # L11-5v class (128 elem, ~2KB registers/thread)
 }
 _TX_DEFAULT_CHUNK = 5_000
 
