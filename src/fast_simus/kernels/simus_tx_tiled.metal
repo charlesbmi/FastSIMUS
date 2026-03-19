@@ -3,9 +3,8 @@
 // AND da-absorbed stride steps into shared memory, then each thread
 // processes sub-element tiles with geometric progression (ALU-only inner loop).
 //
-// Key advantage over shared-direct: inner loop has 0 SFU calls (vs 4-5).
-// Key advantage over full progression: register pressure is TILE_SE*2 float2
-// (e.g., 256 bytes for TILE_SE=16) vs N_ES*2 float2 (1024 bytes for N_ES=64).
+// Low register pressure: only TILE_SE*2 float2 per thread (256 bytes for
+// TILE_SE=16). ALU-only inner loop (0 SFU calls in the frequency sweep).
 //
 // Shared memory layout:
 //   amp[N_ES]         frequency-independent amplitude

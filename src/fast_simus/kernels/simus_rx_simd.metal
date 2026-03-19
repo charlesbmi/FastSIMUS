@@ -10,7 +10,7 @@
 // Coalescing: writing threads (scat_batch==0) are at stride SR in the SIMD group.
 // They write to consecutive element addresses -> coalesced atomics.
 //
-// TG = N_ELEM * SCAT_REDUCE (e.g., 64*4 = 256 for P4-2v with SR=4)
+// TG = N_ELEM * SCAT_REDUCE (e.g., 64*2 = 128 for P4-2v with SR=2)
 //
 // Compile-time constants:
 //   N_ELEM, N_SUB, N_FREQ, N_SCAT, SCAT_REDUCE

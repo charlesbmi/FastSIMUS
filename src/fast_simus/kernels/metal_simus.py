@@ -8,7 +8,7 @@ Two-kernel architecture for optimal GPU occupancy:
   - Kernel B (RX): SIMD-reduce RX with SCAT_REDUCE scatterers per
     threadgroup.  Adjacent SIMD threads handle the same element from
     different scatterers and use simd_shuffle_xor to sum contributions
-    before a single atomic write.  Cuts atomic ops by SCAT_REDUCE (4x)
+    before a single atomic write.  Cuts atomic ops by SCAT_REDUCE (2x)
     while preserving coalesced output access.
     Threadgroup size = N_ELEM * SCAT_REDUCE (128 for P4-2v with SR=2).
 
@@ -50,8 +50,7 @@ _TX_TILE_TG = 64
 _RX_SCAT_REDUCE = 2
 
 # TX tiled kernel: register pressure is only TILE_SE * 2 * 8 bytes per thread
-# (256 bytes for TILE_SE=16). No register spills, so chunks can be larger
-# than the old progression kernel which spilled at ~5000 scatterers.
+# (256 bytes for TILE_SE=16), well within Apple Silicon's register budget.
 _TX_OPTIMAL_CHUNK: dict[int, int] = {
     64: 10_000,  # P4-2v class (64 elem, 256B registers/thread)
     128: 5_000,  # L11-5v class (128 elem, 256B registers/thread)
@@ -178,16 +177,16 @@ def _prepare_common(
     n_freq = int(plan.selected_freqs.shape[0])
     n_scat = int(scatterers.shape[0])
 
+    xp_mx = cast(_ArrayNamespace, mx)
     elem_pos, theta_e, apex_offset = element_positions(
         n_elem,
         params.pitch,
         params.radius,
-        cast(_ArrayNamespace, mx),
+        xp_mx,
     )
     if theta_e is None:
         theta_e = mx.zeros(n_elem, dtype=mx.float32)
 
-    xp_mx = cast(_ArrayNamespace, mx)
     offsets = _subelement_centroids(params.element_width, n_sub, cast("Array", theta_e), xp_mx)
     sub_dx = cast(mx.array, offsets[..., 0]).reshape(-1)
     sub_dz = cast(mx.array, offsets[..., 1]).reshape(-1)
