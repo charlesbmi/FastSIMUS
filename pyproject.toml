@@ -217,6 +217,7 @@ ignore = [
 "tests/**" = ["S101", "PLC0415"]  # Deferred imports for optional dependencies
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
@@ -228,6 +229,9 @@ DEP004 = ["jax", "mlx"]
 
 [tool.ty.environment]
 extra-paths = ["stubs"]
+
+[tool.ty.src]
+exclude = ["bench_*.py"]
 
 [tool.ty.analysis]
 allowed-unresolved-imports = ["mlx.**"]

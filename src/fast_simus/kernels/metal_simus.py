@@ -5,9 +5,12 @@ Two-kernel architecture for optimal GPU occupancy:
     One threadgroup per scatterer; threads cooperatively compute geometry,
     then each thread processes sub-element tiles with ALU-only geometric
     progression. TILE_SE=16, threadgroup=64.
-  - Kernel B (RX): One thread per (scatterer, element) pair, computes RX
-    contribution using precomputed TX pressure. Lightweight registers, high
-    occupancy, uses threadgroup=256.
+  - Kernel B (RX): SIMD-reduce RX with SCAT_REDUCE scatterers per
+    threadgroup.  Adjacent SIMD threads handle the same element from
+    different scatterers and use simd_shuffle_xor to sum contributions
+    before a single atomic write.  Cuts atomic ops by SCAT_REDUCE (4x)
+    while preserving coalesced output access.
+    Threadgroup size = N_ELEM * SCAT_REDUCE (128 for P4-2v with SR=2).
 
 For large scatterer counts, scatterers are processed in chunks that fit
 within ``MAX_TX_INTERMEDIATE_BYTES``, with the split-path spectrum
@@ -47,7 +50,7 @@ MAX_TX_INTERMEDIATE_BYTES = 256 * 1024 * 1024  # 256 MB
 _FUSED_THREADGROUP = 64
 _TX_TILE_SE = 16
 _TX_TILE_TG = 64
-_RX_THREADGROUP = 256
+_RX_SCAT_REDUCE = 2
 
 # TX tiled kernel: register pressure is only TILE_SE * 2 * 8 bytes per thread
 # (256 bytes for TILE_SE=16). No register spills, so chunks can be larger
@@ -73,7 +76,7 @@ def _load_source(filename: str) -> str:
 # ---------------------------------------------------------------------------
 # Kernel builders (cached by dimension tuple)
 # ---------------------------------------------------------------------------
-_kernel_cache: dict[tuple[str, int, int, int, int], Any] = {}
+_kernel_cache: dict[tuple, Any] = {}
 
 
 def _make_header(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> str:
@@ -155,10 +158,19 @@ def _build_tx(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
 
 
 def _build_rx(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
-    key = ("rx", n_elem, n_sub, n_freq, n_scat)
+    """Build the SIMD-reduce RX kernel.
+
+    Groups SCAT_REDUCE scatterers per threadgroup.  Adjacent threads handle
+    the same element from different scatterers and use simd_shuffle_xor to
+    sum contributions before writing a single atomic.  Cuts atomic writes by
+    SCAT_REDUCE while preserving coalesced output access.
+    """
+    sr = _RX_SCAT_REDUCE
+    key = ("rx_simd", n_elem, n_sub, n_freq, n_scat, sr)
     if key not in _kernel_cache:
+        header = _make_header(n_elem, n_sub, n_freq, n_scat) + f"#define SCAT_REDUCE {sr}\n"
         _kernel_cache[key] = mx.fast.metal_kernel(
-            name=f"simus_rx_{n_elem}_{n_sub}_{n_freq}_{n_scat}",
+            name=f"simus_rx_simd_{n_elem}_{n_sub}_{n_freq}_{n_scat}_{sr}",
             input_names=[
                 "scat_x",
                 "scat_z",
@@ -174,8 +186,8 @@ def _build_rx(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
                 "scalars",
             ],
             output_names=["spect_re", "spect_im"],
-            header=_make_header(n_elem, n_sub, n_freq, n_scat),
-            source=_load_source("simus_rx.metal"),
+            header=header,
+            source=_load_source("simus_rx_simd.metal"),
             atomic_outputs=True,
         )
     return _kernel_cache[key]
@@ -387,14 +399,16 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
             threadgroup=(tg, 1, 1),
         )
 
-        # RX kernel: one thread per (scatterer, element) pair
-        rx_grid = cn * n_elem
+        # RX kernel: SCAT_REDUCE scatterers per threadgroup, SIMD reduction
+        sr = _RX_SCAT_REDUCE
+        rx_tg = n_elem * sr
+        n_tgs = (cn + sr - 1) // sr
         rx_out = k_rx(
             inputs=[cx, cz, *geom_rx, tx_out[0], tx_out[1], probe, crc, scalars],
             output_shapes=[(spect_size,), (spect_size,)],
             output_dtypes=[mx.float32, mx.float32],
-            grid=(rx_grid, 1, 1),
-            threadgroup=(min(_RX_THREADGROUP, rx_grid), 1, 1),
+            grid=(n_tgs * rx_tg, 1, 1),
+            threadgroup=(rx_tg, 1, 1),
             init_value=0.0,
         )
 
