@@ -16,8 +16,10 @@ from __future__ import annotations
 
 from enum import StrEnum
 from math import ceil, inf, pi
+from types import ModuleType
 from typing import TYPE_CHECKING, NamedTuple, cast
 
+from array_api_compat import is_jax_namespace
 from jaxtyping import Complex, Float
 
 from fast_simus._pfield_math import (
@@ -329,10 +331,6 @@ def _irfft_and_threshold(
         spect_selected
     )
 
-    from types import ModuleType  # noqa: PLC0415
-
-    from array_api_compat import is_jax_namespace  # noqa: PLC0415
-
     if is_jax_namespace(cast(ModuleType, xp)):
         import jax.numpy as jnp  # noqa: PLC0415
 
@@ -362,10 +360,6 @@ def _select_simus_strategy(xp: _ArrayNamespace, strategy: SimusStrategy | None) 
     """Auto-select simus strategy based on array backend."""
     if strategy is not None:
         return strategy
-
-    from types import ModuleType  # noqa: PLC0415
-
-    from array_api_compat import is_jax_namespace  # noqa: PLC0415
 
     if is_jax_namespace(cast(ModuleType, xp)):
         return SimusStrategy.SCAN
