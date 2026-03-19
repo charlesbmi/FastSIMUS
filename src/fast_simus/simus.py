@@ -20,9 +20,6 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 
 from jaxtyping import Complex, Float
 
-if TYPE_CHECKING:
-    pass
-
 from fast_simus._pfield_math import (
     _distances_and_angles,
     _init_exponentials,

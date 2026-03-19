@@ -16,8 +16,6 @@ For large scatterer counts, scatterers are processed in chunks that fit
 within ``MAX_TX_INTERMEDIATE_BYTES``, with the split-path spectrum
 accumulated across chunks via simple addition.
 
-Falls back to a single fused kernel only when explicitly requested.
-
 Requires: MLX (mlx package) on Apple Silicon.
 
 Limitations:
@@ -47,7 +45,6 @@ _KERNELS_DIR = Path(__file__).parent
 
 MAX_TX_INTERMEDIATE_BYTES = 256 * 1024 * 1024  # 256 MB
 
-_FUSED_THREADGROUP = 64
 _TX_TILE_SE = 16
 _TX_TILE_TG = 64
 _RX_SCAT_REDUCE = 2
@@ -87,38 +84,6 @@ def _make_header(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> str:
         f"#define N_ES {n_elem * n_sub}\n"
         f"#define N_SCAT {n_scat}\n"
     )
-
-
-def _build_fused(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
-    key = ("fused", n_elem, n_sub, n_freq, n_scat)
-    if key not in _kernel_cache:
-        _kernel_cache[key] = mx.fast.metal_kernel(
-            name=f"simus_{n_elem}_{n_sub}_{n_freq}_{n_scat}",
-            input_names=[
-                "scat_x",
-                "scat_z",
-                "elem_x",
-                "elem_z",
-                "theta_e",
-                "sub_dx",
-                "sub_dz",
-                "da_init_re",
-                "da_init_im",
-                "da_step_re",
-                "da_step_im",
-                "pp_re",
-                "pp_im",
-                "probe",
-                "rc",
-                "is_out",
-                "scalars",
-            ],
-            output_names=["spect_re", "spect_im"],
-            header=_make_header(n_elem, n_sub, n_freq, n_scat),
-            source=_load_source("simus.metal"),
-            atomic_outputs=True,
-        )
-    return _kernel_cache[key]
 
 
 def _build_tx(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
@@ -304,42 +269,6 @@ def _prepare_common(
 # ---------------------------------------------------------------------------
 # Dispatch paths
 # ---------------------------------------------------------------------------
-def _dispatch_fused(d: dict[str, Any]) -> mx.array:
-    """Single-kernel path (fused TX+RX). Lower memory, higher register pressure."""
-    n_elem, n_sub, n_freq, n_scat = d["n_elem"], d["n_sub"], d["n_freq"], d["n_scat"]
-    kernel = _build_fused(n_elem, n_sub, n_freq, n_scat)
-    output_size = n_freq * n_elem
-    outputs = kernel(
-        inputs=[
-            d["x_flat"],
-            d["z_flat"],
-            d["elem_x"],
-            d["elem_z"],
-            d["theta_e"],
-            d["sub_dx"],
-            d["sub_dz"],
-            d["da_init_re"],
-            d["da_init_im"],
-            d["da_step_re"],
-            d["da_step_im"],
-            d["pp_re"],
-            d["pp_im"],
-            d["probe_real"],
-            d["rc"],
-            d["is_out"],
-            d["scalars"],
-        ],
-        output_shapes=[(output_size,), (output_size,)],
-        output_dtypes=[mx.float32, mx.float32],
-        grid=(n_scat, 1, 1),
-        threadgroup=(min(_FUSED_THREADGROUP, n_scat), 1, 1),
-        init_value=0.0,
-    )
-    spect_re = outputs[0].reshape(n_freq, n_elem)
-    spect_im = outputs[1].reshape(n_freq, n_elem)
-    return (spect_re + 1j * spect_im).astype(mx.complex64)
-
-
 def _dispatch_split(d: dict[str, Any]) -> mx.array:
     """Two-kernel path with automatic chunking for large scatterer counts.
 
