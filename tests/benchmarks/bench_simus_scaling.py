@@ -9,29 +9,17 @@ Designed to track throughput regressions as kernel optimizations evolve.
 
 from __future__ import annotations
 
-import contextlib
-from types import ModuleType
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from array_api_compat import is_jax_namespace
 
-from fast_simus.simus import simus_compute, simus_precompute
+from fast_simus.simus import simus_precompute
 from fast_simus.transducer_presets import P4_2v
+from tests.benchmarks._simus_bench_util import make_simus_compute, sync_simus_result
 
 if TYPE_CHECKING:
     from fast_simus.utils._array_api import Array, _ArrayNamespace
-
-_jax = None
-_eqx = None
-with contextlib.suppress(ImportError):
-    import equinox as _eqx
-    import jax as _jax
-
-_mx = None
-with contextlib.suppress(ImportError):
-    import mlx.core as _mx
 
 
 def _make_random_scatterers(n_scat: int, xp: _ArrayNamespace, seed: int = 0) -> tuple[Array, Array]:
@@ -41,23 +29,6 @@ def _make_random_scatterers(n_scat: int, xp: _ArrayNamespace, seed: int = 0) -> 
     scatterers = xp.asarray(np.stack([x, z], axis=-1))
     rc = xp.asarray(rng.uniform(0.5, 1.5, n_scat).astype(np.float32))
     return scatterers, rc
-
-
-def _make_compute(plan, params, xp: _ArrayNamespace):
-    if is_jax_namespace(cast(ModuleType, xp)):
-        assert _eqx is not None
-        jitted = _eqx.filter_jit(simus_compute)
-        return lambda scat, rc, dl: jitted(scat, rc, dl, plan, params)
-    return lambda scat, rc, dl: simus_compute(scat, rc, dl, plan, params)
-
-
-def _sync(result, xp: _ArrayNamespace) -> None:
-    if is_jax_namespace(cast(ModuleType, xp)):
-        assert _jax is not None
-        _jax.block_until_ready(result)
-        return
-    if _mx is not None and xp is _mx:
-        _mx.eval(result.rf)
 
 
 @pytest.mark.scaling
@@ -76,11 +47,11 @@ def test_bench_simus_scaling(benchmark, xp, n_scat):
     scatterers, rc = _make_random_scatterers(n_scat, xp)
     delays = xp.zeros(params.n_elements)
     plan = simus_precompute(scatterers, rc, delays, params)
-    compute = _make_compute(plan, params, xp)
+    compute = make_simus_compute(plan, params, xp)
 
     def run():
         result = compute(scatterers, rc, delays)
-        _sync(result, xp)
+        sync_simus_result(result, xp)
         return result
 
     result = benchmark(run)

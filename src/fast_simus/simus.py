@@ -17,7 +17,7 @@ from __future__ import annotations
 from enum import StrEnum
 from math import ceil, inf, pi
 from types import ModuleType
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import NamedTuple, cast
 
 import array_api_extra as xpx
 import jax.numpy as jnp
@@ -426,21 +426,20 @@ def simus_compute(
     selected = _select_simus_strategy(xp, strategy)
 
     if selected == SimusStrategy.METAL:
-        from fast_simus.kernels.metal_simus import simus_metal  # noqa: PLC0415
+        import mlx.core as mx  # noqa: PLC0415
 
-        if TYPE_CHECKING:
-            import mlx.core as mx  # noqa: PLC0415
+        from fast_simus.kernels.metal_simus import simus_metal  # noqa: PLC0415
 
         spect_selected = cast(
             Array,
             simus_metal(
-                scatterers=cast("mx.array", scatterers_flat),
-                rc=cast("mx.array", rc_flat),
+                scatterers=cast(mx.array, scatterers_flat),
+                rc=cast(mx.array, rc_flat),
                 params=params,
                 plan=plan,
                 medium=medium,
-                delays_clean=cast("mx.array", delays_clean),
-                tx_apodization=cast("mx.array", tx_apodization),
+                delays_clean=cast(mx.array, delays_clean),
+                tx_apodization=cast(mx.array, tx_apodization),
             ),
         )
     elif selected == SimusStrategy.SCAN:
