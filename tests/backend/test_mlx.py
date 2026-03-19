@@ -10,6 +10,7 @@ import pytest
 mx = pytest.importorskip("mlx.core")
 
 from fast_simus.pfield import pfield_compute, pfield_precompute  # noqa: E402
+from fast_simus.simus import simus_compute, simus_precompute  # noqa: E402
 from fast_simus.transducer_presets import P4_2v  # noqa: E402
 
 
@@ -42,3 +43,38 @@ def test_mlx_compile_pfield_compute():
 
     assert result.shape == (50, 50)
     assert bool(mx.all(result >= 0))
+
+
+@pytest.mark.slow
+def test_mlx_simus_compute():
+    """simus_compute produces valid output with MLX arrays (Metal strategy).
+
+    Unlike pfield, simus cannot use mx.compile because _irfft_and_threshold
+    requires eager np.asarray() conversion and the Metal kernel path does
+    eager float() on plan arrays. The Metal kernels are already GPU-optimized,
+    so mx.compile is not needed.
+    """
+    from typing import cast
+
+    from fast_simus.backends.mlx import ensure_compat
+    from fast_simus.utils._array_api import Array
+
+    ensure_compat(mx)
+
+    params = P4_2v()
+    n_scat = 6
+    scatterers_np = np.stack([np.zeros(n_scat), np.linspace(1e-2, 5e-2, n_scat)], axis=-1).astype(np.float32)
+    rc_np = np.ones(n_scat, dtype=np.float32)
+    delays_np = np.zeros(params.n_elements, dtype=np.float32)
+
+    scatterers = cast(Array, mx.array(scatterers_np))
+    rc = cast(Array, mx.array(rc_np))
+    delays = cast(Array, mx.array(delays_np))
+
+    plan = simus_precompute(scatterers, rc, delays, params)
+    result = simus_compute(scatterers, rc, delays, plan, params)
+
+    rf = result.rf
+    assert rf.ndim == 2
+    assert rf.shape[1] == params.n_elements
+    assert bool(mx.max(mx.abs(rf)) > 0)

@@ -20,7 +20,6 @@ from types import ModuleType
 from typing import NamedTuple, cast
 
 import array_api_extra as xpx
-import jax.numpy as jnp
 import numpy as np
 from array_api_compat import is_jax_namespace
 from jaxtyping import Complex, Float
@@ -329,6 +328,8 @@ def _irfft_and_threshold(
     )
 
     if is_jax_namespace(cast(ModuleType, xp)):
+        import jax.numpy as jnp  # noqa: PLC0415
+
         rf = jnp.fft.irfft(jnp.conj(full_spectrum), plan.n_fft, axis=0)
     else:
         full_np = np.asarray(full_spectrum)

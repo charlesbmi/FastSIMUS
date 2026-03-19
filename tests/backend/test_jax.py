@@ -12,6 +12,7 @@ jnp = jax.numpy
 eqx = pytest.importorskip("equinox")
 
 from fast_simus.pfield import pfield_compute, pfield_precompute  # noqa: E402
+from fast_simus.simus import simus_compute, simus_precompute  # noqa: E402
 from fast_simus.transducer_presets import P4_2v  # noqa: E402
 
 
@@ -44,3 +45,31 @@ def test_jax_jit_pfield_compute():
 
     assert result.shape == (50, 50)
     assert bool(jnp.all(result >= 0))
+
+
+@pytest.mark.slow
+def test_jax_jit_simus_compute():
+    """simus_compute compiles and produces valid output under eqx.filter_jit.
+
+    Same JIT strategy as pfield: eqx.filter_jit traces JAX arrays and treats
+    everything else (plan scalars, params, medium) as static.
+    """
+    params = P4_2v()
+    n_scat = 6
+    scatterers_np = np.stack([np.zeros(n_scat), np.linspace(1e-2, 5e-2, n_scat)], axis=-1)
+    rc_np = np.ones(n_scat)
+    delays_np = np.zeros(params.n_elements)
+
+    scatterers = jnp.asarray(scatterers_np)
+    rc = jnp.asarray(rc_np)
+    delays = jnp.asarray(delays_np)
+
+    plan = simus_precompute(scatterers, rc, delays, params)
+
+    jitted = eqx.filter_jit(simus_compute)
+    result = jitted(scatterers, rc, delays, plan, params)
+
+    rf = result.rf
+    assert rf.ndim == 2
+    assert rf.shape[1] == params.n_elements
+    assert bool(jnp.max(jnp.abs(rf)) > 0)

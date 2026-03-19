@@ -15,7 +15,7 @@ from array_api_compat import is_jax_namespace
 from fast_simus.medium_params import MediumParams
 from fast_simus.simus import SimusResult, SimusStrategy, simus, simus_compute, simus_precompute
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
-from fast_simus.utils._array_api import Array, _ArrayNamespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace, is_mlx_namespace
 
 xp = cast(_ArrayNamespace, array_api_strict)
 
@@ -437,16 +437,7 @@ class TestSimusStrategyCrossBackend:
         """Each strategy produces valid output on each backend."""
         if simus_strategy == SimusStrategy.SCAN and not is_jax_namespace(xp):
             pytest.skip("scan requires JAX")
-
-        _is_mlx = False
-        try:
-            import mlx.core as _mx
-
-            _is_mlx = xp is _mx
-        except ImportError:
-            pass
-
-        if simus_strategy == SimusStrategy.METAL and not _is_mlx:
+        if simus_strategy == SimusStrategy.METAL and not is_mlx_namespace(xp):
             pytest.skip("metal requires MLX")
 
         params = P4_2v()
