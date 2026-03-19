@@ -217,7 +217,6 @@ ignore = [
 "tests/**" = ["S101", "PLC0415"]  # Deferred imports for optional dependencies
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 
-
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 

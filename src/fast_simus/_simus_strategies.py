@@ -121,9 +121,7 @@ def _simus_freq_outer_python(
                 xp,
                 directivity_k=directivity_k,
             )
-            # In-place update via indexing not available in Array API;
-            # build list and stack.
-            spect_accum = _set_row(spect_accum, k, spect_k, xp)
+            spect_accum = _set_row(spect_accum, k, spect_k)
     else:
         for k in range(n_freq):
             phase, delay_apod_phase, spect_k = _simus_freq_step_body(
@@ -137,7 +135,7 @@ def _simus_freq_outer_python(
                 is_out,
                 xp,
             )
-            spect_accum = _set_row(spect_accum, k, spect_k, xp)
+            spect_accum = _set_row(spect_accum, k, spect_k)
 
     return spect_accum
 
@@ -146,7 +144,6 @@ def _set_row(
     arr: Complex[Array, "n_freq n_elem"],
     k: int,
     row: Complex[Array, " n_elem"],
-    xp: _ArrayNamespace,
 ) -> Complex[Array, "n_freq n_elem"]:
     """Set row k of arr to row, Array API compatible."""
     return xpx.at(arr)[k, :].set(row)  # type: ignore[attr-defined]

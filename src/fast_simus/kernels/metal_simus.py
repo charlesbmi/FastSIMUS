@@ -159,7 +159,7 @@ def _build_rx(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Input preparation (shared by both paths)
+# Input preparation
 # ---------------------------------------------------------------------------
 def _prepare_common(
     scatterers: mx.array,
@@ -208,9 +208,6 @@ def _prepare_common(
 
     ph_step = mx.array(2.0 * pi * freq_step, dtype=mx.float32) * delays_clean
     delay_phase_step = ph_step.astype(mx.float32)
-    da_step_re = mx.cos(ph_step).astype(mx.float32)
-    da_step_im = mx.sin(ph_step).astype(mx.float32)
-
     _pulse = cast(mx.array, plan.pulse_spectrum)
     _probe = cast(mx.array, plan.probe_spectrum)
     pp_complex = _pulse * _probe
@@ -251,8 +248,6 @@ def _prepare_common(
         "da_init_re": da_init_re,
         "da_init_im": da_init_im,
         "delay_phase_step": delay_phase_step,
-        "da_step_re": da_step_re,
-        "da_step_im": da_step_im,
         "pp_re": pp_re,
         "pp_im": pp_im,
         "probe_real": probe_real,
@@ -267,7 +262,7 @@ def _prepare_common(
 
 
 # ---------------------------------------------------------------------------
-# Dispatch paths
+# Dispatch
 # ---------------------------------------------------------------------------
 def _dispatch_split(d: dict[str, Any]) -> mx.array:
     """Two-kernel path with automatic chunking for large scatterer counts.
