@@ -26,7 +26,8 @@ def make_simus_compute(plan: SimusPlan, params: TransducerParams, xp: _ArrayName
     """Return (scatterers, rc, delays) -> SimusResult with JAX JIT when applicable."""
     if is_jax_namespace(cast(ModuleType, xp)):
         assert _eqx is not None
-        jitted = _eqx.filter_jit(simus_compute)
-        return lambda scat, rc, dl: jitted(scat, rc, dl, plan, params)
+        compute_kernel = _eqx.filter_jit(simus_compute)
+    else:
+        compute_kernel = simus_compute
 
-    return lambda scat, rc, dl: simus_compute(scat, rc, dl, plan, params)
+    return lambda scat, rc, dl: compute_kernel(scat, rc, dl, plan, params)

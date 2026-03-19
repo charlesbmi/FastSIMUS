@@ -50,13 +50,13 @@ def _make_compute(plan, params, xp: _ArrayNamespace) -> Callable:
     """Return a (positions, delays) -> result callable with backend-specific JIT."""
     if is_jax_namespace(cast(ModuleType, xp)):
         assert _eqx is not None
-        jitted = _eqx.filter_jit(pfield_compute)
-        return lambda pos, dl: jitted(pos, dl, plan, params)
-
-    if _mx is not None and is_mlx_namespace(xp):
+        compute_kernel = _eqx.filter_jit(pfield_compute)
+    elif _mx is not None and is_mlx_namespace(xp):
         return _mx.compile(lambda pos, dl: pfield_compute(pos, dl, plan, params))
+    else:
+        compute_kernel = pfield_compute
 
-    return lambda pos, dl: pfield_compute(pos, dl, plan, params)
+    return lambda pos, dl: compute_kernel(pos, dl, plan, params)
 
 
 @pytest.mark.benchmark(
