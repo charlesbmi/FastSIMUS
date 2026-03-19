@@ -19,6 +19,7 @@ from math import ceil, inf, pi
 from types import ModuleType
 from typing import TYPE_CHECKING, NamedTuple, cast
 
+import array_api_extra as xpx
 import jax.numpy as jnp
 import numpy as np
 from array_api_compat import is_jax_namespace
@@ -288,8 +289,6 @@ def _prepare_simus_sweep(
     if not full_frequency_directivity:
         center_wavenumber = 2.0 * pi * params.freq_center / speed_of_sound
         sinc_arg = xp.asarray(center_wavenumber * plan.seg_length / 2.0) * sin_theta / pi
-        import array_api_extra as xpx  # noqa: PLC0415
-
         phase_init = phase_init * xpx.sinc(sinc_arg, xp=xp)
 
     # Delay+apodization as separate geometric progressions (not absorbed)
@@ -323,8 +322,6 @@ def _irfft_and_threshold(
 
     Backend-aware: uses jax.numpy.fft when xp is JAX, else numpy.fft.
     """
-    import array_api_extra as xpx  # noqa: PLC0415
-
     n_freq_sel = spect_selected.shape[0]
     full_spectrum = xp.zeros((plan.n_freq_full, n_elements), dtype=spect_selected.dtype)
     full_spectrum = xpx.at(full_spectrum)[plan.freq_idx_start : plan.freq_idx_start + n_freq_sel, :].set(  # type: ignore[attr-defined]
