@@ -11,7 +11,9 @@ import pytest
 
 from fast_simus.simus import simus_precompute
 from fast_simus.transducer_presets import P4_2v
-from tests.benchmarks._simus_bench_util import make_simus_compute, sync_simus_result
+
+from ._bench_sync import sync_benchmark_array
+from ._simus_bench_util import make_simus_compute
 
 if TYPE_CHECKING:
     from fast_simus.utils._array_api import Array, _ArrayNamespace
@@ -45,7 +47,7 @@ def test_bench_simus_compute(benchmark, xp, n_scat):
 
     def run():
         result = compute(scatterers, rc, delays)
-        sync_simus_result(result, xp)
+        sync_benchmark_array(result.rf, xp)
         return result
 
     benchmark(run)
