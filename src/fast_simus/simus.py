@@ -19,6 +19,8 @@ from math import ceil, inf, pi
 from types import ModuleType
 from typing import TYPE_CHECKING, NamedTuple, cast
 
+import jax.numpy as jnp
+import numpy as np
 from array_api_compat import is_jax_namespace
 from jaxtyping import Complex, Float
 
@@ -57,24 +59,22 @@ def _two_way_pulse_duration(
     Returns:
         Pulse duration in seconds.
     """
-    import numpy as _np  # noqa: PLC0415
-
     dt = 1e-9
     df = freq_center / tx_n_wavelengths / 32
-    p = int(_np.ceil(_np.log2(1.0 / dt / 2.0 / df)))
+    p = int(np.ceil(np.log2(1.0 / dt / 2.0 / df)))
     n_fft = 2**p
-    f = _np.linspace(0, 1.0 / dt / 2.0, n_fft)
+    f = np.linspace(0, 1.0 / dt / 2.0, n_fft)
     omega = 2.0 * pi * f
 
     # Two-way spectrum: pulse * probe^2
-    omega_arr: Array = _np.asarray(omega)  # type: ignore[assignment]
+    omega_arr: Array = np.asarray(omega)  # type: ignore[assignment]
     ps = _pulse_spectrum_fn(omega_arr, freq_center, tx_n_wavelengths)
     pr = _probe_spectrum_fn(omega_arr, freq_center, bandwidth)
-    two_way = _np.asarray(ps) * _np.asarray(pr) ** 2
+    two_way = np.asarray(ps) * np.asarray(pr) ** 2
 
-    pulse = _np.fft.fftshift(_np.fft.irfft(two_way))
-    pulse = pulse / _np.max(_np.abs(pulse))
-    idx = _np.where(pulse > (1.0 / 1023))[0]
+    pulse = np.fft.fftshift(np.fft.irfft(two_way))
+    pulse = pulse / np.max(np.abs(pulse))
+    idx = np.where(pulse > (1.0 / 1023))[0]
     if len(idx) == 0:
         return tx_n_wavelengths / freq_center
     idx1 = idx[0]
@@ -332,14 +332,10 @@ def _irfft_and_threshold(
     )
 
     if is_jax_namespace(cast(ModuleType, xp)):
-        import jax.numpy as jnp  # noqa: PLC0415
-
         rf = jnp.fft.irfft(jnp.conj(full_spectrum), plan.n_fft, axis=0)
     else:
-        import numpy as _np  # noqa: PLC0415
-
-        full_np = _np.asarray(full_spectrum)
-        rf_np = _np.fft.irfft(_np.conj(full_np), plan.n_fft, axis=0)
+        full_np = np.asarray(full_spectrum)
+        rf_np = np.fft.irfft(np.conj(full_np), plan.n_fft, axis=0)
         rf = xp.asarray(rf_np)
 
     n_keep = (plan.n_fft + 1) // 2
