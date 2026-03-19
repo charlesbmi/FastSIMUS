@@ -1,9 +1,10 @@
 """Custom Metal kernel for simus RF spectrum on Apple Silicon.
 
 Two-kernel architecture for optimal GPU occupancy:
-  - Kernel A (TX): One thread per scatterer, computes TX pressure at each
-    frequency. Delay+apodization (da) absorbed into cur/stp at init
-    (pfield-style), eliminating da[N_ELEM] from registers. Uses threadgroup=64.
+  - Kernel A (TX): Element-tiled progression with shared-memory geometry.
+    One threadgroup per scatterer; threads cooperatively compute geometry,
+    then each thread processes sub-element tiles with ALU-only geometric
+    progression. TILE_SE=16, threadgroup=64.
   - Kernel B (RX): One thread per (scatterer, element) pair, computes RX
     contribution using precomputed TX pressure. Lightweight registers, high
     occupancy, uses threadgroup=256.
@@ -44,19 +45,18 @@ _KERNELS_DIR = Path(__file__).parent
 MAX_TX_INTERMEDIATE_BYTES = 256 * 1024 * 1024  # 256 MB
 
 _FUSED_THREADGROUP = 64
-_TX_THREADGROUP = 64
+_TX_TILE_SE = 16
+_TX_TILE_TG = 64
 _RX_THREADGROUP = 256
 
-# TX kernel throughput-optimal chunk sizes, empirically determined.
-# After da absorption, the TX kernel uses ~16 * n_elem bytes of registers per
-# thread (cur + stp as float2 arrays; da eliminated by absorption into cur/stp).
-# Beyond these chunk sizes, register spills thrash L2 cache and per-scatterer
-# throughput degrades significantly.
+# TX tiled kernel: register pressure is only TILE_SE * 2 * 8 bytes per thread
+# (256 bytes for TILE_SE=16). No register spills, so chunks can be larger
+# than the old progression kernel which spilled at ~5000 scatterers.
 _TX_OPTIMAL_CHUNK: dict[int, int] = {
-    64: 5_000,  # P4-2v class (64 elem, ~1KB registers/thread)
-    128: 2_500,  # L11-5v class (128 elem, ~2KB registers/thread)
+    64: 10_000,  # P4-2v class (64 elem, 256B registers/thread)
+    128: 5_000,  # L11-5v class (128 elem, 256B registers/thread)
 }
-_TX_DEFAULT_CHUNK = 5_000
+_TX_DEFAULT_CHUNK = 10_000
 
 # ---------------------------------------------------------------------------
 # Source caching
@@ -119,10 +119,18 @@ def _build_fused(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
 
 
 def _build_tx(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
-    key = ("tx", n_elem, n_sub, n_freq, n_scat)
+    """Build the tiled TX kernel (element-tiled progression with shared geometry)."""
+    key = ("tx_tiled", n_elem, n_sub, n_freq, n_scat)
     if key not in _kernel_cache:
+        tg = _TX_TILE_TG
+        header = (
+            _make_header(n_elem, n_sub, n_freq, n_scat)
+            + f"#define TILE_SE {_TX_TILE_SE}\n"
+            + f"#define TG_SIZE {tg}\n"
+            + f"#define MAX_FPT (({n_freq} + {tg} - 1) / {tg})\n"
+        )
         _kernel_cache[key] = mx.fast.metal_kernel(
-            name=f"simus_tx_{n_elem}_{n_sub}_{n_freq}_{n_scat}",
+            name=f"simus_tx_tiled_{n_elem}_{n_sub}_{n_freq}_{n_scat}",
             input_names=[
                 "scat_x",
                 "scat_z",
@@ -133,16 +141,15 @@ def _build_tx(n_elem: int, n_sub: int, n_freq: int, n_scat: int) -> Any:
                 "sub_dz",
                 "da_init_re",
                 "da_init_im",
-                "da_step_re",
-                "da_step_im",
+                "delay_phase_step",
                 "pp_re",
                 "pp_im",
                 "is_out",
                 "scalars",
             ],
             output_names=["tx_re", "tx_im"],
-            header=_make_header(n_elem, n_sub, n_freq, n_scat),
-            source=_load_source("simus_tx.metal"),
+            header=header,
+            source=_load_source("simus_tx_tiled.metal"),
         )
     return _kernel_cache[key]
 
@@ -223,6 +230,7 @@ def _prepare_common(
     da_init_im = (mx.sin(ph_init) * tx_apodization).astype(mx.float32)
 
     ph_step = mx.array(2.0 * pi * freq_step, dtype=mx.float32) * delays_clean
+    delay_phase_step = ph_step.astype(mx.float32)
     da_step_re = mx.cos(ph_step).astype(mx.float32)
     da_step_im = mx.sin(ph_step).astype(mx.float32)
 
@@ -265,6 +273,7 @@ def _prepare_common(
         "sub_dz": sub_dz.astype(mx.float32),
         "da_init_re": da_init_re,
         "da_init_im": da_init_im,
+        "delay_phase_step": delay_phase_step,
         "da_step_re": da_step_re,
         "da_step_im": da_step_im,
         "pp_re": pp_re,
@@ -344,8 +353,7 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
         d["sub_dz"],
         d["da_init_re"],
         d["da_init_im"],
-        d["da_step_re"],
-        d["da_step_im"],
+        d["delay_phase_step"],
         d["pp_re"],
         d["pp_im"],
     ]
@@ -369,13 +377,14 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
         crc = d["rc"][start:end]
         c_out = d["is_out"][start:end]
 
-        # TX kernel: one thread per scatterer in this chunk
+        # TX kernel: one threadgroup per scatterer (tiled progression)
+        tg = _TX_TILE_TG
         tx_out = k_tx(
             inputs=[cx, cz, *geom_tx, c_out, scalars],
             output_shapes=[(cn * n_freq,), (cn * n_freq,)],
             output_dtypes=[mx.float32, mx.float32],
-            grid=(cn, 1, 1),
-            threadgroup=(min(_TX_THREADGROUP, cn), 1, 1),
+            grid=(cn * tg, 1, 1),
+            threadgroup=(tg, 1, 1),
         )
 
         # RX kernel: one thread per (scatterer, element) pair
