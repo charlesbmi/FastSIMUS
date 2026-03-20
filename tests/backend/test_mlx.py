@@ -49,10 +49,9 @@ def test_mlx_compile_pfield_compute():
 def test_mlx_simus_compute():
     """simus_compute produces valid output with MLX arrays (Metal strategy).
 
-    Unlike pfield, simus cannot use mx.compile because _irfft_and_threshold
-    requires eager np.asarray() conversion and the Metal kernel path does
-    eager float() on plan arrays. The Metal kernels are already GPU-optimized,
-    so mx.compile is not needed.
+    Unlike pfield, simus cannot use mx.compile because the Metal kernel path
+    does eager float() on plan arrays. The Metal kernels are already
+    GPU-optimized, so mx.compile is not needed.
     """
     from typing import cast
 

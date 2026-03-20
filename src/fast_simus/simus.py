@@ -15,12 +15,11 @@ References:
 from __future__ import annotations
 
 from enum import StrEnum
-from math import ceil, inf, pi
+from math import ceil, inf, log2, pi
 from types import ModuleType
 from typing import NamedTuple, cast
 
 import array_api_extra as xpx
-import numpy as np
 from array_api_compat import is_jax_namespace
 from jaxtyping import Complex, Float
 
@@ -35,7 +34,7 @@ from fast_simus.medium_params import MediumParams
 from fast_simus.spectrum import probe_spectrum as _probe_spectrum_fn
 from fast_simus.spectrum import pulse_spectrum as _pulse_spectrum_fn
 from fast_simus.transducer_params import TransducerParams
-from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace, _ArrayNamespaceWithFFT, array_namespace
 from fast_simus.utils.geometry import element_positions
 
 _DEFAULT_MEDIUM = MediumParams()
@@ -45,6 +44,7 @@ def _two_way_pulse_duration(
     freq_center: float,
     bandwidth: float,
     tx_n_wavelengths: float,
+    xp: _ArrayNamespaceWithFFT,
 ) -> float:
     """Compute the temporal extent of the two-way (pulse-echo) pulse.
 
@@ -55,33 +55,39 @@ def _two_way_pulse_duration(
         freq_center: Center frequency in Hz.
         bandwidth: Fractional bandwidth (0.75 = 75%).
         tx_n_wavelengths: Number of wavelengths of the TX pulse.
+        xp: Array namespace (must have FFT extension).
 
     Returns:
         Pulse duration in seconds.
     """
     dt = 1e-9
     df = freq_center / tx_n_wavelengths / 32
-    p = int(np.ceil(np.log2(1.0 / dt / 2.0 / df)))
+    p = ceil(log2(1.0 / dt / 2.0 / df))
     n_fft = 2**p
-    f = np.linspace(0, 1.0 / dt / 2.0, n_fft)
-    omega = 2.0 * pi * f
+    omega = 2.0 * pi * xp.linspace(0, 1.0 / dt / 2.0, n_fft)
 
     # Two-way spectrum: pulse * probe^2
-    omega_arr: Array = np.asarray(omega)  # type: ignore[assignment]
-    ps = _pulse_spectrum_fn(omega_arr, freq_center, tx_n_wavelengths)
-    pr = _probe_spectrum_fn(omega_arr, freq_center, bandwidth)
-    two_way = np.asarray(ps) * np.asarray(pr) ** 2
+    ps = _pulse_spectrum_fn(omega, freq_center, tx_n_wavelengths)
+    pr = _probe_spectrum_fn(omega, freq_center, bandwidth)
+    two_way = ps * pr**2
 
-    pulse = np.fft.fftshift(np.fft.irfft(two_way))
-    pulse = pulse / np.max(np.abs(pulse))
-    idx = np.where(pulse > (1.0 / 1023))[0]
-    if len(idx) == 0:
+    pulse = xp.fft.fftshift(xp.fft.irfft(two_way))
+    pulse = pulse / xp.max(xp.abs(pulse))
+
+    above = pulse > (1.0 / 1023)
+    n = above.shape[0]
+    indices = xp.arange(n)
+    masked_min = xp.where(above, indices, xp.asarray(n))
+    masked_max = xp.where(above, indices, xp.asarray(-1))
+    idx1 = int(xp.min(masked_min))
+    idx2 = int(xp.max(masked_max))
+
+    if idx1 >= n:
         return tx_n_wavelengths / freq_center
-    idx1 = idx[0]
-    idx2 = idx[-1]
+
     trim_idx = min(idx1 + 1, 2 * n_fft - 1 - idx2 - 1)
     pulse_trimmed = pulse[-trim_idx : trim_idx - 2 : -1]
-    return float(len(pulse_trimmed) * dt)
+    return float(pulse_trimmed.shape[0] * dt)
 
 
 class SimusStrategy(StrEnum):
@@ -171,6 +177,10 @@ def simus_precompute(
         SimusPlan with static-shaped arrays and precomputed scalars.
     """
     xp = array_namespace(scatterers, delays)
+    if not isinstance(xp, _ArrayNamespaceWithFFT):
+        msg = f"simus_precompute requires an array backend with xp.fft support. {xp=}"
+        raise RuntimeError(msg)
+
     speed_of_sound = medium.speed_of_sound
     fc = params.freq_center
 
@@ -201,7 +211,7 @@ def simus_precompute(
 
     # Two-way pulse length correction (matches MATLAB: getpulse(param,2))
     if tx_n_wavelengths != float("inf"):
-        tp = _two_way_pulse_duration(fc, params.bandwidth, tx_n_wavelengths)
+        tp = _two_way_pulse_duration(fc, params.bandwidth, tx_n_wavelengths, xp)
         max_d = max_d + tp * speed_of_sound
 
     # Round-trip frequency step (matches PyMUST simus df formula)
@@ -315,26 +325,16 @@ def _irfft_and_threshold(
     spect_selected: Complex[Array, "n_freq_sel n_elem"],
     plan: SimusPlan,
     n_elements: int,
-    xp: _ArrayNamespace,
+    xp: _ArrayNamespaceWithFFT,
 ) -> tuple[Float[Array, "n_samples n_elem"], Complex[Array, "n_freq_full n_elem"]]:
-    """Place selected spectrum, IFFT to time domain, apply smooth thresholding.
-
-    Backend-aware: uses jax.numpy.fft when xp is JAX, else numpy.fft.
-    """
+    """Place selected spectrum, IFFT to time domain, apply smooth thresholding."""
     n_freq_sel = spect_selected.shape[0]
     full_spectrum = xp.zeros((plan.n_freq_full, n_elements), dtype=spect_selected.dtype)
     full_spectrum = xpx.at(full_spectrum)[plan.freq_idx_start : plan.freq_idx_start + n_freq_sel, :].set(  # type: ignore[attr-defined]
         spect_selected
     )
 
-    if is_jax_namespace(cast(ModuleType, xp)):
-        import jax.numpy as jnp
-
-        rf = jnp.fft.irfft(jnp.conj(full_spectrum), plan.n_fft, axis=0)
-    else:
-        full_np = np.asarray(full_spectrum)
-        rf_np = np.fft.irfft(np.conj(full_np), plan.n_fft, axis=0)
-        rf = xp.asarray(rf_np)
+    rf = xp.fft.irfft(xp.conj(full_spectrum), n=plan.n_fft, axis=0)
 
     n_keep = (plan.n_fft + 1) // 2
     rf = rf[:n_keep, ...]
@@ -400,6 +400,9 @@ def simus_compute(
         SimusResult with RF signals and complex spectrum.
     """
     xp = array_namespace(scatterers, rc, delays)
+    if not isinstance(xp, _ArrayNamespaceWithFFT):
+        msg = f"simus requires an array backend with xp.fft support. {xp=}"
+        raise RuntimeError(msg)
 
     if tx_apodization is None:
         tx_apodization = xp.ones(params.n_elements)
