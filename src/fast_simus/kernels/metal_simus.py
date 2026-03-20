@@ -268,7 +268,7 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
 
     Scatterers are processed in chunks that fit the TX intermediate buffer
     within ``MAX_TX_INTERMEDIATE_BYTES``. Each chunk runs TX then RX, and
-    the per-chunk spectra are summed on the host.
+    the per-chunk spectra are accumulated via MLX array operations.
     """
     n_elem, n_sub, n_freq, n_scat = d["n_elem"], d["n_sub"], d["n_freq"], d["n_scat"]
     spect_size = n_freq * n_elem
@@ -303,6 +303,8 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
     total_re = mx.zeros(spect_size, dtype=mx.float32)
     total_im = mx.zeros(spect_size, dtype=mx.float32)
 
+    sr = _RX_SCAT_REDUCE
+
     for start in range(0, n_scat, chunk_size):
         end = min(start + chunk_size, n_scat)
         cn = end - start
@@ -322,10 +324,24 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
             threadgroup=(tg, 1, 1),
         )
 
+        # Pad to chunk_size for the RX kernel (compiled with N_SCAT=chunk_size).
+        # Without padding, the last chunk's threads would read past the TX
+        # intermediate buffer. Padding with is_out=1 zeroes their contribution.
+        if cn < chunk_size:
+            pad_n = chunk_size - cn
+            cx = mx.concatenate([cx, mx.zeros(pad_n, dtype=mx.float32)])
+            cz = mx.concatenate([cz, mx.zeros(pad_n, dtype=mx.float32)])
+            crc = mx.concatenate([crc, mx.zeros(pad_n, dtype=mx.float32)])
+            c_out = mx.concatenate([c_out, mx.ones(pad_n, dtype=mx.float32)])
+            tx_re_pad = mx.zeros(pad_n * n_freq, dtype=mx.float32)
+            tx_out = (
+                mx.concatenate([tx_out[0], tx_re_pad]),
+                mx.concatenate([tx_out[1], tx_re_pad]),
+            )
+
         # RX kernel: SCAT_REDUCE scatterers per threadgroup, SIMD reduction
-        sr = _RX_SCAT_REDUCE
         rx_tg = n_elem * sr
-        n_tgs = (cn + sr - 1) // sr
+        n_tgs = (chunk_size + sr - 1) // sr
         rx_out = k_rx(
             inputs=[cx, cz, *geom_rx, tx_out[0], tx_out[1], probe, crc, scalars],
             output_shapes=[(spect_size,), (spect_size,)],

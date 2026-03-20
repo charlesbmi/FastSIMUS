@@ -33,7 +33,7 @@ from fast_simus._pfield_math import (
 from fast_simus.medium_params import MediumParams
 from fast_simus.spectrum import probe_spectrum as _probe_spectrum_fn
 from fast_simus.spectrum import pulse_spectrum as _pulse_spectrum_fn
-from fast_simus.transducer_params import TransducerParams
+from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.utils._array_api import Array, _ArrayNamespace, _ArrayNamespaceWithFFT, array_namespace
 from fast_simus.utils.geometry import element_positions
 
@@ -359,9 +359,33 @@ def _irfft_and_threshold(
     return rf, full_spectrum
 
 
-def _select_simus_strategy(xp: _ArrayNamespace, strategy: SimusStrategy | None) -> SimusStrategy:
+def _simus_metal_supported(params: TransducerParams, full_frequency_directivity: bool) -> bool:
+    """Check whether the Metal kernel supports the given configuration."""
+    if full_frequency_directivity:
+        return False
+    if not isinstance(params.baffle, str | BaffleType):
+        return False
+    return params.baffle == BaffleType.SOFT
+
+
+def _select_simus_strategy(
+    xp: _ArrayNamespace,
+    params: TransducerParams,
+    full_frequency_directivity: bool,
+    *,
+    strategy: SimusStrategy | None = None,
+) -> SimusStrategy:
     """Auto-select simus strategy based on array backend."""
     if strategy is not None:
+        if strategy == SimusStrategy.METAL and not _simus_metal_supported(params, full_frequency_directivity):
+            unsupported = []
+            if full_frequency_directivity:
+                unsupported.append("full_frequency_directivity=True")
+            if params.baffle != BaffleType.SOFT:
+                unsupported.append(f"baffle={params.baffle!r} (only SOFT supported)")
+            raise NotImplementedError(
+                f"Metal kernel does not support: {', '.join(unsupported)}. Use strategy=None for auto-selection."
+            )
         return strategy
 
     if is_jax_namespace(cast(ModuleType, xp)):
@@ -370,7 +394,7 @@ def _select_simus_strategy(xp: _ArrayNamespace, strategy: SimusStrategy | None) 
     try:
         import mlx.core
 
-        if xp is mlx.core:
+        if xp is mlx.core and _simus_metal_supported(params, full_frequency_directivity):
             return SimusStrategy.METAL
     except ImportError:
         pass
@@ -417,10 +441,17 @@ def simus_compute(
     tx_apodization = xp.where(nan_mask, xp.asarray(0.0), tx_apodization)
     delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
 
-    # Flatten scatterers for the frequency sweep
-    n_scat = scatterers.shape[0] if scatterers.ndim >= 2 else 1
-    scatterers_flat = xp.reshape(scatterers, (n_scat, 2)) if scatterers.ndim > 2 else scatterers
-    rc_flat = xp.reshape(rc, (n_scat,)) if rc.ndim > 1 else rc
+    # Flatten scatterers: (*batch, 2) -> (n_scat, 2), (*batch,) -> (n_scat,)
+    if scatterers.ndim <= 1:
+        n_scat = 1
+        scatterers_flat = xp.reshape(scatterers, (1, scatterers.shape[-1]))
+    else:
+        n_scat = 1
+        for d in scatterers.shape[:-1]:
+            n_scat *= d
+        scatterers_flat = xp.reshape(scatterers, (n_scat, scatterers.shape[-1]))
+
+    rc_flat = xp.reshape(rc, (n_scat,)) if rc.ndim != 1 else rc
 
     sweep = _prepare_simus_sweep(
         scatterers_flat,
@@ -433,7 +464,7 @@ def simus_compute(
         xp=xp,
     )
 
-    selected = _select_simus_strategy(xp, strategy)
+    selected = _select_simus_strategy(xp, params, full_frequency_directivity, strategy=strategy)
 
     if selected == SimusStrategy.METAL:
         import mlx.core as mx

@@ -537,7 +537,7 @@ class TestSimusMetal:
 
         ensure_compat(_mx)
 
-        n_scat = 10_000
+        n_scat = 10_001
         params = P4_2v()
         np.random.seed(42)
         scatterers_np = np.stack(
@@ -565,7 +565,7 @@ class TestSimusMetal:
             rf_metal,
             rf_python,
             atol_peak=0.02,
-            desc="Metal chunked (10K) vs Python",
+            desc="Metal chunked (10K+1, odd SCAT_REDUCE tail) vs Python",
         )
 
     def test_metal_auto_selected_for_mlx(self):
@@ -577,7 +577,8 @@ class TestSimusMetal:
 
         ensure_compat(_mx)
 
-        strategy = _select_simus_strategy(cast(_ArrayNamespace, _mx), None)
+        params = P4_2v()
+        strategy = _select_simus_strategy(cast(_ArrayNamespace, _mx), params, False)
         assert strategy == SimusStrategy.METAL
 
 
