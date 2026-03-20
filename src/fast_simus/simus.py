@@ -44,7 +44,7 @@ def _two_way_pulse_duration(
     freq_center: float,
     bandwidth: float,
     tx_n_wavelengths: float,
-    xp: _ArrayNamespaceWithFFT,
+    xp: _ArrayNamespace,
 ) -> float:
     """Compute the temporal extent of the two-way (pulse-echo) pulse.
 
@@ -60,6 +60,14 @@ def _two_way_pulse_duration(
     Returns:
         Pulse duration in seconds.
     """
+    # hasattr instead of isinstance(_ArrayNamespaceWithFFT) because Python 3.12+
+    # Protocol isinstance uses getattr_static, which misses lazy sub-module attrs
+    # like numpy.fft. See https://docs.python.org/3/whatsnew/3.12.html#typing
+    if not hasattr(xp, "fft"):
+        msg = "simus requires an array backend with FFT support (e.g. numpy, jax, cupy)"
+        raise RuntimeError(msg)
+    xp_fft = cast(_ArrayNamespaceWithFFT, xp)
+
     dt = 1e-9
     df = freq_center / tx_n_wavelengths / 32
     p = ceil(log2(1.0 / dt / 2.0 / df))
@@ -71,7 +79,7 @@ def _two_way_pulse_duration(
     pr = _probe_spectrum_fn(omega, freq_center, bandwidth)
     two_way = ps * pr**2
 
-    pulse = xp.fft.fftshift(xp.fft.irfft(two_way))
+    pulse = xp_fft.fft.fftshift(xp_fft.fft.irfft(two_way))
     pulse = pulse / xp.max(xp.abs(pulse))
 
     above = pulse > (1.0 / 1023)
@@ -177,10 +185,6 @@ def simus_precompute(
         SimusPlan with static-shaped arrays and precomputed scalars.
     """
     xp = array_namespace(scatterers, delays)
-    if not isinstance(xp, _ArrayNamespaceWithFFT):
-        msg = f"simus_precompute requires an array backend with xp.fft support. {xp=}"
-        raise RuntimeError(msg)
-
     speed_of_sound = medium.speed_of_sound
     fc = params.freq_center
 
@@ -325,16 +329,21 @@ def _irfft_and_threshold(
     spect_selected: Complex[Array, "n_freq_sel n_elem"],
     plan: SimusPlan,
     n_elements: int,
-    xp: _ArrayNamespaceWithFFT,
+    xp: _ArrayNamespace,
 ) -> tuple[Float[Array, "n_samples n_elem"], Complex[Array, "n_freq_full n_elem"]]:
     """Place selected spectrum, IFFT to time domain, apply smooth thresholding."""
+    if not hasattr(xp, "fft"):
+        msg = "simus requires an array backend with FFT support (e.g. numpy, jax, cupy)"
+        raise RuntimeError(msg)
+    xp_fft = cast(_ArrayNamespaceWithFFT, xp)
+
     n_freq_sel = spect_selected.shape[0]
     full_spectrum = xp.zeros((plan.n_freq_full, n_elements), dtype=spect_selected.dtype)
     full_spectrum = xpx.at(full_spectrum)[plan.freq_idx_start : plan.freq_idx_start + n_freq_sel, :].set(  # type: ignore[attr-defined]
         spect_selected
     )
 
-    rf = xp.fft.irfft(xp.conj(full_spectrum), n=plan.n_fft, axis=0)
+    rf = xp_fft.fft.irfft(xp.conj(full_spectrum), n=plan.n_fft, axis=0)
 
     n_keep = (plan.n_fft + 1) // 2
     rf = rf[:n_keep, ...]
@@ -400,9 +409,6 @@ def simus_compute(
         SimusResult with RF signals and complex spectrum.
     """
     xp = array_namespace(scatterers, rc, delays)
-    if not isinstance(xp, _ArrayNamespaceWithFFT):
-        msg = f"simus requires an array backend with xp.fft support. {xp=}"
-        raise RuntimeError(msg)
 
     if tx_apodization is None:
         tx_apodization = xp.ones(params.n_elements)
