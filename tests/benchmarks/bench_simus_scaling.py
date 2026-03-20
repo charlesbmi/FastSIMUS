@@ -38,7 +38,7 @@ def _make_random_scatterers(n_scat: int, xp: _ArrayNamespace, seed: int = 0) -> 
     group="simus_scaling",
     min_time=0.5,
     max_time=30.0,
-    min_rounds=3,
+    min_rounds=1,
     warmup=True,
     warmup_iterations=1,
 )

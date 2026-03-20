@@ -32,7 +32,7 @@ def _make_scatterers(n_scat: int, xp: _ArrayNamespace) -> tuple[Array, Array]:
     group="simus_compute",
     min_time=0.1,
     max_time=10.0,
-    min_rounds=3,
+    min_rounds=1,
     warmup=True,
     warmup_iterations=1,
 )

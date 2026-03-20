@@ -63,7 +63,7 @@ def _make_compute(plan, params, xp: _ArrayNamespace) -> Callable:
     group="pfield_compute",
     min_time=0.1,
     max_time=5.0,
-    min_rounds=3,
+    min_rounds=1,
     warmup=True,
     warmup_iterations=1,
 )
