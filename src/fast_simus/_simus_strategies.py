@@ -170,7 +170,7 @@ def _simus_freq_outer_scan(
     (n_scat, n_elem, n_sub) and (n_elem,). Each step outputs
     spect_k with shape (n_elem,), stacked by scan into (n_freq, n_elem).
     """
-    import jax  # noqa: PLC0415
+    import jax
 
     spectra = pulse_spect * probe_spect
 

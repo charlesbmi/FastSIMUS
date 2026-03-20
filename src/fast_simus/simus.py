@@ -328,7 +328,7 @@ def _irfft_and_threshold(
     )
 
     if is_jax_namespace(cast(ModuleType, xp)):
-        import jax.numpy as jnp  # noqa: PLC0415
+        import jax.numpy as jnp
 
         rf = jnp.fft.irfft(jnp.conj(full_spectrum), plan.n_fft, axis=0)
     else:
@@ -359,7 +359,7 @@ def _select_simus_strategy(xp: _ArrayNamespace, strategy: SimusStrategy | None) 
         return SimusStrategy.SCAN
 
     try:
-        import mlx.core  # noqa: PLC0415
+        import mlx.core
 
         if xp is mlx.core:
             return SimusStrategy.METAL
@@ -427,9 +427,9 @@ def simus_compute(
     selected = _select_simus_strategy(xp, strategy)
 
     if selected == SimusStrategy.METAL:
-        import mlx.core as mx  # noqa: PLC0415
+        import mlx.core as mx
 
-        from fast_simus.kernels.metal_simus import simus_metal  # noqa: PLC0415
+        from fast_simus.kernels.metal_simus import simus_metal
 
         spect_selected = cast(
             Array,
@@ -444,11 +444,11 @@ def simus_compute(
             ),
         )
     elif selected == SimusStrategy.SCAN:
-        from fast_simus._simus_strategies import _simus_freq_outer_scan  # noqa: PLC0415
+        from fast_simus._simus_strategies import _simus_freq_outer_scan
 
         spect_selected = _simus_freq_outer_scan(rc=rc_flat, xp=xp, **sweep)
     else:
-        from fast_simus._simus_strategies import _simus_freq_outer_python  # noqa: PLC0415
+        from fast_simus._simus_strategies import _simus_freq_outer_python
 
         spect_selected = _simus_freq_outer_python(rc=rc_flat, xp=xp, **sweep)
 

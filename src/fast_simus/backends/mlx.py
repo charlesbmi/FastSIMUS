@@ -90,7 +90,7 @@ def _patch_device(xp: Any) -> None:
     array_api_compat.device = _device_with_mlx  # type: ignore[assignment]
 
     with contextlib.suppress(ImportError):
-        import array_api_extra._lib._utils._compat as _xpx_compat  # noqa: PLC0415  # type: ignore[import-untyped]
+        import array_api_extra._lib._utils._compat as _xpx_compat  # type: ignore[import-untyped]
 
         _xpx_compat.device = _device_with_mlx
 

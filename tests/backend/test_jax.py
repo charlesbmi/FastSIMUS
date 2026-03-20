@@ -11,9 +11,9 @@ jax = pytest.importorskip("jax")
 jnp = jax.numpy
 eqx = pytest.importorskip("equinox")
 
-from fast_simus.pfield import pfield_compute, pfield_precompute  # noqa: E402
-from fast_simus.simus import simus_compute, simus_precompute  # noqa: E402
-from fast_simus.transducer_presets import P4_2v  # noqa: E402
+from fast_simus.pfield import pfield_compute, pfield_precompute
+from fast_simus.simus import simus_compute, simus_precompute
+from fast_simus.transducer_presets import P4_2v
 
 
 def _make_positions(x_range: tuple[float, float], z_range: tuple[float, float], n: int) -> np.ndarray:
