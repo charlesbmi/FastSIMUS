@@ -343,10 +343,10 @@ def pfield_compute(
     selected = _select_strategy(xp, grid_size, params, full_frequency_directivity, strategy=strategy)
 
     if selected == PfieldStrategy.METAL:
-        from fast_simus.kernels.metal_pfield import pfield_metal  # noqa: PLC0415
+        from fast_simus.kernels.metal_pfield import pfield_metal
 
         if TYPE_CHECKING:
-            import mlx.core as mx  # noqa: PLC0415
+            import mlx.core as mx
 
         pressure_accum = cast(
             Array,
@@ -360,7 +360,7 @@ def pfield_compute(
             ),
         )
     else:
-        from fast_simus._pfield_strategies import _freq_outer_python, _freq_outer_scan  # noqa: PLC0415
+        from fast_simus._pfield_strategies import _freq_outer_python, _freq_outer_scan
 
         sweep = _prepare_frequency_sweep(
             positions,

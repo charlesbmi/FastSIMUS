@@ -149,8 +149,8 @@ def _freq_outer_scan(
     The scan carry is only (n_sources,) per grid point, matching the Metal
     kernel's per-thread model. vmap handles parallelism across grid points.
     """
-    import jax  # noqa: PLC0415
-    import jax.numpy as jnp  # noqa: PLC0415
+    import jax
+    import jax.numpy as jnp
 
     grid_shape = phase_decay_init.shape[:-1]
     n_sources = phase_decay_init.shape[-1]

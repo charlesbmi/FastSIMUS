@@ -7,6 +7,8 @@ from typing import Any, Literal, Protocol, Self, cast, runtime_checkable
 
 from array_api_compat import array_namespace as xpc_array_namespace
 
+from fast_simus.backends.mlx import ensure_compat as _ensure_mlx_compat
+
 
 @runtime_checkable
 class LinAlg(Protocol):
@@ -274,9 +276,7 @@ def array_namespace(
     """
     xp = xpc_array_namespace(*arrays)
     if is_mlx_namespace(xp):
-        from fast_simus.backends.mlx import ensure_compat  # noqa: PLC0415
-
-        ensure_compat(xp)
+        _ensure_mlx_compat(xp)
     return cast(
         _ArrayNamespace | _ArrayNamespaceWithLinAlg | _ArrayNamespaceWithFFT | _ArrayNamespaceWithLinAlgAndFFT,
         xp,

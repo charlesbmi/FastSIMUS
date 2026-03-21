@@ -2,6 +2,7 @@
 
 from fast_simus.medium_params import MediumParams
 from fast_simus.pfield import PfieldPlan, PfieldStrategy, pfield, pfield_compute, pfield_precompute
+from fast_simus.simus import SimusPlan, SimusResult, SimusStrategy, simus, simus_compute, simus_precompute
 from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.tx_delay import (
     diverging_wave,
@@ -15,6 +16,9 @@ __all__ = [
     "MediumParams",
     "PfieldPlan",
     "PfieldStrategy",
+    "SimusPlan",
+    "SimusResult",
+    "SimusStrategy",
     "TransducerParams",
     "diverging_wave",
     "element_positions",
@@ -23,4 +27,7 @@ __all__ = [
     "pfield_compute",
     "pfield_precompute",
     "plane_wave",
+    "simus",
+    "simus_compute",
+    "simus_precompute",
 ]

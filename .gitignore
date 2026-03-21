@@ -193,6 +193,9 @@ __marimo__/
 .claude/settings.local.json
 .tmp/
 
+# Brainstorm docs (research artifacts, not shipped)
+docs/brainstorms/
+
 # Dolt database files (added by bd init)
 .dolt/
 *.db

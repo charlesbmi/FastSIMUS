@@ -21,23 +21,20 @@ from fast_simus.pfield import pfield_compute, pfield_precompute
 from fast_simus.transducer_presets import P4_2v
 from fast_simus.utils._array_api import is_mlx_namespace
 
+from ._bench_sync import sync_benchmark_array
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from fast_simus.utils._array_api import Array, _ArrayNamespace
 
-_jax = None
 _eqx = None
 with contextlib.suppress(ImportError):
     import equinox as _eqx
-    import jax as _jax
 
 _mx = None
-_mx_sync = None
 with contextlib.suppress(ImportError):
     import mlx.core as _mx
-
-    _mx_sync = _mx.eval
 
 
 def _make_positions(grid_length: int, xp: _ArrayNamespace) -> Array:
@@ -53,29 +50,20 @@ def _make_compute(plan, params, xp: _ArrayNamespace) -> Callable:
     """Return a (positions, delays) -> result callable with backend-specific JIT."""
     if is_jax_namespace(cast(ModuleType, xp)):
         assert _eqx is not None
-        jitted = _eqx.filter_jit(pfield_compute)
-        return lambda pos, dl: jitted(pos, dl, plan, params)
-
-    if _mx is not None and is_mlx_namespace(xp):
+        compute_kernel = _eqx.filter_jit(pfield_compute)
+    elif _mx is not None and is_mlx_namespace(xp):
         return _mx.compile(lambda pos, dl: pfield_compute(pos, dl, plan, params))
+    else:
+        compute_kernel = pfield_compute
 
-    return lambda pos, dl: pfield_compute(pos, dl, plan, params)
-
-
-def _sync(result: Array, xp: _ArrayNamespace) -> None:
-    """Block until result is ready for async backends (JAX, MLX)."""
-    if is_jax_namespace(cast(ModuleType, xp)):
-        assert _jax is not None
-        _jax.block_until_ready(result)
-    elif _mx_sync is not None and is_mlx_namespace(xp):
-        _mx_sync(result)
+    return lambda pos, dl: compute_kernel(pos, dl, plan, params)
 
 
 @pytest.mark.benchmark(
     group="pfield_compute",
     min_time=0.1,
     max_time=5.0,
-    min_rounds=3,
+    min_rounds=1,
     warmup=True,
     warmup_iterations=1,
 )
@@ -90,7 +78,7 @@ def test_bench_pfield_compute(benchmark, xp, grid_n):
 
     def run():
         result = compute(positions, delays)
-        _sync(result, xp)
+        sync_benchmark_array(result, xp)
         return result
 
     benchmark(run)
