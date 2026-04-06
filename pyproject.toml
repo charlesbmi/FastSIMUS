@@ -82,10 +82,11 @@ test = [
     "pytest-testmon>=2.2.0",
     "array-api-strict>=2.0",
     "numpy>=2.3",
-    "jax>=0.9",
+    "jax[cuda12]>=0.9; platform_machine == 'x86_64'",
     "equinox>=0.11",
     "mlx>=0.31; platform_system == 'Darwin'",
     "pymust>=0.1.9",
+    "absl-py>=2.0",
 ]
 test-parallel = [
     { include-group = "test" },

@@ -105,11 +105,13 @@ class SimusStrategy(StrEnum):
         PYTHON: Python for-loop (NumPy/CuPy, constant memory).
         SCAN: JAX lax.scan for O(1) compilation cost.
         METAL: Custom Metal kernel on Apple Silicon (MLX).
+        CUDA: Fused CUDA kernels via JAX on NVIDIA GPUs.
     """
 
     PYTHON = "python"
     SCAN = "scan"
     METAL = "metal"
+    CUDA = "cuda"
 
 
 class SimusResult(NamedTuple):
@@ -215,7 +217,12 @@ def simus_precompute(
 
     # Two-way pulse length correction (matches MATLAB: getpulse(param,2))
     if tx_n_wavelengths != float("inf"):
-        tp = _two_way_pulse_duration(fc, params.bandwidth, tx_n_wavelengths, xp)
+        import numpy as np_cpu
+
+        try:
+            tp = _two_way_pulse_duration(fc, params.bandwidth, tx_n_wavelengths, xp)
+        except Exception:
+            tp = _two_way_pulse_duration(fc, params.bandwidth, tx_n_wavelengths, np_cpu)
         max_d = max_d + tp * speed_of_sound
 
     # Round-trip frequency step (matches PyMUST simus df formula)
@@ -359,6 +366,25 @@ def _irfft_and_threshold(
     return rf, full_spectrum
 
 
+def _simus_cuda_supported(params: TransducerParams, full_frequency_directivity: bool) -> bool:
+    """Check whether the CUDA kernel supports the given configuration."""
+    if full_frequency_directivity:
+        return False
+    if not isinstance(params.baffle, str | BaffleType):
+        return False
+    return params.baffle == BaffleType.SOFT
+
+
+def _has_nvidia_gpu() -> bool:
+    """Check if an NVIDIA GPU is available via JAX."""
+    try:
+        import jax
+
+        return jax.default_backend() == "gpu"
+    except ImportError:
+        return False
+
+
 def _simus_metal_supported(params: TransducerParams, full_frequency_directivity: bool) -> bool:
     """Check whether the Metal kernel supports the given configuration."""
     if full_frequency_directivity:
@@ -386,9 +412,20 @@ def _select_simus_strategy(
             raise NotImplementedError(
                 f"Metal kernel does not support: {', '.join(unsupported)}. Use strategy=None for auto-selection."
             )
+        if strategy == SimusStrategy.CUDA and not _simus_cuda_supported(params, full_frequency_directivity):
+            unsupported = []
+            if full_frequency_directivity:
+                unsupported.append("full_frequency_directivity=True")
+            if params.baffle != BaffleType.SOFT:
+                unsupported.append(f"baffle={params.baffle!r} (only SOFT supported)")
+            raise NotImplementedError(
+                f"CUDA kernel does not support: {', '.join(unsupported)}. Use strategy=None for auto-selection."
+            )
         return strategy
 
     if is_jax_namespace(cast(ModuleType, xp)):
+        if _simus_cuda_supported(params, full_frequency_directivity) and _has_nvidia_gpu():
+            return SimusStrategy.CUDA
         return SimusStrategy.SCAN
 
     try:
@@ -453,49 +490,76 @@ def simus_compute(
 
     rc_flat = xp.reshape(rc, (n_scat,)) if rc.ndim != 1 else rc
 
-    sweep = _prepare_simus_sweep(
-        scatterers_flat,
-        delays_clean,
-        tx_apodization,
-        plan,
-        params,
-        medium,
-        full_frequency_directivity=full_frequency_directivity,
-        xp=xp,
-    )
-
     selected = _select_simus_strategy(xp, params, full_frequency_directivity, strategy=strategy)
 
-    if selected == SimusStrategy.METAL:
-        import mlx.core as mx
-
-        from fast_simus.kernels.metal_simus import simus_metal
+    if selected == SimusStrategy.CUDA:
+        from fast_simus.kernels.cuda_simus import simus_cuda
 
         spect_selected = cast(
             Array,
-            simus_metal(
-                scatterers=cast(mx.array, scatterers_flat),
-                rc=cast(mx.array, rc_flat),
+            simus_cuda(
+                scatterers=scatterers_flat,
+                rc=rc_flat,
                 params=params,
                 plan=plan,
                 medium=medium,
-                delays_clean=cast(mx.array, delays_clean),
-                tx_apodization=cast(mx.array, tx_apodization),
+                delays_clean=delays_clean,
+                tx_apodization=tx_apodization,
             ),
         )
-    elif selected == SimusStrategy.SCAN:
-        from fast_simus._simus_strategies import _simus_freq_outer_scan
-
-        spect_selected = _simus_freq_outer_scan(rc=rc_flat, xp=xp, **sweep)
     else:
-        from fast_simus._simus_strategies import _simus_freq_outer_python
+        sweep = _prepare_simus_sweep(
+            scatterers_flat,
+            delays_clean,
+            tx_apodization,
+            plan,
+            params,
+            medium,
+            full_frequency_directivity=full_frequency_directivity,
+            xp=xp,
+        )
 
-        spect_selected = _simus_freq_outer_python(rc=rc_flat, xp=xp, **sweep)
+        if selected == SimusStrategy.METAL:
+            import mlx.core as mx
+
+            from fast_simus.kernels.metal_simus import simus_metal
+
+            spect_selected = cast(
+                Array,
+                simus_metal(
+                    scatterers=cast(mx.array, scatterers_flat),
+                    rc=cast(mx.array, rc_flat),
+                    params=params,
+                    plan=plan,
+                    medium=medium,
+                    delays_clean=cast(mx.array, delays_clean),
+                    tx_apodization=cast(mx.array, tx_apodization),
+                ),
+            )
+        elif selected == SimusStrategy.SCAN:
+            from fast_simus._simus_strategies import _simus_freq_outer_scan
+
+            spect_selected = _simus_freq_outer_scan(rc=rc_flat, xp=xp, **sweep)
+        else:
+            from fast_simus._simus_strategies import _simus_freq_outer_python
+
+            spect_selected = _simus_freq_outer_python(rc=rc_flat, xp=xp, **sweep)
 
     # Apply correction factor
     spect_selected = spect_selected * xp.asarray(plan.correction_factor)
 
-    rf, full_spectrum = _irfft_and_threshold(spect_selected, plan, params.n_elements, xp)
+    try:
+        rf, full_spectrum = _irfft_and_threshold(spect_selected, plan, params.n_elements, xp)
+    except Exception:
+        # GPU cuFFT may fail on older NVIDIA drivers; fall back to numpy IRFFT
+        import numpy as np_cpu
+
+        spect_np = np_cpu.asarray(spect_selected)
+        rf_np, full_spectrum_np = _irfft_and_threshold(
+            spect_np, plan, params.n_elements, np_cpu,
+        )
+        rf = xp.asarray(rf_np)
+        full_spectrum = xp.asarray(full_spectrum_np)
 
     return SimusResult(rf=rf, spectrum=full_spectrum)
 
