@@ -38,6 +38,10 @@ Full experiment docs in `docs/progress/experiments/`.
 | 9a| v15 fp16 TX buffer                    | **+2.5%** | 31.6ms; register wall blocks higher B_SCAT    |
 | 9b| v11-stagger element group order       | 0%        | Atomic contention from volume, not collisions  |
 | 10| Combined analysis + GPU roadmap       | Analysis  | A4000 near-optimal; 4090 projected 7-9ms      |
+| 11| Block count sweep (48-384)            | 0%        | Wave quantization matters; L2 contention disproved |
+| 12| v16 Grid-Y element group partitioning | **-261%** | 8x redundant Phase 1+2 dominates atomic savings |
+| 13| L2 persistence hints                  | 0%        | Output already L2-resident; no effect          |
+| 14| v17 SCAT_REDUCE warp shuffle          | **DNF**   | Register spills from dynamic loop; catastrophic |
 
 ## Current Champion: v11 B=5 ET=8
 
@@ -125,3 +129,7 @@ The 72 MB L2 cache changes the game:
 - Metal-style SIMD shuffle (Exp 8a): thread mapping creates MORE atomics on CUDA
 - launch_bounds register reduction (Exp 3): shmem binds occupancy, not registers
 - Element group staggering (Exp 9b): no measurable effect on L2 contention
+- Block count reduction (Exp 11): 96 vs 192 identical; L2 contention not a factor at B=5
+- Grid-Y element group partitioning (Exp 12): 8x redundant geo+TX dominates atomic savings
+- L2 persistence hints (Exp 13): output already L2-resident; zero effect
+- SCAT_REDUCE warp shuffle (Exp 14): dynamic scatterer loop prevents unrolling -> catastrophic spills
