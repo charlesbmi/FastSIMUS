@@ -62,14 +62,17 @@ class TestExtractBackend:
     """Backend label parsing from pytest-benchmark names."""
 
     def test_pymust_name(self) -> None:
+        """`test_bench_pymust_*` names resolve to the "pymust" backend."""
         assert plot_module._extract_backend("test_bench_pymust_scaling[1000]") == "pymust"
 
     def test_xp_parametrized_name(self) -> None:
+        """Names with `[backend-n_scat]` params resolve to the first non-numeric token."""
         assert plot_module._extract_backend("test_bench_simus_scaling[numpy-1000]") == "numpy"
         assert plot_module._extract_backend("test_bench_simus_scaling[jax-1000]") == "jax"
         assert plot_module._extract_backend("test_bench_simus_scaling[mlx-1000]") == "mlx"
 
     def test_unknown_shape(self) -> None:
+        """Names without brackets fall back to "unknown"."""
         assert plot_module._extract_backend("weird_name_no_brackets") == "unknown"
 
 
@@ -77,6 +80,7 @@ class TestBuildDataFrame:
     """End-to-end DataFrame construction from JSON fixtures."""
 
     def test_single_file_multi_backend(self, tmp_path: Path) -> None:
+        """One JSON with multiple backends yields one row per backend."""
         fixture = tmp_path / "run1.json"
         _make_benchmark_json(
             fixture,
@@ -95,6 +99,7 @@ class TestBuildDataFrame:
         assert (df["throughput"] > 0).all()
 
     def test_multi_file_merges_machines(self, tmp_path: Path) -> None:
+        """Rows from multiple JSONs merge into one DataFrame keyed by machine label."""
         mac = tmp_path / "mac.json"
         _make_benchmark_json(
             mac,
@@ -114,6 +119,7 @@ class TestBuildDataFrame:
         assert len(df) == 2
 
     def test_fallback_machine_label_when_device_unset(self, tmp_path: Path) -> None:
+        """Missing device label falls back to `node (backend)` in machine column."""
         fixture = tmp_path / "nolabel.json"
         _make_benchmark_json(
             fixture,
@@ -125,6 +131,7 @@ class TestBuildDataFrame:
         assert df["machine"].iloc[0] == "testnode (numpy)"
 
     def test_group_filter(self, tmp_path: Path) -> None:
+        """Benchmarks outside the requested group are excluded from the DataFrame."""
         fixture = tmp_path / "run.json"
         data = {
             "machine_info": {"node": "x"},
@@ -147,6 +154,7 @@ class TestCli:
     """CLI entry-point behavior."""
 
     def test_main_produces_png(self, tmp_path: Path) -> None:
+        """Happy-path CLI run writes a non-empty PNG and returns 0."""
         fixture = tmp_path / "run.json"
         _make_benchmark_json(
             fixture,
@@ -166,6 +174,7 @@ class TestCli:
         assert out.stat().st_size > 0
 
     def test_main_exits_2_when_no_benchmarks(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """JSON with zero matching benchmarks -> exit 2 + stderr message."""
         empty = tmp_path / "empty.json"
         _make_benchmark_json(empty, device_label=None, commit_id="abc", entries=[])
         rc = plot_module.main([str(empty), "-o", str(tmp_path / "out.png")])
@@ -173,11 +182,13 @@ class TestCli:
         assert "no benchmarks in group" in capsys.readouterr().err
 
     def test_main_exits_2_when_missing_file(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """Non-existent input path -> exit 2 + stderr message naming the path."""
         rc = plot_module.main([str(tmp_path / "nope.json"), "-o", str(tmp_path / "out.png")])
         assert rc == 2
         assert "no such file" in capsys.readouterr().err
 
     def test_main_malformed_json_surfaces_path(self, tmp_path: Path) -> None:
+        """Malformed JSON raises SystemExit whose message includes the offending path."""
         bad = tmp_path / "bad.json"
         bad.write_text("{not valid json")
         with pytest.raises(SystemExit) as excinfo:

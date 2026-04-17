@@ -148,9 +148,7 @@ def build_dataframe(paths: list[Path], group: str) -> pd.DataFrame:
     for path in paths:
         rows.extend(_load_rows(path, group))
     if not rows:
-        return pd.DataFrame(
-            columns=["source_file", "machine", "backend", "n_scat", "mean_s", "stddev_s", "throughput"]
-        )
+        return pd.DataFrame(columns=["source_file", "machine", "backend", "n_scat", "mean_s", "stddev_s", "throughput"])
     df = pd.DataFrame([r.__dict__ for r in rows])
     df["throughput"] = df["n_scat"] / df["mean_s"]
     return df.sort_values(["backend", "machine", "n_scat"]).reset_index(drop=True)
@@ -264,8 +262,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     render_plot(df, args.output, commit_summary=_commit_summary(paths))
-    print(f"Wrote {args.output} ({len(df)} rows across {df['backend'].nunique()} backend(s), "
-          f"{df['machine'].nunique()} machine(s))")
+    print(
+        f"Wrote {args.output} ({len(df)} rows across {df['backend'].nunique()} backend(s), "
+        f"{df['machine'].nunique()} machine(s))"
+    )
     return 0
 
 

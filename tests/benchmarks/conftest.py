@@ -15,7 +15,7 @@ _DEVICE_LABEL_ENV_VAR = "FASTSIMUS_DEVICE_LABEL"
 _DEVICE_LABEL_MACHINE_INFO_KEY = "fast_simus_device_label"
 
 
-def pytest_benchmark_update_machine_info(config: object, machine_info: dict[str, Any]) -> None:  # noqa: ARG001
+def pytest_benchmark_update_machine_info(config: object, machine_info: dict[str, Any]) -> None:
     """Inject ``FASTSIMUS_DEVICE_LABEL`` (if set) into pytest-benchmark machine_info."""
     label = os.environ.get(_DEVICE_LABEL_ENV_VAR, "")
     if label:
