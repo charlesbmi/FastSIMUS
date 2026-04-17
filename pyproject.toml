@@ -93,7 +93,13 @@ test-parallel = [
 ]
 bench = [
     { include-group = "test" },
+    { include-group = "plot" },
     "pytest-benchmark[histogram]>=4.0.0",
+]
+# Plotting deps are separate so `bench` users who only need raw JSON can skip them.
+plot = [
+    "pandas>=2.2",
+    "seaborn>=0.13",
 ]
 
 
@@ -142,10 +148,22 @@ help = "Run performance benchmarks"
 cmd = "pytest tests/benchmarks/ --benchmark-only --benchmark-autosave -p no:xdist -m 'not scaling'"
 executor = { group = "bench" }
 
-[tool.poe.tasks.benchmark-scaling]
-help = "Run scaling benchmarks (1K-1M scatterers, slow)"
+[tool.poe.tasks.benchmark-scaling-run]
+help = "Run scaling benchmarks only (JSON output under .benchmarks/, no plot)"
 cmd = "pytest tests/benchmarks/ --benchmark-only --benchmark-autosave -p no:xdist -m scaling"
 executor = { group = "bench" }
+
+[tool.poe.tasks.benchmark-plot]
+help = "Plot scaling results from one or more pytest-benchmark JSON files (default: .benchmarks/**/*.json)"
+cmd = "python scripts/plot_benchmark_scaling.py .benchmarks/**/*.json"
+executor = { group = "bench" }
+
+[tool.poe.tasks.benchmark-scaling]
+help = "Run scaling benchmarks (1K-1M scatterers, slow) and regenerate the scaling plot"
+sequence = [
+    { ref = "benchmark-scaling-run" },
+    { ref = "benchmark-plot" },
+]
 
 [tool.poe.tasks.build]
 help = "Build wheel file"
