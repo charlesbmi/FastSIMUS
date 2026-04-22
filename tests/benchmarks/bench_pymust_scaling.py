@@ -81,6 +81,10 @@ def test_bench_pymust_scaling(benchmark, n_scat):
     param.c = 1540.0
     options = pymust.utils.Options()
     options.dBThresh = -60.0
+    # Pin ElementSplitting=1 to match bench_simus_scaling.py. For P4-2v the
+    # auto formula already lands on 1, but pinning it keeps this config
+    # reproducible across probes.
+    options.ElementSplitting = 1
     delays = np.zeros((1, param.Nelements))
     x, z, rc = _make_random_scatterers(n_scat)
 
@@ -90,6 +94,7 @@ def test_bench_pymust_scaling(benchmark, n_scat):
             "probe": "P4-2v",
             "n_scat": n_scat,
             "db_thresh": options.dBThresh,
+            "element_splitting": int(options.ElementSplitting),
             **_dump_pymust_param(param),
         }
     )

@@ -67,7 +67,10 @@ def test_bench_simus_scaling(benchmark, xp, n_scat):
     params = P4_2v()
     scatterers, rc = _make_random_scatterers(n_scat, xp)
     delays = xp.zeros(params.n_elements)
-    plan = simus_precompute(scatterers, rc, delays, params)
+    # Pin element_splitting=1 to match the public PyMUST SIMUS benchmark
+    # config. For P4-2v the auto formula already lands on 1, but pinning it
+    # keeps this config reproducible across probes and backends.
+    plan = simus_precompute(scatterers, rc, delays, params, element_splitting=1)
     compute = make_simus_compute(plan, params, xp)
 
     benchmark.extra_info.update(
@@ -75,6 +78,7 @@ def test_bench_simus_scaling(benchmark, xp, n_scat):
             "backend": xp.__name__.split(".")[0],
             "probe": "P4-2v",
             "n_scat": n_scat,
+            "element_splitting": 1,
             **_safe_transducer_dump(params),
         }
     )
