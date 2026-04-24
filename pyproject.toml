@@ -54,6 +54,7 @@ dev = [
     "prek>=0.3.0",
     { include-group = "docs" },
     { include-group = "lint" },
+    { include-group = "plot" },
     { include-group = "test-parallel" },
 ]
 docs = [

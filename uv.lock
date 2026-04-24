@@ -497,6 +497,7 @@ dev = [
     { name = "mkdocstrings", extra = ["python"] },
     { name = "mlx", marker = "sys_platform == 'darwin'" },
     { name = "numpy" },
+    { name = "pandas" },
     { name = "poethepoet" },
     { name = "prek" },
     { name = "pymust" },
@@ -506,6 +507,7 @@ dev = [
     { name = "pytest-testmon" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "seaborn" },
     { name = "ty" },
 ]
 docs = [
@@ -592,6 +594,7 @@ dev = [
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.0" },
     { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.31" },
     { name = "numpy", specifier = ">=2.3" },
+    { name = "pandas", specifier = ">=2.2" },
     { name = "poethepoet", specifier = ">=0.32.1" },
     { name = "prek", specifier = ">=0.3.0" },
     { name = "pymust", specifier = ">=0.1.9" },
@@ -601,6 +604,7 @@ dev = [
     { name = "pytest-testmon", specifier = ">=2.2.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.14.11" },
+    { name = "seaborn", specifier = ">=0.13" },
     { name = "ty", specifier = ">=0.0.20" },
 ]
 docs = [
