@@ -247,6 +247,7 @@ convention = "google"
 
 [tool.deptry.package_module_name_map]
 pytest-benchmark = "pytest_benchmark"
+mlx = "mlx"
 
 [tool.deptry.per_rule_ignores]
 DEP004 = ["jax", "mlx"]
