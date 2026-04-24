@@ -35,7 +35,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
@@ -310,7 +309,7 @@ def render_plot(df: pd.DataFrame, output: Path, commit_summary: str = "") -> Non
 
     output.parent.mkdir(parents=True, exist_ok=True)
     g.savefig(output, dpi=150, bbox_inches="tight")
-    plt.close(g.figure)
+    g.figure.close()
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
