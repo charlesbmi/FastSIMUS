@@ -1,8 +1,10 @@
 """Plot pytest-benchmark scaling results across machines and backends.
 
 Loads one or more ``pytest-benchmark --benchmark-autosave`` JSON files and
-produces a 1x2 log-log PNG: runtime (s) vs n_scat on the left, throughput
-(scatterers/s) vs n_scat on the right. One line per (machine, backend).
+produces a log-log PNG with runtime (s) vs n_scat and throughput
+(scatterers/s) vs n_scat. When PyMUST reference rows are present, the plot
+also includes a third panel showing speedup vs PyMUST. One line per
+(machine, backend).
 
 Typical usage:
 
