@@ -5,9 +5,33 @@
   "extraKnownMarketplaces": {
     "charlesbmi-claude-code": {
       "source": {
-        "source": "github",
-        "repo": "charlesbmi/everything-claude-code"
+        "repo": "charlesbmi/everything-claude-code",
+        "source": "github"
       }
     }
+  },
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": "bd prime",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "bd prime",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ]
   }
 }

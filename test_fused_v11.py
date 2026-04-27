@@ -25,7 +25,7 @@ from fast_simus.utils.geometry import element_positions
 
 _NEPER_TO_DB = 8.685889638065036
 _TG_SIZE = 128
-NUM_SMS = 48
+NUM_SMS = 128
 
 
 def prepare(n_scat):
@@ -176,15 +176,17 @@ if __name__ == "__main__":
                "N_ES": nes, "TILE_SE": 16, "TG_SIZE": _TG_SIZE, "MAX_FPT": max_fpt}
     v6_shmem = (9 * nes + 3 * ne) * 4
 
-    print(f"\n--- v6 baseline ---")
+    blocks = 2 * NUM_SMS
+
+    print(f"\n--- v6 baseline (blocks={blocks}) ---")
     out_v6, t_v6 = bench("v6", "src/fast_simus/kernels/simus_fused_v6.cu",
-                          d, 192, v6_defs, v6_shmem)
+                          d, blocks, v6_defs, v6_shmem)
 
     results = {}
     configs = [
-        (2, 4, 192),  (2, 8, 192),  (2, 16, 192),
-        (4, 4, 192),  (4, 8, 192),  (4, 16, 192),
-        (2, 4, 96),   (4, 4, 96),
+        (2, 4, blocks),  (2, 8, blocks),  (2, 16, blocks),
+        (4, 4, blocks),  (4, 8, blocks),  (4, 16, blocks),
+        (5, 8, blocks),
     ]
 
     for b_scat, etile, npb in configs:

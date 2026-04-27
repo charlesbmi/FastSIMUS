@@ -83,7 +83,7 @@ def _get_context() -> ctypes.c_void_p:
 def compile_module(
     source: str,
     defines: tuple[tuple[str, Any], ...] | None = None,
-    arch: str = "sm_86",
+    arch: str = "sm_89",
 ) -> ctypes.c_void_p:
     """Compile CUDA source via NVRTC and return a module handle.
 
@@ -159,7 +159,7 @@ def compile_kernel(
     source: str,
     kernel_name: str,
     defines: tuple[tuple[str, Any], ...] | None = None,
-    arch: str = "sm_86",
+    arch: str = "sm_89",
 ) -> tuple[ctypes.c_void_p, ctypes.c_void_p]:
     """Compile CUDA source and return (module, function) for a named kernel.
 
