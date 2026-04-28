@@ -31,7 +31,7 @@ N_SCAT = 10_000
 BLOCKS = 96
 
 
-def run_kernel(source_path, shmem_bytes, b_scat, elem_tile, d):
+def run_kernel(source_path, shmem_bytes, b_scat, elem_tile, d, extra_defs=None):
     nf, ne, nes, ns = d["n_freq"], d["n_elem"], d["n_es"], d["n_sub"]
     max_fpt = (nf + _TG_SIZE - 1) // _TG_SIZE
     defs = {
@@ -39,6 +39,8 @@ def run_kernel(source_path, shmem_bytes, b_scat, elem_tile, d):
         "TILE_SE": 16, "TG_SIZE": _TG_SIZE, "MAX_FPT": max_fpt,
         "B_SCAT": b_scat, "ELEM_TILE": elem_tile,
     }
+    if extra_defs:
+        defs.update(extra_defs)
     source = Path(source_path).read_text()
     mod = compile_module(source, defines=tuple(sorted(defs.items())))
     func = get_function(mod, "simus_fused_kernel")
@@ -141,6 +143,26 @@ def main():
     v25b_re, v25b_im = run_kernel(
         "src/fast_simus/kernels/simus_fused_v25b_regtx_unroll.cu",
         shmem_v25, b, et, d)
+    print("Running v25c (register TX + sv_arr from shmem, fp32)...")
+    v25c_re, v25c_im = run_kernel(
+        "src/fast_simus/kernels/simus_fused_v25c_svshmem.cu",
+        shmem_v25, b, et, d)
+    print("Running v26 chunk=1 (sanity check, should match v25b)...")
+    v26c1_re, v26c1_im = run_kernel(
+        "src/fast_simus/kernels/simus_fused_v26_freqchunk.cu",
+        shmem_v25, b, et, d, extra_defs={"N_CHUNKS": 1})
+    print("Running v26 chunk=2 (freq-chunked register TX, fp32)...")
+    v26c2_re, v26c2_im = run_kernel(
+        "src/fast_simus/kernels/simus_fused_v26_freqchunk.cu",
+        shmem_v25, b, et, d, extra_defs={"N_CHUNKS": 2})
+    print("Running v26 chunk=3 (freq-chunked register TX, fp32)...")
+    v26c3_re, v26c3_im = run_kernel(
+        "src/fast_simus/kernels/simus_fused_v26_freqchunk.cu",
+        shmem_v25, b, et, d, extra_defs={"N_CHUNKS": 3})
+    print("Running v26 chunk=7 (1 freq per chunk -- isolates init precision)...")
+    v26c7_re, v26c7_im = run_kernel(
+        "src/fast_simus/kernels/simus_fused_v26_freqchunk.cu",
+        shmem_v25, b, et, d, extra_defs={"N_CHUNKS": 7})
 
     def gate(name, ref_re, ref_im, x_re, x_im):
         e_max = report(name, "v11", ref_re, ref_im, x_re, x_im)
@@ -160,6 +182,11 @@ def main():
     gate("v23b", v11_re, v11_im, v23b_re, v23b_im)
     gate("v25",  v11_re, v11_im, v25_re,  v25_im)
     gate("v25b", v11_re, v11_im, v25b_re, v25b_im)
+    gate("v25c", v11_re, v11_im, v25c_re, v25c_im)
+    gate("v26c1", v11_re, v11_im, v26c1_re, v26c1_im)
+    gate("v26c2", v11_re, v11_im, v26c2_re, v26c2_im)
+    gate("v26c3", v11_re, v11_im, v26c3_re, v26c3_im)
+    gate("v26c7", v11_re, v11_im, v26c7_re, v26c7_im)
 
 
 if __name__ == "__main__":

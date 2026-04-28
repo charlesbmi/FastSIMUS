@@ -43,17 +43,20 @@ _BLOCKS = 256
 _N_SCAT = 100_000
 
 VARIANTS = {
-    "v11":         ("src/fast_simus/kernels/simus_fused_v11.cu",            "fp32"),
-    "v23_split":   ("src/fast_simus/kernels/simus_fused_v23_chainsplit.cu", "fp32"),
-    "v23b_adv":    ("src/fast_simus/kernels/simus_fused_v23b_advsplit.cu",  "fp32"),
-    "v25_regtx":   ("src/fast_simus/kernels/simus_fused_v25_regtx.cu",      "fp32_regtx"),
-    "v25b_unroll": ("src/fast_simus/kernels/simus_fused_v25b_regtx_unroll.cu", "fp32_regtx"),
-    "v15":         ("src/fast_simus/kernels/simus_fused_v15.cu",            "fp16"),
+    "v11":         ("src/fast_simus/kernels/simus_fused_v11.cu",            "fp32",       {}),
+    "v23_split":   ("src/fast_simus/kernels/simus_fused_v23_chainsplit.cu", "fp32",       {}),
+    "v23b_adv":    ("src/fast_simus/kernels/simus_fused_v23b_advsplit.cu",  "fp32",       {}),
+    "v25_regtx":   ("src/fast_simus/kernels/simus_fused_v25_regtx.cu",      "fp32_regtx", {}),
+    "v25b_unroll": ("src/fast_simus/kernels/simus_fused_v25b_regtx_unroll.cu", "fp32_regtx", {}),
+    "v25c_svshmem": ("src/fast_simus/kernels/simus_fused_v25c_svshmem.cu", "fp32_regtx", {}),
+    "v26_chunk2":  ("src/fast_simus/kernels/simus_fused_v26_freqchunk.cu",  "fp32_regtx", {"N_CHUNKS": 2}),
+    "v26_chunk3":  ("src/fast_simus/kernels/simus_fused_v26_freqchunk.cu",  "fp32_regtx", {"N_CHUNKS": 3}),
+    "v15":         ("src/fast_simus/kernels/simus_fused_v15.cu",            "fp16",       {}),
 }
 
 
 def bench_one(cuda, path, precision, b_scat, elem_tile, blocks, d, kernel_args,
-              d_ore, d_oim, out_size, reps=5):
+              d_ore, d_oim, out_size, reps=5, extra_defs=None):
     nf, ne, nes, ns = d["n_freq"], d["n_elem"], d["n_es"], d["n_sub"]
     if precision == "fp16":
         shmem = compute_shmem_v15(b_scat, nes, nf, ne)
@@ -68,6 +71,8 @@ def bench_one(cuda, path, precision, b_scat, elem_tile, blocks, d, kernel_args,
         "TILE_SE": _TILE_SE, "TG_SIZE": _TG_SIZE, "MAX_FPT": max_fpt,
         "B_SCAT": b_scat, "ELEM_TILE": elem_tile,
     }
+    if extra_defs:
+        defs.update(extra_defs)
     try:
         mod = compile_module(source, defines=tuple(sorted(defs.items())))
         func = get_function(mod, "simus_fused_kernel")
@@ -151,12 +156,12 @@ def main():
               f"{'best_ms':>9} {'med_ms':>8} {'M scat/s':>10}")
     print(header); print("-" * len(header))
     rows = {}
-    for variant_name, (path, precision) in VARIANTS.items():
+    for variant_name, (path, precision, extra_defs) in VARIANTS.items():
         for b in args.b_scat:
             for et in args.elem_tile:
                 res = bench_one(cuda, path, precision, b, et, args.blocks, d,
                                 kernel_args, d_ore, d_oim, out_size,
-                                reps=args.reps)
+                                reps=args.reps, extra_defs=extra_defs)
                 if "error" in res:
                     print(f"{variant_name:>11} {precision:>5} {b:3d} {et:3d} ERR ... {res['error']}")
                     continue
@@ -170,7 +175,7 @@ def main():
 
     print("=" * 105)
     print("\nfp32 delta vs v11 baseline:")
-    for cand in ["v23_split", "v23b_adv", "v25_regtx", "v25b_unroll"]:
+    for cand in ["v25b_unroll", "v25c_svshmem", "v26_chunk2", "v26_chunk3"]:
         print(f"\n  -- {cand}")
         for b in args.b_scat:
             for et in args.elem_tile:

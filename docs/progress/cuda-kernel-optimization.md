@@ -24,7 +24,8 @@ P4-2v transducer, 100K scatterers, N_FREQ=854, N_ELEM=64, N_SUB=1, N_ES=64
 | v22 | 4090 idealized (nochain+ILP)    | B=5, ET=8, 256    | 2.86      | 34.97M    | 24.1x     | NOT correct -- per-element scatter degenerate |
 | v23 | 4090 chain-split (correct fp32) | B=5, ET=8, 256    | 8.18      | 12.21M    | 8.55x     | Negative result -- exp20 ILP win bound to chain break |
 | v15 | 4090 fp16 champion (prior)          | B=9, ET=4, 256    | 6.69      | 14.96M    | 10.5x     | Eclipsed by v25b on correctness AND speed |
-| **v25b** | **4090 correct champion (fp32 regtx)** | **B=7, ET=4, 256** | **5.66** | **17.68M** | **12.4x** | **TX in registers (drop 60 KB shmem); +18% over v15 fp16** |
+| v25b | 4090 correct champion (prior) | B=7, ET=4, 256 | 5.66 | 17.68M | 12.4x | Eclipsed by v25c at lower ET / higher B |
+| **v25c** | **4090 correct champion (fp32 regtx + sv shmem, ET=2)** | **B=9, ET=2, 256** | **5.39** | **18.56M** | **13.1x** | **+5% over v25b; smaller cv chain drops L2 78%->65%** |
 
 ## Experiment Results Summary
 
@@ -55,32 +56,42 @@ Full experiment docs in `docs/progress/experiments/`.
 | 19| v22 6-blocks/SM + Phase-3 ILP restructure | **+140%** | **v22_nochain_ilp B=5 ET=8: 2.86ms = 34.97M scat/s; exp19 ceiling broken (idealized only)** |
 | 20| v23 chain-split / advance-split on correct fp32 (v11 base) | **0% / -7%** | exp20 ILP win does not transfer to correct kernel; cv[B*ET] live across freq blocks register headroom |
 | 21| v25b register-resident TX (correct fp32) | **+66% / +18%** | **B=7 ET=4: 5.66 ms = 17.68M scat/s; per-thread tk arrays remove 60 KB shmem; new bottleneck = L2 throughput on local-mem spill** |
+| 22| v26 freq-chunk + v25c sv-from-shmem + ET=2 sweep | **+5% / +24%** | **v25c B=9 ET=2: 5.39 ms = 18.56M scat/s; smaller cv chain drops L2 78->65%; v26 chunking shelved (cmul-init overhead > spill savings)** |
 
-## Current correct-kernel champion: v25b register-resident TX (RTX 4090)
+## Current correct-kernel champion: v25c register TX + sv-from-shmem (RTX 4090)
 
 v22_nochain_ilp's 34.97 M scat/s is an *idealized-kernel ceiling*, not a
 shippable correct result (per-element scatter behaviour is degenerate under
 the `nochain` simplification — see exp20 + the v23 plan doc). Standing
 correct-kernel champions, ordered by speed:
 
-- **fp32 v25b (regtx + unrolled fi)**: B=7 ET=4, 5.66 ms = **17.68 M scat/s**
-- fp16 TX v15: B=9 ET=4, 6.69 ms = 14.96 M scat/s
-- fp32 v11: B=5 ET=4, 7.61 ms = 13.14 M scat/s
+- **fp32 v25c (regtx + sv-shmem, ET=2)**: B=9 ET=2, 5.39 ms = **18.56 M scat/s**
+- fp32 v25b (regtx + unrolled fi):       B=7 ET=4, 5.66 ms = 17.68 M scat/s
+- fp16 TX v15:                            B=9 ET=4, 6.69 ms = 14.96 M scat/s
+- fp32 v11:                               B=5 ET=4, 7.61 ms = 13.14 M scat/s
 
-v25b is +18% over the fp16 v15 baseline AND keeps full fp32 precision
-(max mag rel err vs v11 = 4.1e-5, mean 4.4e-7 — FMA-reorder noise).
-Mechanism: per-thread `tk_re/tk_im[B*MAX_FPT]` register arrays replace
-the 60 KB `sh_tx_re/sh_tx_im` shmem buffer, which v11 was using as a
-per-thread temporary (no cross-thread sharing). Unrolling the fi loop
-with predicated valid checks keeps tk register-resident.
+v25c is +24 % over the fp16 v15 baseline AND keeps full fp32 precision
+(max mag rel err vs v11 = 4.3 × 10⁻⁵). Mechanism (vs v25b):
 
-NCU shows the new bottleneck is **L2 throughput at 76.5% from local-mem
-spill traffic** (99.97% L2 hit rate), with achieved occupancy 16% pinned
-by 255 regs/thread. Next levers:
+1. `sv_arr[B*ET]` is no longer cached in regs — `GEO_STP_RX_RE/IM` is
+   re-read from shmem inside each `cmul`. Saves 56 floats/thread at
+   B=7 ET=4.
+2. Cutting `ELEM_TILE` from 4 to 2 shrinks the live `cv[B*ET]` chain
+   from 28 to 18 elements (B=9), opening reg headroom for `tk` and
+   raising the optimal `B_SCAT` from 7 to 9–10.
 
-- Reduce regs/thread to unlock 3 blk/SM (shmem already allows 4)
-- Chunk freqs in Phase 2+3 to shrink the live tk window
-- half2 cv chain (FastSIMUS-9bj) to free registers for tk
+NCU @ B=9 ET=2: L2 throughput 64.9 % (was 76.5 %), Compute 63.4 %
+(was 61.2 %), occupancy still 16 % (reg-cap = 255). Local mem 520 B
+(`tk` mostly fits but still spills enough to dominate L1 traffic).
+
+Next levers (FastSIMUS-9bj is highest leverage):
+
+- **fp16 cv chain (FastSIMUS-9bj)**: pack 2 freqs per `__hfma2`,
+  halving cv reg footprint. Should drop spill enough to either fit
+  `tk` fully in regs or open 3 blk/SM (need ≤ 168 regs/thread).
+- ~~Chunk freqs in Phase 2+3 to shrink live tk window~~: tried in
+  v26 (FastSIMUS-frh). Reduces spill (400 B → 240 B) but cmul-chain
+  init overhead exceeds the L2 savings. Shelved — see exp22.
 
 ## (Idealized) v22_nochain_ilp B=5 ET=8 (RTX 4090)
 

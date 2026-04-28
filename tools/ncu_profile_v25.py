@@ -40,6 +40,8 @@ from ncu_profile_v22 import prepare, upload  # reuse harness
 VARIANT_PATHS = {
     "v25":  "src/fast_simus/kernels/simus_fused_v25_regtx.cu",
     "v25b": "src/fast_simus/kernels/simus_fused_v25b_regtx_unroll.cu",
+    "v25c": "src/fast_simus/kernels/simus_fused_v25c_svshmem.cu",
+    "v26":  "src/fast_simus/kernels/simus_fused_v26_freqchunk.cu",
     "v11":  "src/fast_simus/kernels/simus_fused_v11.cu",
     "v15":  "src/fast_simus/kernels/simus_fused_v15.cu",
 }
