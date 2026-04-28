@@ -1,4 +1,4 @@
-"""Plot pytest-benchmark scaling results across machines and backends.
+
 
 Loads one or more ``pytest-benchmark --benchmark-autosave`` JSON files and
 produces a log-log PNG with runtime (s) vs n_scat and throughput
@@ -87,7 +87,6 @@ def _extract_backend(benchmark_name: str) -> str:
         (e.g. ``test_bench_simus_scaling[jax-1000]`` -> "jax").
       * Fall back to "unknown" if nothing matches.
     """
-    # Split off any [param] suffix before checking the function name.
     func_name = benchmark_name.split("[", 1)[0]
     if func_name.startswith("test_bench_pymust"):
         return "pymust"
@@ -162,23 +161,11 @@ _DATAFRAME_COLUMNS = [
 ]
 
 
-def build_dataframe(
-    paths: list[Path],
-    group: str,
-    *,
-    dedupe: bool = True,
-    commit_filter: str | None = None,
-) -> pd.DataFrame:
+def build_dataframe(paths: list[Path], group: str) -> pd.DataFrame:
     """Load all JSONs, filter to ``group``, return a tidy DataFrame.
 
-    Args:
-        paths: Expanded list of JSON files to parse.
-        group: pytest-benchmark group name to keep.
-        dedupe: If True (default), collapse duplicate (machine, backend, n_scat)
-            rows by keeping the latest ``datetime``. Set False to preserve every
-            row (e.g. for `--all-commits`).
-        commit_filter: If set, drop rows whose ``commit`` does not start with
-            this prefix.
+    Duplicate (machine, backend, n_scat) rows are collapsed to the newest row
+    by ``datetime`` so repeated benchmark runs just show the latest point.
     """
     rows: list[BenchmarkRow] = []
     for path in paths:
@@ -186,12 +173,7 @@ def build_dataframe(
     if not rows:
         return pd.DataFrame(columns=_DATAFRAME_COLUMNS)
     df = pd.DataFrame([r.__dict__ for r in rows])
-    if commit_filter:
-        df = df[df["commit"].str.startswith(commit_filter)]
-    if dedupe and not df.empty:
-        df = df.sort_values("datetime", kind="stable").drop_duplicates(
-            subset=["machine", "backend", "n_scat"], keep="last"
-        )
+    df = df.sort_values("datetime", kind="stable").drop_duplicates(subset=["machine", "backend", "n_scat"], keep="last")
     if df.empty:
         return pd.DataFrame(columns=_DATAFRAME_COLUMNS)
     df = df.copy()
@@ -209,10 +191,9 @@ def _compute_speedups(df: pd.DataFrame, reference_backend: str = _REFERENCE_BACK
     """Compute per-row speedup relative to the reference backend at the same ``n_scat``.
 
     The reference mean is the median of all reference-backend runtimes at each
-    ``n_scat`` (robust to multiple PyMUST samples across machines/commits).
-    Reference rows themselves are excluded from the output. Returns an empty
-    DataFrame if there are no reference-backend rows (e.g. a run that skipped
-    PyMUST), so callers can drop the speedup panel gracefully.
+    ``n_scat`` (robust to multiple PyMUST samples across machines). Reference
+    rows themselves are excluded from the output. Returns an empty DataFrame
+    when no reference rows are present, so callers can drop the speedup panel.
     """
     if df.empty or "backend" not in df.columns:
         return df.iloc[0:0].assign(speedup=pd.Series(dtype="float64"))
@@ -229,34 +210,7 @@ def _compute_speedups(df: pd.DataFrame, reference_backend: str = _REFERENCE_BACK
     return merged.drop(columns=["_ref_mean_s"]).reset_index(drop=True)
 
 
-def _unique_short_commits(df: pd.DataFrame) -> list[str]:
-    """Return the ordered set of short (7-char) commits actually present in ``df``."""
-    if df.empty or "commit" not in df.columns:
-        return []
-    seen: list[str] = []
-    for commit in df["commit"]:
-        if not isinstance(commit, str) or not commit:
-            continue
-        short = commit[:7]
-        if short not in seen:
-            seen.append(short)
-    return seen
-
-
-def _commit_summary(df: pd.DataFrame) -> str:
-    """Return a short title suffix describing the git commit(s) actually plotted."""
-    commits = _unique_short_commits(df)
-    if not commits:
-        return ""
-    if len(commits) == 1:
-        return f"@ {commits[0]}"
-    preview = ", ".join(commits[:3])
-    if len(commits) > 3:
-        preview += ", ..."
-    return f"@ {len(commits)} commits: {preview}"
-
-
-def render_plot(df: pd.DataFrame, output: Path, commit_summary: str = "") -> None:
+def render_plot(df: pd.DataFrame, output: Path) -> None:
     """Render the log-log figure and save to ``output`` as PNG.
 
     Two panels (Runtime, Throughput) are always shown; a third "Speedup vs
@@ -302,10 +256,7 @@ def render_plot(df: pd.DataFrame, output: Path, commit_summary: str = "") -> Non
         elif col_name == _SPEEDUP_METRIC:
             ax.set_ylabel("Speedup (x, vs PyMUST)")
             ax.axhline(1.0, color="black", linestyle="--", linewidth=1, alpha=0.5)
-    title = "SIMUS scaling: PyMUST vs FastSIMUS backends"
-    if commit_summary:
-        title += f" {commit_summary}"
-    g.figure.suptitle(title, y=1.02)
+    g.figure.suptitle("SIMUS scaling: PyMUST vs FastSIMUS backends", y=1.02)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     g.savefig(output, dpi=150, bbox_inches="tight")
@@ -336,22 +287,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=_DEFAULT_GROUP,
         help=f"pytest-benchmark group to plot (default: {_DEFAULT_GROUP!r}).",
     )
-    commit_group = parser.add_mutually_exclusive_group()
-    commit_group.add_argument(
-        "--commit",
-        default=None,
-        help="Only plot rows whose commit_info.id starts with this prefix (e.g. 'a3a98ed').",
-    )
-    commit_group.add_argument(
-        "--all-commits",
-        "--no-dedupe",
-        dest="all_commits",
-        action="store_true",
-        help=(
-            "Disable the default 'keep newest per (machine, backend, n_scat)' dedupe "
-            "and plot every row from every input JSON. Useful for surveying historical runs."
-        ),
-    )
     return parser.parse_args(argv)
 
 
@@ -365,44 +300,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: no such file: {p}", file=sys.stderr)
         return 2
 
-    raw_df = build_dataframe(paths, group=args.group, dedupe=False)
-    if raw_df.empty:
+    df = build_dataframe(paths, group=args.group)
+    if df.empty:
         print(
             f"error: no benchmarks in group {args.group!r} found across {len(paths)} JSON file(s).",
             file=sys.stderr,
         )
         return 2
 
-    df = build_dataframe(
-        paths,
-        group=args.group,
-        dedupe=not args.all_commits,
-        commit_filter=args.commit,
-    )
-    if df.empty:
-        if args.commit:
-            print(
-                f"error: no benchmarks in group {args.group!r} match --commit {args.commit!r} "
-                f"across {len(paths)} JSON file(s).",
-                file=sys.stderr,
-            )
-        else:
-            print(
-                f"error: no benchmarks in group {args.group!r} found across {len(paths)} JSON file(s).",
-                file=sys.stderr,
-            )
-        return 2
-
-    dropped = len(raw_df) - len(df)
-    commits = _unique_short_commits(df)
-    commits_str = ", ".join(commits) if commits else "none"
-    print(
-        f"Plotting {len(df)} row(s) from {len(paths)} JSON file(s)"
-        f" (dropped {dropped} stale/filtered row(s); commits: {commits_str}).",
-        file=sys.stderr,
-    )
-
-    render_plot(df, args.output, commit_summary=_commit_summary(df))
+    render_plot(df, args.output)
     print(
         f"Wrote {args.output} ({len(df)} rows across {df['backend'].nunique()} backend(s), "
         f"{df['machine'].nunique()} machine(s))"

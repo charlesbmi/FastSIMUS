@@ -9,14 +9,12 @@ Designed to track throughput regressions as kernel optimizations evolve.
 
 from __future__ import annotations
 
-import math
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 
 from fast_simus.simus import simus_precompute
-from fast_simus.transducer_params import TransducerParams
 from fast_simus.transducer_presets import P4_2v
 
 from ._bench_sync import sync_benchmark_array
@@ -24,6 +22,9 @@ from ._simus_bench_util import make_simus_compute
 
 if TYPE_CHECKING:
     from fast_simus.utils._array_api import Array, _ArrayNamespace
+
+
+_N_SCAT_SWEEP = (1_000, 10_000, 100_000, 1_000_000)
 
 
 def _make_random_scatterers(n_scat: int, xp: _ArrayNamespace, seed: int = 0) -> tuple[Array, Array]:
@@ -36,19 +37,6 @@ def _make_random_scatterers(n_scat: int, xp: _ArrayNamespace, seed: int = 0) -> 
     return scatterers, rc
 
 
-def _safe_transducer_dump(params: TransducerParams) -> dict[str, Any]:
-    """Dump TransducerParams fields for JSON.
-
-    Non-finite floats (e.g. ``radius=inf`` on non-convex probes) and ``None``
-    values are dropped to keep the ``extra_info`` payload strict-JSON safe.
-    """
-    return {
-        key: value
-        for key, value in params.model_dump().items()
-        if value is not None and not (isinstance(value, float) and not math.isfinite(value))
-    }
-
-
 @pytest.mark.scaling
 @pytest.mark.benchmark(
     group="simus_scaling",
@@ -58,12 +46,9 @@ def _safe_transducer_dump(params: TransducerParams) -> dict[str, Any]:
     warmup=True,
     warmup_iterations=1,
 )
+@pytest.mark.parametrize("n_scat", _N_SCAT_SWEEP)
 def test_bench_simus_scaling(benchmark, xp, n_scat):
-    """Scaling benchmark: simus_compute at configurable scatterer counts.
-
-    The ``n_scat`` parametrization is provided by ``conftest.pytest_generate_tests``
-    (default sweep 1K-1M, override with ``--n-scat=1000,3162,...``).
-    """
+    """Scaling benchmark: simus_compute at 1K-1M scatterers across backends."""
     params = P4_2v()
     scatterers, rc = _make_random_scatterers(n_scat, xp)
     delays = xp.zeros(params.n_elements)
@@ -79,7 +64,6 @@ def test_bench_simus_scaling(benchmark, xp, n_scat):
             "probe": "P4-2v",
             "n_scat": n_scat,
             "element_splitting": 1,
-            **_safe_transducer_dump(params),
         }
     )
 
