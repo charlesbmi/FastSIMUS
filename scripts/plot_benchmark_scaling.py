@@ -35,6 +35,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
@@ -310,8 +311,6 @@ def render_plot(df: pd.DataFrame, output: Path, commit_summary: str = "") -> Non
     output.parent.mkdir(parents=True, exist_ok=True)
     g.savefig(output, dpi=150, bbox_inches="tight")
     # matplotlib.Figure has no .close(); use plt.close on the figure instance.
-    import matplotlib.pyplot as plt
-
     plt.close(g.figure)
 
 
