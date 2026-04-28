@@ -1,6 +1,6 @@
 # FastSIMUS
 
-Array API-compliant ultrasound simulation library with NumPy/JAX/CuPy backends for 50-100x GPU acceleration.
+Array API-compliant ultrasound simulation library with NumPy/JAX/CuPy/MLX backends for 50-100x GPU acceleration. Custom Metal (MLX) and CUDA (CuPy + NVRTC) kernels accelerate the SIMUS frequency sweep on Apple Silicon and NVIDIA GPUs respectively.
 
 ## Code Organization
 
