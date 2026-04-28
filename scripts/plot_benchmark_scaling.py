@@ -309,7 +309,10 @@ def render_plot(df: pd.DataFrame, output: Path, commit_summary: str = "") -> Non
 
     output.parent.mkdir(parents=True, exist_ok=True)
     g.savefig(output, dpi=150, bbox_inches="tight")
-    g.figure.close()
+    # matplotlib.Figure has no .close(); use plt.close on the figure instance.
+    import matplotlib.pyplot as plt
+
+    plt.close(g.figure)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
