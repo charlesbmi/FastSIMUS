@@ -240,6 +240,17 @@ def is_mlx_namespace(xp: object) -> bool:
     return getattr(xp, "__name__", "").startswith("mlx")
 
 
+def is_cupy_namespace(xp: object) -> bool:
+    """Return True if xp is a CuPy namespace (raw cupy or array_api_compat wrapper).
+
+    array_api_compat wraps cupy as ``array_api_compat.cupy`` whose ``__name__``
+    contains ``cupy``; raw ``cupy`` matches the same predicate. Mirrors
+    ``is_mlx_namespace`` (CuPy *does* have an array_api_compat wrapper, but a
+    string check covers both raw and wrapped variants without an import).
+    """
+    return "cupy" in getattr(xp, "__name__", "")
+
+
 def array_namespace(
     *arrays: Any,
 ) -> _ArrayNamespace | _ArrayNamespaceWithLinAlg | _ArrayNamespaceWithFFT | _ArrayNamespaceWithLinAlgAndFFT:

@@ -34,7 +34,13 @@ from fast_simus.medium_params import MediumParams
 from fast_simus.spectrum import probe_spectrum as _probe_spectrum_fn
 from fast_simus.spectrum import pulse_spectrum as _pulse_spectrum_fn
 from fast_simus.transducer_params import TransducerParams
-from fast_simus.utils._array_api import Array, _ArrayNamespace, _ArrayNamespaceWithFFT, array_namespace
+from fast_simus.utils._array_api import (
+    Array,
+    _ArrayNamespace,
+    _ArrayNamespaceWithFFT,
+    array_namespace,
+    is_cupy_namespace,
+)
 from fast_simus.utils.geometry import element_positions
 
 _DEFAULT_MEDIUM = MediumParams()
@@ -105,11 +111,13 @@ class SimusStrategy(StrEnum):
         PYTHON: Python for-loop (NumPy/CuPy, constant memory).
         SCAN: JAX lax.scan for O(1) compilation cost.
         METAL: Custom Metal kernel on Apple Silicon (MLX).
+        CUDA: Custom CUDA kernel on NVIDIA GPUs (CuPy + NVRTC).
     """
 
     PYTHON = "python"
     SCAN = "scan"
     METAL = "metal"
+    CUDA = "cuda"
 
 
 class SimusResult(NamedTuple):
@@ -375,6 +383,9 @@ def _select_simus_strategy(xp: _ArrayNamespace, strategy: SimusStrategy | None) 
     except ImportError:
         pass
 
+    if is_cupy_namespace(xp):
+        return SimusStrategy.CUDA
+
     return SimusStrategy.PYTHON
 
 
@@ -450,6 +461,21 @@ def simus_compute(
                 medium=medium,
                 delays_clean=cast(mx.array, delays_clean),
                 tx_apodization=cast(mx.array, tx_apodization),
+            ),
+        )
+    elif selected == SimusStrategy.CUDA:
+        from fast_simus.kernels.cuda_simus import simus_cuda
+
+        spect_selected = cast(
+            Array,
+            simus_cuda(
+                scatterers=scatterers_flat,
+                rc=rc_flat,
+                params=params,
+                plan=plan,
+                medium=medium,
+                delays_clean=delays_clean,
+                tx_apodization=tx_apodization,
             ),
         )
     elif selected == SimusStrategy.SCAN:
