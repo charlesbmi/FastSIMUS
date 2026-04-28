@@ -433,17 +433,6 @@ def simus_compute(
     scatterers_flat = xp.reshape(scatterers, (n_scat, 2)) if scatterers.ndim > 2 else scatterers
     rc_flat = xp.reshape(rc, (n_scat,)) if rc.ndim > 1 else rc
 
-    sweep = _prepare_simus_sweep(
-        scatterers_flat,
-        delays_clean,
-        tx_apodization,
-        plan,
-        params,
-        medium,
-        full_frequency_directivity=full_frequency_directivity,
-        xp=xp,
-    )
-
     selected = _select_simus_strategy(xp, strategy)
 
     if selected == SimusStrategy.METAL:
@@ -478,14 +467,25 @@ def simus_compute(
                 tx_apodization=tx_apodization,
             ),
         )
-    elif selected == SimusStrategy.SCAN:
-        from fast_simus._simus_strategies import _simus_freq_outer_scan
-
-        spect_selected = _simus_freq_outer_scan(rc=rc_flat, xp=xp, **sweep)
     else:
-        from fast_simus._simus_strategies import _simus_freq_outer_python
+        sweep = _prepare_simus_sweep(
+            scatterers_flat,
+            delays_clean,
+            tx_apodization,
+            plan,
+            params,
+            medium,
+            full_frequency_directivity=full_frequency_directivity,
+            xp=xp,
+        )
+        if selected == SimusStrategy.SCAN:
+            from fast_simus._simus_strategies import _simus_freq_outer_scan
 
-        spect_selected = _simus_freq_outer_python(rc=rc_flat, xp=xp, **sweep)
+            spect_selected = _simus_freq_outer_scan(rc=rc_flat, xp=xp, **sweep)
+        else:
+            from fast_simus._simus_strategies import _simus_freq_outer_python
+
+            spect_selected = _simus_freq_outer_python(rc=rc_flat, xp=xp, **sweep)
 
     # Apply correction factor
     spect_selected = spect_selected * xp.asarray(plan.correction_factor)

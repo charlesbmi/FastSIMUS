@@ -1017,6 +1017,10 @@ ______________________________________________________________________
 
 Run the full scaling sweep on the 4090, join with existing Mac MLX + PyMUST JSONs, regenerate the plot, commit the PNG.
 
+> Follow-up note: the first CuPy scaling figure included dead `_prepare_simus_sweep()` work in `simus_compute()`. The
+> CUDA kernel itself was already near the exp22 target; a later fast-path dispatch refactor should move end-to-end
+> benchmark throughput from ~7 M scat/s to ~15-17 M scat/s.
+
 ### Changes Required
 
 #### 8.1 Run the sweep on the 4090

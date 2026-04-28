@@ -5,6 +5,7 @@ Array API abstraction: ``cupy.RawModule`` NVRTC compile path, kernel
 cache behavior, and CUDA device placement.
 """
 
+from importlib import import_module
 from typing import cast
 
 import numpy as np
@@ -16,6 +17,8 @@ from fast_simus.kernels.cuda_simus import _DEFAULT_SHMEM_CAP_BYTES, _get_kernel,
 from fast_simus.simus import SimusStrategy, simus
 from fast_simus.transducer_presets import L11_5v, P4_2v
 from fast_simus.utils._array_api import Array
+
+simus_mod = import_module("fast_simus.simus")
 
 
 def test_kernel_cache_hits_on_repeat_call():
@@ -52,6 +55,38 @@ def test_simus_cuda_output_is_cupy():
 
     assert isinstance(result.rf, cp.ndarray)
     assert isinstance(result.spectrum, cp.ndarray)
+    assert result.rf.shape[1] == params.n_elements
+    assert bool(cp.all(cp.isfinite(result.rf)))
+
+
+def test_simus_cuda_does_not_prepare_python_sweep(monkeypatch):
+    """CUDA dispatch must skip _prepare_simus_sweep; v25c prepares flat inputs itself."""
+    params = P4_2v()
+    n_scat = 9
+    scat_np = np.stack([np.zeros(n_scat), np.linspace(1e-2, 5e-2, n_scat)], axis=-1).astype(np.float32)
+    rc_np = np.ones(n_scat, dtype=np.float32)
+    delays_np = np.zeros(params.n_elements, dtype=np.float32)
+
+    scatterers = cp.asarray(scat_np)
+    rc = cp.asarray(rc_np)
+    delays = cp.asarray(delays_np)
+    plan = simus_mod.simus_precompute(scatterers, rc, delays, params)
+
+    def fail_prepare_sweep(*args, **kwargs):
+        raise AssertionError("CUDA dispatch should not build _prepare_simus_sweep")
+
+    monkeypatch.setattr(simus_mod, "_prepare_simus_sweep", fail_prepare_sweep)
+
+    result = simus_mod.simus_compute(
+        scatterers,
+        rc,
+        delays,
+        plan,
+        params,
+        strategy=SimusStrategy.CUDA,
+    )
+
+    assert isinstance(result.rf, cp.ndarray)
     assert result.rf.shape[1] == params.n_elements
     assert bool(cp.all(cp.isfinite(result.rf)))
 
