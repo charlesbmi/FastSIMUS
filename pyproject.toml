@@ -167,6 +167,11 @@ sequence = [
     { ref = "benchmark-plot" },
 ]
 
+[tool.poe.tasks.profile-cuda]
+help = "Profile a CUDA simus benchmark under Nsight Compute. Pass -k <expr> -o <out>."
+shell = "sudo $(which python) scripts/ncu_pytest.py $@"
+executor = { group = "bench" }
+
 [tool.poe.tasks.build]
 help = "Build wheel file"
 sequence = [
