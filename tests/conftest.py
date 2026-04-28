@@ -34,6 +34,13 @@ with contextlib.suppress(ImportError):
     ensure_compat(mx)
     HAS_MLX = True
 
+HAS_CUPY = False
+cp = None
+with contextlib.suppress(ImportError):
+    import cupy as cp
+
+    HAS_CUPY = True
+
 
 @pytest.fixture(
     params=[
@@ -50,12 +57,17 @@ with contextlib.suppress(ImportError):
             id="mlx",
             marks=pytest.mark.skipif(not HAS_MLX, reason="MLX not available"),
         ),
+        pytest.param(
+            cp,
+            id="cupy",
+            marks=pytest.mark.skipif(not HAS_CUPY, reason="CuPy not available"),
+        ),
     ]
 )
 def xp(request) -> _ArrayNamespace:
     """Fixture providing different array API backends.
 
-    Parametrizes tests to run with NumPy, JAX, and MLX.
+    Parametrizes tests to run with NumPy, JAX, MLX, and CuPy.
     Does not include array-api-strict, which can be used in place of a parametrized backend
     for Array API compliance testing.
     """
@@ -81,6 +93,7 @@ def strategy(request) -> PfieldStrategy | None:
         pytest.param(SimusStrategy.PYTHON, id="python"),
         pytest.param(SimusStrategy.SCAN, id="scan"),
         pytest.param(SimusStrategy.METAL, id="metal"),
+        pytest.param(SimusStrategy.CUDA, id="cuda"),
     ]
 )
 def simus_strategy(request) -> SimusStrategy | None:

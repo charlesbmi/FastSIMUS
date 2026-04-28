@@ -147,7 +147,13 @@ def _preset_for_probe(probe: str):
 def _assert_valid_pfield_output(rp, expected_shape: tuple[int, ...], *, expect_zero: bool = False) -> None:
     """Assert pfield output has correct shape and valid values."""
     assert rp.shape == expected_shape
-    rp_np = np.asarray(rp)
+    # CuPy refuses implicit np.asarray; route through cp.asnumpy when needed.
+    if type(rp).__module__.startswith("cupy"):
+        import cupy as cp_
+
+        rp_np = cp_.asnumpy(rp)
+    else:
+        rp_np = np.asarray(rp)
     assert np.all(rp_np >= 0)
     if expect_zero:
         assert np.max(rp_np) < 1e-10

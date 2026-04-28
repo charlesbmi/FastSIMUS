@@ -47,10 +47,12 @@ _GRID_BLOCKS = 256  # 2 * 128 SMs on RTX 4090
 # so we don't pin it here. Tuning constants (B_SCAT, ELEM_TILE, TG_SIZE)
 # are still hardwired for sm_89 and may need adjustment for sm_80 / sm_90.
 
-# Default 48 KB CUDA dynamic-shmem cap. We assert against this so a future
-# probe that pushes shmem over the cap fails fast instead of silently
-# truncating the kernel launch.
+# Default static dynamic-shmem cap (48 KB) is below what some probes
+# need (e.g. L11-5v with n_sub=2 hits ~64 KB). We raise the per-kernel
+# cap via cuFuncSetAttribute when required. Modern GPUs (sm_75+) support
+# up to ~96-100 KB dynamic shared memory per block.
 _DEFAULT_SHMEM_CAP_BYTES = 48 * 1024
+_MAX_DYNAMIC_SHMEM_BYTES = 96 * 1024
 
 _source_cache: dict[str, str] = {}
 _kernel_cache: dict[tuple[int, int, int], Any] = {}
@@ -170,10 +172,33 @@ def _prepare_inputs(
     # 1e31 so the kernel's `radius * radius` stays finite in fp32.
     radius_v = params.radius if params.radius != inf else 1e31
 
+    # Pad scatterers to a multiple of B_SCAT. The kernel processes
+    # B_SCAT scatterers per block and, when actual_b < B_SCAT, leaves
+    # shmem GEO_* slots for si in [actual_b, B_SCAT) uninitialized.
+    # Phase 3's cmul(cv=0, garbage) then produces NaN if the garbage is
+    # NaN. Padding with valid positions and rc=0 makes Phase 1 populate
+    # all si slots while contributing zero to the spectrum (rc=0 zeros
+    # tk in Phase 2, and the GEO progression stays finite).
+    n_scat = int(scatterers.shape[0])
+    n_scat_padded = ((n_scat + _B_SCAT - 1) // _B_SCAT) * _B_SCAT
+    if n_scat_padded > n_scat:
+        pad = n_scat_padded - n_scat
+        scat_x = cp.concatenate(
+            [scatterers[:, 0].astype(cp.float32), cp.repeat(scatterers[:1, 0].astype(cp.float32), pad)],
+        )
+        scat_z = cp.concatenate(
+            [scatterers[:, 1].astype(cp.float32), cp.repeat(scatterers[:1, 1].astype(cp.float32), pad)],
+        )
+        rc_padded = cp.concatenate([rc.astype(cp.float32), cp.zeros(pad, dtype=cp.float32)])
+    else:
+        scat_x = scatterers[:, 0].astype(cp.float32)
+        scat_z = scatterers[:, 1].astype(cp.float32)
+        rc_padded = rc.astype(cp.float32)
+
     return {
-        "scat_x": cp.ascontiguousarray(scatterers[:, 0].astype(cp.float32)),
-        "scat_z": cp.ascontiguousarray(scatterers[:, 1].astype(cp.float32)),
-        "rc": cp.ascontiguousarray(rc.astype(cp.float32)),
+        "scat_x": cp.ascontiguousarray(scat_x),
+        "scat_z": cp.ascontiguousarray(scat_z),
+        "rc": cp.ascontiguousarray(rc_padded),
         "elem_x": cp.ascontiguousarray(elem_pos[:, 0].astype(cp.float32)),
         "elem_z": cp.ascontiguousarray(elem_pos[:, 1].astype(cp.float32)),
         "cos_te": cos_te,
@@ -186,7 +211,7 @@ def _prepare_inputs(
         "pp_re": pp_re,
         "pp_im": pp_im,
         "probe_real": probe_real,
-        "n_scat": int(scatterers.shape[0]),
+        "n_scat": n_scat_padded,
         "kw_init": 2 * pi * freq_start / c,
         "alpha_init": alpha / NEPER_TO_DB * freq_start / 1e6 * 1e2,
         "kw_step": 2 * pi * freq_step / c,
@@ -233,16 +258,19 @@ def simus_cuda(
     n_elem, n_sub, n_freq = d["n_elem"], d["n_sub"], d["n_freq"]
 
     shmem = _shmem_bytes(n_elem, n_sub)
-    if shmem > _DEFAULT_SHMEM_CAP_BYTES:
-        # Cross this bridge when an autotune probe pushes us over -- would
-        # need cuFuncSetAttribute(MAX_DYNAMIC_SHARED_SIZE_BYTES) here.
+    if shmem > _MAX_DYNAMIC_SHMEM_BYTES:
         msg = (
-            f"v25c shmem {shmem} B exceeds default {_DEFAULT_SHMEM_CAP_BYTES} B cap "
-            f"for (n_elem={n_elem}, n_sub={n_sub}); raise the cap explicitly."
+            f"v25c shmem {shmem} B exceeds the {_MAX_DYNAMIC_SHMEM_BYTES} B "
+            f"per-block cap for (n_elem={n_elem}, n_sub={n_sub}); needs a "
+            f"smaller B_SCAT or a different probe."
         )
         raise RuntimeError(msg)
 
     kernel = _get_kernel(n_elem, n_sub, n_freq)
+    # Raise per-kernel dynamic-shmem cap when we exceed the 48 KB default.
+    # No-op when shmem fits under _DEFAULT_SHMEM_CAP_BYTES.
+    if shmem > _DEFAULT_SHMEM_CAP_BYTES:
+        kernel.max_dynamic_shared_size_bytes = shmem
 
     # Output buffers; kernel uses atomicAdd into spect_re[elem*N_FREQ + f].
     spect_re = cp.zeros(n_elem * n_freq, dtype=cp.float32)
