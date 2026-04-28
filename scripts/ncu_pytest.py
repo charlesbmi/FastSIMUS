@@ -23,6 +23,39 @@ import sys
 NCU_DEFAULT = "/usr/local/cuda/bin/ncu"
 
 
+def _build_ncu_command(args: argparse.Namespace, *, python_executable: str) -> list[str]:
+    """Build an Nsight Compute command for profiling a pytest benchmark."""
+    return [
+        args.ncu,
+        "--target-processes",
+        "all",
+        "--launch-skip",
+        str(args.launch_skip),
+        "--launch-count",
+        str(args.launch_count),
+        "--set",
+        args.set,
+        "--kernel-name",
+        f"regex:{args.kernel_regex}",
+        "--force-overwrite",
+        "--export",
+        args.output,
+        python_executable,
+        "-m",
+        "pytest",
+        args.bench_path,
+        "--benchmark-only",
+        "-p",
+        "no:xdist",
+        "-k",
+        args.k,
+        # Keep pytest-benchmark from rerunning the timing loop -- NCU
+        # profiling already takes 30+ seconds per launch.
+        "--benchmark-min-rounds=1",
+        "--benchmark-min-time=0",
+    ]
+
+
 def main() -> int:
     """Argparse + subprocess driver. Returns NCU's exit code."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -52,7 +85,7 @@ def main() -> int:
     parser.add_argument(
         "--kernel-regex",
         default="simus_fused_kernel",
-        help="ncu --kernel-id ::regex:<this>. Default: simus_fused_kernel.",
+        help="ncu --kernel-name regex:<this>. Default: simus_fused_kernel.",
     )
     parser.add_argument(
         "--ncu",
@@ -71,36 +104,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    cmd = [
-        args.ncu,
-        "--target-processes",
-        "all",
-        "--launch-skip",
-        str(args.launch_skip),
-        "--launch-count",
-        str(args.launch_count),
-        "--set",
-        args.set,
-        "--kernel-id",
-        f"::regex:{args.kernel_regex}",
-        "-f",
-        "-o",
-        args.output,
-        "--",
-        sys.executable,
-        "-m",
-        "pytest",
-        args.bench_path,
-        "--benchmark-only",
-        "-p",
-        "no:xdist",
-        "-k",
-        args.k,
-        # Keep pytest-benchmark from rerunning the timing loop -- NCU
-        # profiling already takes 30+ seconds per launch.
-        "--benchmark-min-rounds=1",
-        "--benchmark-min-time=0",
-    ]
+    cmd = _build_ncu_command(args, python_executable=sys.executable)
     print("Running:", " ".join(cmd), flush=True)
     return subprocess.call(cmd)  # noqa: S603 - args are constructed from argparse, not user shell input
 

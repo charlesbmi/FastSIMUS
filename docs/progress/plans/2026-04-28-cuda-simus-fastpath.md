@@ -473,8 +473,7 @@ Observed 2026-04-28: targeted run wrote
 100K measured 8.4616 ms = 11.82 M scat/s, below the 13.9 M scat/s gate. 1M measured 60.1277 ms = 16.63 M scat/s, above
 the 14.9 M scat/s gate. A 100K-only rerun measured 8.4823 ms = 11.79 M scat/s, confirming the 100K miss. User guidance:
 prioritize the 1M scale because it is the larger time sink; do not block Phase 3 on the 100K miss unless an easy cleanup
-falls out naturally.
-Full CuPy sweep wrote
+falls out naturally. Full CuPy sweep wrote
 `.benchmarks/Linux-CPython-3.12-64bit/0005_74696bdbaff2cfaefc4c857a1f5c951b57ce18ed_20260428_212045_uncommited-changes.json`.
 The regenerated figure used that JSON plus the PyMUST CPU baseline
 `.benchmarks/Linux-CPython-3.12-64bit/0002_60a71e35b185e0eb00ed75ce6f27a9ec7362dd9b_20260428_195358.json`.
@@ -507,9 +506,10 @@ register pressure, or the known local-memory spill path.
 
 ```bash
 sudo $(which python) scripts/ncu_pytest.py \
-  -k "test_bench_simus_scaling and 100000 and cupy" \
+  -k "cupy and 100000 and not 1000000" \
   -o /tmp/4090_fastpath_100k.ncu-rep \
-  --launch-skip 5 --launch-count 1
+  --launch-skip 5 --launch-count 1 \
+  --bench-path tests/benchmarks/bench_simus_scaling.py
 ```
 
 **Record these metrics in a new experiment doc.**
@@ -602,8 +602,8 @@ Implementation sketch:
 
 #### Automated Verification
 
-- [ ] NCU command produces a `.ncu-rep` file.
-- [ ] Experiment doc contains concrete measured values from pytest-benchmark and NCU before commit.
+- [x] NCU command produces a `.ncu-rep` file.
+- [x] Experiment doc contains concrete measured values from pytest-benchmark and NCU before commit.
 - [ ] Any kernel variant passes CUDA backend tests:
   `uv run pytest tests/backend/test_cupy.py -q -p no:xdist -p no:testmon`
 - [ ] Any public dispatch changes pass full suite:
@@ -612,8 +612,8 @@ Implementation sketch:
 
 #### Manual Verification
 
-- [ ] Compare NCU metrics to exp22 (`Compute (SM)`, `L2`, occupancy, local memory/thread).
-- [ ] Decide whether the next bottleneck is wrapper overhead or kernel execution based on NCU, not intuition.
+- [x] Compare NCU metrics to exp22 (`Compute (SM)`, `L2`, occupancy, local memory/thread).
+- [x] Decide whether the next bottleneck is wrapper overhead or kernel execution based on NCU, not intuition.
 - [ ] If a 20 M/s experiment is committed, record before/after rows in the experiment doc.
 
 ______________________________________________________________________
