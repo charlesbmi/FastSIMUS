@@ -51,6 +51,32 @@ registers/thread, and the local load/store counters plus NCU warnings show ineff
 L2 throughput are close to the exp22 v25c profile, so the fast-path dispatch refactor did not change the underlying
 kernel limiter.
 
-The next experiment should be **Experiment C: Kernel tuning from exp22 follow-up**, focused on reducing register
-pressure and local-memory traffic. Wrapper prep is a visible 100K fixed cost, but the user's priority is the 1M scale,
-where the kernel dominates the time sink.
+The next experiment should be **Experiment C: Kernel tuning from exp22 follow-up**, focused on reducing register pressure
+and local-memory traffic. Wrapper prep is a visible 100K fixed cost, but the user's priority is the 1M scale, where the
+kernel dominates the time sink.
+
+## Constant Sweep
+
+Before changing the CUDA source structure, run a narrow compile-time constant sweep around the shipped config. This uses
+the same `simus_compute()` inputs and measures five synchronized runs per config at 1M scatterers:
+
+| Config               | Mean Runtime | Throughput    |
+| -------------------- | -----------: | ------------: |
+| `B_SCAT=8, ET=2`     |    60.472 ms | 16.54 M/s     |
+| `B_SCAT=9, ET=2`     |    59.641 ms | 16.77 M/s     |
+| `B_SCAT=10, ET=2`    |    58.905 ms | **16.98 M/s** |
+| `B_SCAT=7, ET=3`     |    63.546 ms | 15.74 M/s     |
+| `B_SCAT=7, ET=4`     |    62.352 ms | 16.04 M/s     |
+
+Select `B_SCAT=10, ELEM_TILE=2` as a small 1M-focused tuning win. This does not address the fundamental register/local
+memory limiter; it is a narrow constant adjustment before larger half2/fp16 `cv` work.
+
+Pytest-benchmark verification after applying `B_SCAT=10, ELEM_TILE=2` wrote
+`.benchmarks/Linux-CPython-3.12-64bit/0006_329560fd18e690bc806f269e7cb0dca1f76a85a6_20260428_234933_uncommited-changes.json`:
+
+| `n_scat` | Mean Runtime | Throughput |
+| -------: | -----------: | ---------: |
+|     1000 |    3.1835 ms |  0.31 M/s  |
+|    10000 |    3.1910 ms |  3.13 M/s  |
+|   100000 |    8.1315 ms | 12.30 M/s  |
+|  1000000 |   59.6752 ms | 16.76 M/s  |

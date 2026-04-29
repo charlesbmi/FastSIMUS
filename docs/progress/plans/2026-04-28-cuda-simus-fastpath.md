@@ -191,8 +191,8 @@ def test_simus_cuda_does_not_prepare_python_sweep(monkeypatch):
     assert bool(cp.all(cp.isfinite(result.rf)))
 ```
 
-**Why `n_scat = 9`:** It is exactly one `B_SCAT` batch, so the test focuses on dispatch ordering and avoids exercising
-the padding path in `cuda_simus._prepare_inputs`.
+**Why `n_scat` follows `cuda_simus._B_SCAT`:** It is exactly one scatterer batch, so the test focuses on dispatch ordering
+and avoids exercising the padding path in `cuda_simus._prepare_inputs`.
 
 #### 2. Python Strategy Still Uses Sweep
 
@@ -477,6 +477,9 @@ falls out naturally. Full CuPy sweep wrote
 `.benchmarks/Linux-CPython-3.12-64bit/0005_74696bdbaff2cfaefc4c857a1f5c951b57ce18ed_20260428_212045_uncommited-changes.json`.
 The regenerated figure used that JSON plus the PyMUST CPU baseline
 `.benchmarks/Linux-CPython-3.12-64bit/0002_60a71e35b185e0eb00ed75ce6f27a9ec7362dd9b_20260428_195358.json`.
+After the Phase 4 `B_SCAT=10` constant adjustment, the refreshed CuPy sweep wrote
+`.benchmarks/Linux-CPython-3.12-64bit/0006_329560fd18e690bc806f269e7cb0dca1f76a85a6_20260428_234933_uncommited-changes.json`.
+The 100K row improved to 8.1315 ms = 12.30 M scat/s, and the 1M row improved to 59.6752 ms = 16.76 M scat/s.
 
 #### Manual Verification
 
@@ -604,11 +607,11 @@ Implementation sketch:
 
 - [x] NCU command produces a `.ncu-rep` file.
 - [x] Experiment doc contains concrete measured values from pytest-benchmark and NCU before commit.
-- [ ] Any kernel variant passes CUDA backend tests:
+- [x] Any kernel variant passes CUDA backend tests:
   `uv run pytest tests/backend/test_cupy.py -q -p no:xdist -p no:testmon`
 - [ ] Any public dispatch changes pass full suite:
   `uv run pytest tests/ --ignore=tests/benchmarks -n 4 -p no:testmon -p no:benchmark`
-- [ ] Any benchmark improvement is measured with pytest-benchmark JSON, not hand timing.
+- [x] Any benchmark improvement is measured with pytest-benchmark JSON, not hand timing.
 
 #### Manual Verification
 

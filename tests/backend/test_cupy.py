@@ -13,7 +13,7 @@ import pytest
 
 cp = pytest.importorskip("cupy")
 
-from fast_simus.kernels.cuda_simus import _DEFAULT_SHMEM_CAP_BYTES, _get_kernel, _kernel_cache, _shmem_bytes
+from fast_simus.kernels.cuda_simus import _B_SCAT, _DEFAULT_SHMEM_CAP_BYTES, _get_kernel, _kernel_cache, _shmem_bytes
 from fast_simus.simus import SimusStrategy, simus
 from fast_simus.transducer_presets import L11_5v, P4_2v
 from fast_simus.utils._array_api import Array
@@ -62,7 +62,7 @@ def test_simus_cuda_output_is_cupy():
 def test_simus_cuda_does_not_prepare_python_sweep(monkeypatch):
     """CUDA dispatch must skip _prepare_simus_sweep; v25c prepares flat inputs itself."""
     params = P4_2v()
-    n_scat = 9
+    n_scat = _B_SCAT
     scat_np = np.stack([np.zeros(n_scat), np.linspace(1e-2, 5e-2, n_scat)], axis=-1).astype(np.float32)
     rc_np = np.ones(n_scat, dtype=np.float32)
     delays_np = np.zeros(params.n_elements, dtype=np.float32)

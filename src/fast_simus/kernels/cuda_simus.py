@@ -2,7 +2,7 @@
 
 Compiles the v25c register-resident TX kernel via NVRTC at runtime
 (``cupy.RawModule``) -- no nanobind, no setuptools build step. Pinned to
-``(B_SCAT=9, ELEM_TILE=2)`` for RTX 4090 / sm_89 / P4-2v; performance may
+``(B_SCAT=10, ELEM_TILE=2)`` for RTX 4090 / sm_89 / P4-2v; performance may
 regress on other probes / GPUs (see exp22 + the FastSIMUS-cuda-tune
 follow-up).
 
@@ -37,7 +37,7 @@ _SOURCE_NAME = "simus_fused.cu"
 
 # Pinned tuning -- see docs/progress/experiments/exp22-svshmem-et2.md.
 # These constants are RTX 4090 / sm_89 / P4-2v optimal; not autotuned.
-_B_SCAT = 9
+_B_SCAT = 10
 _ELEM_TILE = 2
 _TG_SIZE = 128
 _TILE_SE = 16
