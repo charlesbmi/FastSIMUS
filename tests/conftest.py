@@ -1,6 +1,7 @@
 """Pytest configuration for FastSIMUS tests."""
 
 import contextlib
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -8,6 +9,40 @@ import pytest
 from fast_simus.pfield import PfieldStrategy
 from fast_simus.simus import SimusStrategy
 from fast_simus.utils._array_api import _ArrayNamespace
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register FastSIMUS test-specific command-line options."""
+    parser.addoption(
+        "--plot-picmus-phantom",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="Write optional reconstructed PICMUS phantom diagnostic figure to PATH.",
+    )
+    parser.addoption(
+        "--picmus-phantom-angles",
+        action="store",
+        choices=("broadside", "full"),
+        default="broadside",
+        help="Choose broadside or full 75-angle sequence for optional PICMUS phantom plots.",
+    )
+
+
+@pytest.fixture
+def picmus_phantom_plot(request: pytest.FixtureRequest) -> Path | None:
+    """Return the optional PICMUS phantom diagnostic plot output path."""
+    figure_path = request.config.getoption("--plot-picmus-phantom")
+    if figure_path is None:
+        return None
+    return Path(figure_path)
+
+
+@pytest.fixture
+def picmus_phantom_angles(request: pytest.FixtureRequest) -> str:
+    """Return the PICMUS phantom angle mode for optional diagnostic plots."""
+    return cast("str", request.config.getoption("--picmus-phantom-angles"))
+
 
 # Try to import array backends
 
@@ -81,7 +116,7 @@ def xp(request) -> _ArrayNamespace:
     Does not include array-api-strict, which can be used in place of a parametrized backend
     for Array API compliance testing.
     """
-    return cast(_ArrayNamespace, request.param)
+    return cast("_ArrayNamespace", request.param)
 
 
 @pytest.fixture(
@@ -90,7 +125,7 @@ def xp(request) -> _ArrayNamespace:
         pytest.param(PfieldStrategy.VECTORIZED, id="vectorized"),
         pytest.param(PfieldStrategy.SCAN, id="scan"),
         pytest.param(PfieldStrategy.METAL, id="metal"),
-    ]
+    ],
 )
 def strategy(request) -> PfieldStrategy | None:
     """Fixture providing different pfield strategies."""
