@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
@@ -36,6 +37,7 @@ BANDWIDTH_PERCENT = 67.0
 BANDWIDTH_FRACTION = BANDWIDTH_PERCENT / 100.0
 TX_N_WAVELENGTHS = 2.5
 SPEED_OF_SOUND_M_S = 1540.0
+PICMUS_WAVELENGTH_M = SPEED_OF_SOUND_M_S / FREQ_CENTER_HZ
 # Attenuation is not stored in the PICMUS HDF5 files; the prototype uses 0.5 dB/cm/MHz.
 ATTENUATION_DB_CM_MHZ = 0.5
 SAMPLING_FREQUENCY_HZ = 4.001 * FREQ_CENTER_HZ
@@ -92,22 +94,30 @@ PICMUS_PHANTOM_Z_M = 1e-3 * np.array(
 PICMUS_FULL_ANGLES_RAD = np.deg2rad(np.linspace(-16.0, 16.0, 75))
 PICMUS_BROADSIDE_ANGLES_RAD = PICMUS_FULL_ANGLES_RAD[36:39].copy()
 PICMUS_APERTURE_X_M = 19.05000114440918e-3
+IMAGE_X_MIN_M = -PICMUS_APERTURE_X_M
+IMAGE_X_MAX_M = PICMUS_APERTURE_X_M
+IMAGE_Z_MIN_M = 5.0e-3
+IMAGE_Z_MAX_M = 50.0e-3
 
 CPWC_ANGLES_RAD = PICMUS_BROADSIDE_ANGLES_RAD.copy()
 PHANTOM_X_M = PICMUS_PHANTOM_X_M.copy()
 PHANTOM_Z_M = PICMUS_PHANTOM_Z_M.copy()
 PHANTOM_RC = np.ones(PHANTOM_X_M.shape, dtype=np.float64)
 
-IMAGE_X_M = np.linspace(-PICMUS_APERTURE_X_M, PICMUS_APERTURE_X_M, 96)
-IMAGE_Z_M = np.linspace(5.0e-3, 50.0e-3, 128)
+IMAGE_X_M = np.linspace(IMAGE_X_MIN_M, IMAGE_X_MAX_M, 96)
+IMAGE_Z_M = np.linspace(IMAGE_Z_MIN_M, IMAGE_Z_MAX_M, 128)
 IQ_ATOL_PEAK = 5e-2
 DYNAMIC_RANGE_DB = 60.0
+PICMUS_GRID_WARN_PIXELS = 1_000_000
+PICMUS_RECONSTRUCTION_WARN_PIXEL_FIRINGS = 5_000_000
 PROPOSED_LABEL = "Proposed"
 REFERENCE_LABEL = "PyMUST"
 RESIDUAL_LABEL = f"|{PROPOSED_LABEL} - {REFERENCE_LABEL}|"
+# 12 in x 360 dpi gives a 4320 px-wide three-panel PNG, close to a 4k export target.
 PICMUS_PLOT_FIGSIZE_IN = (12.0, 4.0)
 PICMUS_PLOT_MIN_WIDTH_PX = 4096
 PICMUS_PLOT_DPI = 360
+PICMUS_PLOT_INTERPOLATION = "nearest"
 # array_api_strict exercises the FastSIMUS simulation path; PyMUST reconstruction is NumPy-only.
 XP_STRICT = cast("_ArrayNamespace", array_api_strict)
 
@@ -171,6 +181,62 @@ def _angles_for_plot_mode(angle_mode: str) -> np.ndarray:
     if angle_mode == "full":
         return PICMUS_FULL_ANGLES_RAD.copy()
     raise ValueError(f"Unknown PICMUS phantom angle mode: {angle_mode}")
+
+
+def _image_axes_for_grid_wavelengths(grid_wavelengths: float | None) -> tuple[np.ndarray, np.ndarray]:
+    """Return image axes for either the fast test grid or a wavelength-spaced plot grid."""
+    if grid_wavelengths is None:
+        return IMAGE_X_M.copy(), IMAGE_Z_M.copy()
+
+    n_x, n_z = _image_axis_sizes_for_grid_wavelengths(grid_wavelengths)
+    n_pixels = n_x * n_z
+    if n_pixels > PICMUS_GRID_WARN_PIXELS:
+        warnings.warn(
+            f"PICMUS phantom grid spacing {grid_wavelengths:g} wavelengths produces "
+            f"{n_x}x{n_z} = {n_pixels} pixels; reconstruction will be slow",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return (
+        np.linspace(IMAGE_X_MIN_M, IMAGE_X_MAX_M, n_x),
+        np.linspace(IMAGE_Z_MIN_M, IMAGE_Z_MAX_M, n_z),
+    )
+
+
+def _image_axis_sizes_for_grid_wavelengths(grid_wavelengths: float | None) -> tuple[int, int]:
+    """Return image-axis lengths for a plot grid spacing."""
+    if grid_wavelengths is None:
+        return IMAGE_X_M.size, IMAGE_Z_M.size
+    if not np.isfinite(grid_wavelengths) or grid_wavelengths <= 0.0:
+        raise ValueError("grid spacing must be finite and positive")
+
+    spacing_m = grid_wavelengths * PICMUS_WAVELENGTH_M
+    n_x = int(np.ceil((IMAGE_X_MAX_M - IMAGE_X_MIN_M) / spacing_m)) + 1
+    n_z = int(np.ceil((IMAGE_Z_MAX_M - IMAGE_Z_MIN_M) / spacing_m)) + 1
+    return n_x, n_z
+
+
+def _expects_large_reconstruction_warning(
+    *,
+    grid_wavelengths: float | None,
+    n_firings: int,
+) -> bool:
+    """Return whether a requested diagnostic reconstruction is expected to warn."""
+    n_x, n_z = _image_axis_sizes_for_grid_wavelengths(grid_wavelengths)
+    n_pixels = n_x * n_z
+    return n_pixels > PICMUS_GRID_WARN_PIXELS or n_pixels * n_firings > PICMUS_RECONSTRUCTION_WARN_PIXEL_FIRINGS
+
+
+def _warn_if_reconstruction_is_large(*, n_pixels: int, n_firings: int) -> None:
+    """Warn when a diagnostic DAS reconstruction is expected to be slow."""
+    pixel_firings = n_pixels * n_firings
+    if pixel_firings > PICMUS_RECONSTRUCTION_WARN_PIXEL_FIRINGS:
+        warnings.warn(
+            f"PICMUS phantom DAS reconstruction will be slow: {n_pixels} pixels x "
+            f"{n_firings} firings = {pixel_firings} pixel-firings",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
 
 def _make_picmus_resolution_phantom() -> Phantom:
@@ -344,12 +410,20 @@ def _simulate_rf_stacks_for_angles(angles_key: tuple[float, ...]) -> RfStacks:
     return result
 
 
-def _reconstruct_iq(stacks: RfStacks) -> ReconstructedIq:
+def _reconstruct_iq(
+    stacks: RfStacks,
+    *,
+    x_axis_m: np.ndarray | None = None,
+    z_axis_m: np.ndarray | None = None,
+) -> ReconstructedIq:
     """Reconstruct FastSIMUS and PyMUST RF stacks through the same PyMUST DAS matrices."""
     params = _make_matched_simulator_params()
     param_for_das = copy.copy(params.pymust_param)
     pymust_delays = _pymust_plane_wave_delays(params.pymust_param, stacks.angles_rad)
-    x_grid, z_grid = np.meshgrid(IMAGE_X_M, IMAGE_Z_M)
+    x_axis = IMAGE_X_M if x_axis_m is None else x_axis_m
+    z_axis = IMAGE_Z_M if z_axis_m is None else z_axis_m
+    x_grid, z_grid = np.meshgrid(x_axis, z_axis)
+    _warn_if_reconstruction_is_large(n_pixels=x_grid.size, n_firings=stacks.angles_rad.size)
     fastsimus_image = np.zeros(x_grid.shape, dtype=np.complex128)
     pymust_image = np.zeros(x_grid.shape, dtype=np.complex128)
 
@@ -388,13 +462,17 @@ def _reconstruct_iq(stacks: RfStacks) -> ReconstructedIq:
 @lru_cache(maxsize=1)
 def _reconstruct_picmus_iq() -> ReconstructedIq:
     """Reconstruct the cached PICMUS phantom RF stacks once per test session."""
-    return _reconstruct_picmus_iq_for_angles(_angle_cache_key(CPWC_ANGLES_RAD))
+    return _reconstruct_picmus_iq_for_grid(_angle_cache_key(CPWC_ANGLES_RAD), None)
 
 
-@lru_cache(maxsize=2)
-def _reconstruct_picmus_iq_for_angles(angles_key: tuple[float, ...]) -> ReconstructedIq:
-    """Reconstruct the PICMUS phantom for a requested angle sequence."""
-    return _reconstruct_iq(_simulate_rf_stacks_for_angles(angles_key))
+@lru_cache(maxsize=4)
+def _reconstruct_picmus_iq_for_grid(
+    angles_key: tuple[float, ...],
+    grid_wavelengths: float | None,
+) -> ReconstructedIq:
+    """Reconstruct the PICMUS phantom for requested angles and image-grid spacing."""
+    x_axis_m, z_axis_m = _image_axes_for_grid_wavelengths(grid_wavelengths)
+    return _reconstruct_iq(_simulate_rf_stacks_for_angles(angles_key), x_axis_m=x_axis_m, z_axis_m=z_axis_m)
 
 
 def _assert_iq_close(actual: np.ndarray, expected: np.ndarray, *, atol_peak: float = IQ_ATOL_PEAK) -> None:
@@ -480,7 +558,15 @@ def _render_picmus_phantom_plot(reconstructed: ReconstructedIq, output_path: Pat
         (RESIDUAL_LABEL, residual_db, "magma", -DYNAMIC_RANGE_DB, 0.0, "Residual amplitude [dB]"),
     )
     for ax, (title, image, cmap, vmin, vmax, colorbar_label) in zip(axes, panel_specs, strict=True):
-        im = ax.imshow(image, extent=extent_mm, cmap=cmap, vmin=vmin, vmax=vmax, aspect="auto")
+        im = ax.imshow(
+            image,
+            extent=extent_mm,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            aspect="auto",
+            interpolation=PICMUS_PLOT_INTERPOLATION,
+        )
         ax.set_title(title)
         ax.set_xlabel("Lateral [mm]")
         ax.set_ylabel("Depth [mm]")
@@ -521,8 +607,10 @@ def test_picmus_phantom_constants_match_hdf5_values() -> None:
     assert pytest.approx(0.5) == ATTENUATION_DB_CM_MHZ
     assert IMAGE_X_M[0] <= -PICMUS_APERTURE_X_M
     assert IMAGE_X_M[-1] >= PICMUS_APERTURE_X_M
-    assert IMAGE_Z_M[0] <= 5.0e-3
-    assert IMAGE_Z_M[-1] >= 50.0e-3
+    assert pytest.approx(5.0e-3) == IMAGE_Z_MIN_M
+    assert pytest.approx(50.0e-3) == IMAGE_Z_MAX_M
+    assert IMAGE_Z_M[0] <= IMAGE_Z_MIN_M
+    assert IMAGE_Z_M[-1] >= IMAGE_Z_MAX_M
 
 
 def test_picmus_phantom_angle_modes_select_expected_sequences() -> None:
@@ -539,6 +627,61 @@ def test_picmus_phantom_plot_labels_are_anonymous() -> None:
     assert PROPOSED_LABEL == "Proposed"
     assert "FastSIMUS" not in PROPOSED_LABEL
     assert "FastSIMUS" not in RESIDUAL_LABEL
+
+
+def test_picmus_phantom_plot_export_targets_4k_width() -> None:
+    """Diagnostic figures are exported near 4k width without display smoothing."""
+    assert PICMUS_PLOT_DPI > 150
+    assert PICMUS_PLOT_FIGSIZE_IN[0] * PICMUS_PLOT_DPI >= PICMUS_PLOT_MIN_WIDTH_PX
+    assert PICMUS_PLOT_MIN_WIDTH_PX >= 4096
+    assert PICMUS_PLOT_INTERPOLATION == "nearest"
+
+
+def test_picmus_phantom_grid_wavelength_spacing_defaults_to_test_grid() -> None:
+    """The optional plot grid defaults to the compact test grid."""
+    x_axis_m, z_axis_m = _image_axes_for_grid_wavelengths(None)
+
+    np.testing.assert_allclose(x_axis_m, IMAGE_X_M)
+    np.testing.assert_allclose(z_axis_m, IMAGE_Z_M)
+
+
+def test_picmus_phantom_grid_wavelength_spacing_supports_lambda_quarter() -> None:
+    """A 0.25 wavelength plot grid beamforms close to lambda/4 sample spacing."""
+    spacing_m = 0.25 * PICMUS_WAVELENGTH_M
+    x_axis_m, z_axis_m = _image_axes_for_grid_wavelengths(0.25)
+
+    assert x_axis_m.size == int(np.ceil((IMAGE_X_MAX_M - IMAGE_X_MIN_M) / spacing_m)) + 1
+    assert z_axis_m.size == int(np.ceil((IMAGE_Z_MAX_M - IMAGE_Z_MIN_M) / spacing_m)) + 1
+    assert np.max(np.diff(x_axis_m)) <= spacing_m
+    assert np.max(np.diff(z_axis_m)) <= spacing_m
+    assert x_axis_m[0] == pytest.approx(IMAGE_X_MIN_M)
+    assert x_axis_m[-1] == pytest.approx(IMAGE_X_MAX_M)
+    assert z_axis_m[0] == pytest.approx(IMAGE_Z_MIN_M)
+    assert z_axis_m[-1] == pytest.approx(IMAGE_Z_MAX_M)
+
+    with pytest.raises(ValueError, match="grid spacing must be finite and positive"):
+        _image_axes_for_grid_wavelengths(0.0)
+
+    with pytest.raises(ValueError, match="grid spacing must be finite and positive"):
+        _image_axes_for_grid_wavelengths(np.inf)
+
+    with pytest.raises(ValueError, match="grid spacing must be finite and positive"):
+        _image_axes_for_grid_wavelengths(np.nan)
+
+    with pytest.raises(ValueError, match="grid spacing must be finite and positive"):
+        _image_axes_for_grid_wavelengths(-1.0)
+
+
+def test_picmus_phantom_grid_wavelength_spacing_warns_for_large_grids() -> None:
+    """Very fine plot grids warn before expensive DAS reconstruction."""
+    with pytest.warns(RuntimeWarning, match="reconstruction will be slow"):
+        _image_axes_for_grid_wavelengths(0.1)
+
+
+def test_picmus_phantom_reconstruction_warns_for_large_grid_angle_products() -> None:
+    """Fine grids with many firings warn before expensive DAS reconstruction."""
+    with pytest.warns(RuntimeWarning, match="DAS reconstruction will be slow"):
+        _warn_if_reconstruction_is_large(n_pixels=315_000, n_firings=75)
 
 
 def test_simulated_rf_stacks_are_finite_and_nonzero() -> None:
@@ -616,6 +759,7 @@ def test_residual_display_uses_complex_domain_difference() -> None:
 def test_optional_picmus_phantom_plot_is_written(
     picmus_phantom_plot: Path | None,
     picmus_phantom_angles: str,
+    picmus_phantom_grid_wavelengths: float | None,
 ) -> None:
     """The optional CLI path writes a diagnostic PNG and stays inactive by default."""
     if picmus_phantom_plot is None:
@@ -624,7 +768,19 @@ def test_optional_picmus_phantom_plot_is_written(
         pytest.skip("--plot-picmus-phantom requires matplotlib")
 
     angles_rad = _angles_for_plot_mode(picmus_phantom_angles)
-    _render_picmus_phantom_plot(_reconstruct_picmus_iq_for_angles(_angle_cache_key(angles_rad)), picmus_phantom_plot)
+    warning_context = (
+        pytest.warns(RuntimeWarning, match="reconstruction will be slow")
+        if _expects_large_reconstruction_warning(
+            grid_wavelengths=picmus_phantom_grid_wavelengths,
+            n_firings=angles_rad.size,
+        )
+        else contextlib.nullcontext()
+    )
+    with warning_context:
+        _render_picmus_phantom_plot(
+            _reconstruct_picmus_iq_for_grid(_angle_cache_key(angles_rad), picmus_phantom_grid_wavelengths),
+            picmus_phantom_plot,
+        )
 
     assert picmus_phantom_plot.is_file()
     assert picmus_phantom_plot.stat().st_size > 0

@@ -1,6 +1,7 @@
 """Pytest configuration for FastSIMUS tests."""
 
 import contextlib
+import math
 from pathlib import Path
 from typing import Any, cast
 
@@ -27,6 +28,17 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default="broadside",
         help="Choose broadside or full 75-angle sequence for optional PICMUS phantom plots.",
     )
+    parser.addoption(
+        "--picmus-phantom-grid-wavelengths",
+        action="store",
+        type=float,
+        default=None,
+        metavar="N_WAVELENGTHS",
+        help=(
+            "Use a diagnostic plot beamforming grid with this spacing in center-frequency wavelengths "
+            "(for example, 0.25 for lambda/4)."
+        ),
+    )
 
 
 @pytest.fixture
@@ -42,6 +54,15 @@ def picmus_phantom_plot(request: pytest.FixtureRequest) -> Path | None:
 def picmus_phantom_angles(request: pytest.FixtureRequest) -> str:
     """Return the PICMUS phantom angle mode for optional diagnostic plots."""
     return cast("str", request.config.getoption("--picmus-phantom-angles"))
+
+
+@pytest.fixture
+def picmus_phantom_grid_wavelengths(request: pytest.FixtureRequest) -> float | None:
+    """Return optional diagnostic plot grid spacing in center-frequency wavelengths."""
+    grid_wavelengths = cast("float | None", request.config.getoption("--picmus-phantom-grid-wavelengths"))
+    if grid_wavelengths is not None and (not math.isfinite(grid_wavelengths) or grid_wavelengths <= 0.0):
+        raise pytest.UsageError("--picmus-phantom-grid-wavelengths must be finite and positive")
+    return grid_wavelengths
 
 
 # Try to import array backends
