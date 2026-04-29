@@ -105,6 +105,9 @@ DYNAMIC_RANGE_DB = 60.0
 PROPOSED_LABEL = "Proposed"
 REFERENCE_LABEL = "PyMUST"
 RESIDUAL_LABEL = f"|{PROPOSED_LABEL} - {REFERENCE_LABEL}|"
+PICMUS_PLOT_FIGSIZE_IN = (12.0, 4.0)
+PICMUS_PLOT_MIN_WIDTH_PX = 4096
+PICMUS_PLOT_DPI = 360
 # array_api_strict exercises the FastSIMUS simulation path; PyMUST reconstruction is NumPy-only.
 XP_STRICT = cast("_ArrayNamespace", array_api_strict)
 
@@ -470,7 +473,7 @@ def _render_picmus_phantom_plot(reconstructed: ReconstructedIq, output_path: Pat
         float(reconstructed.z_grid_m.min() * 1e3),
     )
 
-    fig, axes = pyplot.subplots(1, 3, figsize=(12, 4), constrained_layout=True)
+    fig, axes = pyplot.subplots(1, 3, figsize=PICMUS_PLOT_FIGSIZE_IN, constrained_layout=True)
     panel_specs = (
         (PROPOSED_LABEL, fastsimus_db, "gray", -DYNAMIC_RANGE_DB, 0.0, "Amplitude [dB]"),
         (REFERENCE_LABEL, pymust_db, "gray", -DYNAMIC_RANGE_DB, 0.0, "Amplitude [dB]"),
@@ -483,7 +486,7 @@ def _render_picmus_phantom_plot(reconstructed: ReconstructedIq, output_path: Pat
         ax.set_ylabel("Depth [mm]")
         fig.colorbar(im, ax=ax, label=colorbar_label)
 
-    fig.savefig(output_path, dpi=150)
+    fig.savefig(output_path, dpi=PICMUS_PLOT_DPI)
     pyplot.close(fig)
 
 
@@ -625,3 +628,5 @@ def test_optional_picmus_phantom_plot_is_written(
 
     assert picmus_phantom_plot.is_file()
     assert picmus_phantom_plot.stat().st_size > 0
+    pyplot = cast("Any", plt)
+    assert pyplot.imread(picmus_phantom_plot).shape[1] >= PICMUS_PLOT_MIN_WIDTH_PX
