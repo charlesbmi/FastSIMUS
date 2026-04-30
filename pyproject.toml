@@ -86,6 +86,7 @@ test = [
     "jax>=0.9",
     "equinox>=0.11",
     "mlx>=0.31; platform_system == 'Darwin'",
+    "cupy-cuda12x>=13.0; platform_system == 'Linux'",
     "pymust>=0.1.9",
 ]
 test-parallel = [
@@ -99,6 +100,7 @@ bench = [
 ]
 # Plotting deps are separate so `bench` users who only need raw JSON can skip them.
 plot = [
+    "matplotlib>=3.8",
     "pandas>=2.2",
     "seaborn>=0.13",
 ]
@@ -165,6 +167,11 @@ sequence = [
     { ref = "benchmark-scaling-run" },
     { ref = "benchmark-plot" },
 ]
+
+[tool.poe.tasks.profile-cuda]
+help = "Profile a CUDA simus benchmark under Nsight Compute. Pass -k <expr> -o <out>."
+shell = "sudo $(which python) scripts/ncu_pytest.py $@"
+executor = { group = "bench" }
 
 [tool.poe.tasks.build]
 help = "Build wheel file"
@@ -248,9 +255,10 @@ convention = "google"
 [tool.deptry.package_module_name_map]
 pytest-benchmark = "pytest_benchmark"
 mlx = "mlx"
+cupy-cuda12x = "cupy"
 
 [tool.deptry.per_rule_ignores]
-DEP004 = ["jax", "mlx"]
+DEP004 = ["jax", "mlx", "cupy"]
 
 [tool.ty.environment]
 extra-paths = ["stubs"]
@@ -259,7 +267,7 @@ extra-paths = ["stubs"]
 exclude = ["bench_*.py"]
 
 [tool.ty.analysis]
-allowed-unresolved-imports = ["mlx.**"]
+allowed-unresolved-imports = ["mlx.**", "cupy", "cupy.**"]
 
 [tool.codespell]
 ignore-words-list = "te,nax"

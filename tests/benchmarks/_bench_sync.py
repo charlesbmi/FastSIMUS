@@ -1,4 +1,4 @@
-"""Block until JAX / MLX arrays are materialized (wall-clock benchmarks)."""
+"""Block until JAX / MLX / CuPy arrays are materialized (wall-clock benchmarks)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 from array_api_compat import is_jax_namespace
 
-from fast_simus.utils._array_api import Array, is_mlx_namespace
+from fast_simus.utils._array_api import Array, is_cupy_namespace, is_mlx_namespace
 
 if TYPE_CHECKING:
     from fast_simus.utils._array_api import _ArrayNamespace
@@ -23,6 +23,10 @@ with contextlib.suppress(ImportError):
 
     _mx_eval = _mlx_core.eval
 
+_cp = None
+with contextlib.suppress(ImportError):
+    import cupy as _cp
+
 
 def sync_benchmark_array(value: Array, xp: _ArrayNamespace) -> None:
     """Ensure *value* is evaluated on async backends before timing ends."""
@@ -32,3 +36,7 @@ def sync_benchmark_array(value: Array, xp: _ArrayNamespace) -> None:
         return
     if _mx_eval is not None and is_mlx_namespace(xp):
         _mx_eval(value)
+        return
+    if _cp is not None and is_cupy_namespace(xp):
+        # CUDA kernels on the default stream are async; force completion.
+        _cp.cuda.Stream.null.synchronize()

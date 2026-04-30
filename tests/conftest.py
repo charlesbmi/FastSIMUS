@@ -1,7 +1,7 @@
 """Pytest configuration for FastSIMUS tests."""
 
 import contextlib
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -10,6 +10,16 @@ from fast_simus.simus import SimusStrategy
 from fast_simus.utils._array_api import _ArrayNamespace
 
 # Try to import array backends
+
+
+def _cupy_has_cuda_device(cupy_module: Any) -> bool:
+    """Return whether CuPy can see at least one CUDA device."""
+    try:
+        return int(cupy_module.cuda.runtime.getDeviceCount()) > 0
+    except Exception:
+        return False
+
+
 HAS_NUMPY = False
 np = None
 with contextlib.suppress(ImportError):
@@ -34,6 +44,13 @@ with contextlib.suppress(ImportError):
     ensure_compat(mx)
     HAS_MLX = True
 
+HAS_CUPY = False
+cp = None
+with contextlib.suppress(ImportError):
+    import cupy as cp
+
+    HAS_CUPY = _cupy_has_cuda_device(cp)
+
 
 @pytest.fixture(
     params=[
@@ -50,12 +67,17 @@ with contextlib.suppress(ImportError):
             id="mlx",
             marks=pytest.mark.skipif(not HAS_MLX, reason="MLX not available"),
         ),
+        pytest.param(
+            cp,
+            id="cupy",
+            marks=pytest.mark.skipif(not HAS_CUPY, reason="CuPy CUDA device not available"),
+        ),
     ]
 )
 def xp(request) -> _ArrayNamespace:
     """Fixture providing different array API backends.
 
-    Parametrizes tests to run with NumPy, JAX, and MLX.
+    Parametrizes tests to run with NumPy, JAX, MLX, and CuPy.
     Does not include array-api-strict, which can be used in place of a parametrized backend
     for Array API compliance testing.
     """
@@ -81,6 +103,7 @@ def strategy(request) -> PfieldStrategy | None:
         pytest.param(SimusStrategy.PYTHON, id="python"),
         pytest.param(SimusStrategy.SCAN, id="scan"),
         pytest.param(SimusStrategy.METAL, id="metal"),
+        pytest.param(SimusStrategy.CUDA, id="cuda"),
     ]
 )
 def simus_strategy(request) -> SimusStrategy | None:

@@ -4,6 +4,7 @@ Reference tests compare FastSIMUS simus against PyMUST's simus output.
 Tests are structured as invariants that must hold at every refactoring step.
 """
 
+from importlib import import_module
 from typing import NamedTuple, cast
 
 import array_api_strict
@@ -15,9 +16,10 @@ from array_api_compat import is_jax_namespace
 from fast_simus.medium_params import MediumParams
 from fast_simus.simus import SimusResult, SimusStrategy, simus, simus_compute, simus_precompute
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
-from fast_simus.utils._array_api import Array, _ArrayNamespace, is_mlx_namespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace, is_cupy_namespace, is_mlx_namespace
 
 xp = cast(_ArrayNamespace, array_api_strict)
+simus_mod = import_module("fast_simus.simus")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -439,6 +441,8 @@ class TestSimusStrategyCrossBackend:
             pytest.skip("scan requires JAX")
         if simus_strategy == SimusStrategy.METAL and not is_mlx_namespace(xp):
             pytest.skip("metal requires MLX")
+        if simus_strategy == SimusStrategy.CUDA and not is_cupy_namespace(xp):
+            pytest.skip("cuda requires CuPy")
 
         params = P4_2v()
         scatterers = np.stack([np.zeros(3), np.linspace(1e-2, 5e-2, 3)], axis=-1)
@@ -452,7 +456,13 @@ class TestSimusStrategyCrossBackend:
             params,
             strategy=simus_strategy,
         )
-        rf_np = np.asarray(result.rf)
+        # CuPy refuses implicit np.asarray conversion; route through cp.asnumpy.
+        if is_cupy_namespace(xp):
+            import cupy as cp_
+
+            rf_np = cp_.asnumpy(result.rf)
+        else:
+            rf_np = np.asarray(result.rf)
         assert rf_np.ndim == 2
         assert rf_np.shape[1] == params.n_elements
         assert np.max(np.abs(rf_np)) > 0
@@ -593,6 +603,39 @@ class TestSimusStrategy:
         result = simus(
             xp.asarray(scatterers), xp.asarray(rc), xp.asarray(delays), params, strategy=SimusStrategy.PYTHON
         )
+        assert np.max(np.abs(np.asarray(result.rf))) > 0
+
+    def test_python_strategy_prepares_sweep(self, monkeypatch):
+        """Python strategy still builds the shared Array API sweep tensors."""
+        params = P4_2v()
+        scatterers = np.stack([np.zeros(3), np.linspace(1e-2, 5e-2, 3)], axis=-1)
+        rc = np.ones(3)
+        delays = np.zeros(params.n_elements)
+
+        scatterers_arr = xp.asarray(scatterers)
+        rc_arr = xp.asarray(rc)
+        delays_arr = xp.asarray(delays)
+        plan = simus_precompute(scatterers_arr, rc_arr, delays_arr, params)
+
+        original_prepare = simus_mod._prepare_simus_sweep
+        calls = {"count": 0}
+
+        def spy_prepare_sweep(*args, **kwargs):
+            calls["count"] += 1
+            return original_prepare(*args, **kwargs)
+
+        monkeypatch.setattr(simus_mod, "_prepare_simus_sweep", spy_prepare_sweep)
+
+        result = simus_compute(
+            scatterers_arr,
+            rc_arr,
+            delays_arr,
+            plan,
+            params,
+            strategy=SimusStrategy.PYTHON,
+        )
+
+        assert calls["count"] == 1
         assert np.max(np.abs(np.asarray(result.rf))) > 0
 
     def test_simus_compute_accepts_strategy(self):
