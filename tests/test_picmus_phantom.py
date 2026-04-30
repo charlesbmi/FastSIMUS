@@ -167,16 +167,19 @@ def _assert_reconstructed_iq_layout(
     assert pymust.shape == (n_z, n_x)
 
 
-def _angles_for_plot_mode(angle_mode: str) -> np.ndarray:
+def _angles_for_plot_mode(case: PhantomCase, angle_mode: str) -> np.ndarray:
     """Return the PICMUS angle sequence requested for diagnostic plotting."""
     if angle_mode == "broadside":
-        return PICMUS_BROADSIDE_ANGLES_RAD.copy()
+        return np.array(case.default_angles_rad, dtype=np.float64)
     if angle_mode == "full":
-        return PICMUS_FULL_ANGLES_RAD.copy()
+        if case.diagnostic_angles_rad is None:
+            raise ValueError(f"Phantom case {case.id!r} has no full diagnostic angle sequence")
+        return np.array(case.diagnostic_angles_rad, dtype=np.float64)
     raise ValueError(f"Unknown PICMUS phantom angle mode: {angle_mode}")
 
 
 def _expects_large_reconstruction_warning(
+    case: PhantomCase,
     *,
     grid_wavelengths: float | None,
     n_firings: int,
@@ -185,11 +188,11 @@ def _expects_large_reconstruction_warning(
     return _shared_expects_large_reconstruction_warning(
         grid_wavelengths=grid_wavelengths,
         n_firings=n_firings,
-        default_x_axis_m=IMAGE_X_M,
-        default_z_axis_m=IMAGE_Z_M,
-        x_bounds_m=(IMAGE_X_MIN_M, IMAGE_X_MAX_M),
-        z_bounds_m=(IMAGE_Z_MIN_M, IMAGE_Z_MAX_M),
-        wavelength_m=PICMUS_WAVELENGTH_M,
+        default_x_axis_m=_case_default_x_axis(case),
+        default_z_axis_m=_case_default_z_axis(case),
+        x_bounds_m=case.x_bounds_m,
+        z_bounds_m=case.z_bounds_m,
+        wavelength_m=case.wavelength_m,
         warn_pixels=PICMUS_GRID_WARN_PIXELS,
         warn_pixel_firings=PICMUS_RECONSTRUCTION_WARN_PIXEL_FIRINGS,
     )
@@ -228,6 +231,8 @@ RESOLUTION_CASE = PhantomCase(
     iq_atol_peak=IQ_ATOL_PEAK,
 )
 ACTIVE_PHANTOM_CASES = (RESOLUTION_CASE,)
+# Future contrast/speckle phantoms should use metric-specific case collections,
+# not the IQ residual comparison used by point-scatterer resolution data.
 IQ_RESIDUAL_CASES = tuple(case for case in ACTIVE_PHANTOM_CASES if case.validation_mode == "iq_residual")
 _CASES_BY_CACHE_KEY = {case.cache_key: case for case in ACTIVE_PHANTOM_CASES}
 
@@ -406,11 +411,11 @@ def test_picmus_phantom_constants_match_hdf5_values() -> None:
 
 def test_picmus_phantom_angle_modes_select_expected_sequences() -> None:
     """Plot angle modes select either the fast subset or full PICMUS sequence."""
-    np.testing.assert_allclose(_angles_for_plot_mode("broadside"), PICMUS_BROADSIDE_ANGLES_RAD)
-    np.testing.assert_allclose(_angles_for_plot_mode("full"), PICMUS_FULL_ANGLES_RAD)
+    np.testing.assert_allclose(_angles_for_plot_mode(RESOLUTION_CASE, "broadside"), PICMUS_BROADSIDE_ANGLES_RAD)
+    np.testing.assert_allclose(_angles_for_plot_mode(RESOLUTION_CASE, "full"), PICMUS_FULL_ANGLES_RAD)
 
     with pytest.raises(ValueError, match="Unknown PICMUS phantom angle mode"):
-        _angles_for_plot_mode("unsupported")
+        _angles_for_plot_mode(RESOLUTION_CASE, "unsupported")
 
 
 def test_resolution_case_uses_explicit_scientific_cache_key() -> None:
@@ -426,6 +431,20 @@ def test_iq_residual_cases_select_supported_validation_modes() -> None:
     """IQ residual tests only collect cases configured for complex-IQ comparison."""
     assert IQ_RESIDUAL_CASES == (RESOLUTION_CASE,)
     assert all(case.validation_mode == "iq_residual" for case in IQ_RESIDUAL_CASES)
+
+
+def test_resolution_case_is_the_only_active_phantom_case() -> None:
+    """Contrast remains a future, explicitly gated extension point."""
+    assert ACTIVE_PHANTOM_CASES == (RESOLUTION_CASE,)
+
+
+def test_diagnostic_warning_uses_case_grid_identity() -> None:
+    """Diagnostic warning prediction uses the case bounds, wavelength, and grid."""
+    assert _expects_large_reconstruction_warning(
+        RESOLUTION_CASE,
+        grid_wavelengths=0.1,
+        n_firings=len(RESOLUTION_CASE.diagnostic_angles_rad or ()),
+    )
 
 
 @pytest.mark.parametrize("case", IQ_RESIDUAL_CASES, ids=lambda case: case.id)
@@ -477,10 +496,11 @@ def test_optional_picmus_phantom_plot_is_written(
     if not HAS_MATPLOTLIB:
         pytest.skip("--plot-picmus-phantom requires matplotlib")
 
-    angles_rad = _angles_for_plot_mode(picmus_phantom_angles)
+    angles_rad = _angles_for_plot_mode(RESOLUTION_CASE, picmus_phantom_angles)
     warning_context = (
         pytest.warns(RuntimeWarning, match="reconstruction will be slow")
         if _expects_large_reconstruction_warning(
+            RESOLUTION_CASE,
             grid_wavelengths=picmus_phantom_grid_wavelengths,
             n_firings=angles_rad.size,
         )
