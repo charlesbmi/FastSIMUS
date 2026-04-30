@@ -204,6 +204,7 @@ _REFERENCE_BACKEND = "pymust"
 _RUNTIME_METRIC = "Runtime (s)"
 _THROUGHPUT_METRIC = "Throughput (scatterers/s)"
 _SPEEDUP_METRIC = "Speedup vs PyMUST"
+_DEFAULT_TITLE = "SIMUS scaling: PyMUST vs FastSIMUS backends"
 
 
 def _compute_speedups(df: pd.DataFrame, reference_backend: str = _REFERENCE_BACKEND) -> pd.DataFrame:
@@ -228,6 +229,33 @@ def _compute_speedups(df: pd.DataFrame, reference_backend: str = _REFERENCE_BACK
     merged = merged.copy()
     merged["speedup"] = merged["_ref_mean_s"] / merged["mean_s"]
     return merged.drop(columns=["_ref_mean_s"]).reset_index(drop=True)
+
+
+def _build_long_dataframe(
+    df: pd.DataFrame,
+    *,
+    reference_backend: str = _REFERENCE_BACKEND,
+    reference_label: str = "PyMUST",
+    series_column: str = "backend",
+) -> tuple[pd.DataFrame, list[str]]:
+    """Build the long-form dataframe consumed by seaborn."""
+    speedup_metric = f"Speedup vs {reference_label}"
+    speedup_df = _compute_speedups(df, reference_backend)
+    frames = [
+        df.assign(metric=_RUNTIME_METRIC, value=df["mean_s"], series=df[series_column]),
+        df.assign(metric=_THROUGHPUT_METRIC, value=df["throughput"], series=df[series_column]),
+    ]
+    col_order = [_RUNTIME_METRIC, _THROUGHPUT_METRIC]
+    if not speedup_df.empty:
+        frames.append(
+            speedup_df.assign(
+                metric=speedup_metric,
+                value=speedup_df["speedup"],
+                series=speedup_df[series_column],
+            )
+        )
+        col_order.append(speedup_metric)
+    return pd.concat(frames, ignore_index=True), col_order
 
 
 def _unique_short_commits(df: pd.DataFrame) -> list[str]:
@@ -257,30 +285,36 @@ def _commit_summary(df: pd.DataFrame) -> str:
     return f"@ {len(commits)} commits: {preview}"
 
 
-def render_plot(df: pd.DataFrame, output: Path, commit_summary: str = "") -> None:
+def render_plot(
+    df: pd.DataFrame,
+    output: Path,
+    commit_summary: str = "",
+    *,
+    reference_backend: str = _REFERENCE_BACKEND,
+    reference_label: str = "PyMUST",
+    series_column: str = "backend",
+    title: str = _DEFAULT_TITLE,
+) -> None:
     """Render the log-log figure and save to ``output`` as PNG.
 
     Two panels (Runtime, Throughput) are always shown; a third "Speedup vs
-    PyMUST" panel is appended when at least one reference PyMUST row is
+    reference" panel is appended when at least one reference row is
     available to normalize against.
     """
-    speedup_df = _compute_speedups(df)
-    frames = [
-        df.assign(metric=_RUNTIME_METRIC, value=df["mean_s"]),
-        df.assign(metric=_THROUGHPUT_METRIC, value=df["throughput"]),
-    ]
-    col_order = [_RUNTIME_METRIC, _THROUGHPUT_METRIC]
-    if not speedup_df.empty:
-        frames.append(speedup_df.assign(metric=_SPEEDUP_METRIC, value=speedup_df["speedup"]))
-        col_order.append(_SPEEDUP_METRIC)
-    long_df = pd.concat(frames, ignore_index=True)
+    long_df, col_order = _build_long_dataframe(
+        df,
+        reference_backend=reference_backend,
+        reference_label=reference_label,
+        series_column=series_column,
+    )
+    speedup_metric = f"Speedup vs {reference_label}"
 
     sns.set_theme(context="notebook", style="whitegrid")
     g = sns.relplot(
         data=long_df,
         x="n_scat",
         y="value",
-        hue="backend",
+        hue="series",
         style="machine",
         col="metric",
         col_order=col_order,
@@ -300,13 +334,13 @@ def render_plot(df: pd.DataFrame, output: Path, commit_summary: str = "") -> Non
             ax.set_ylabel("Runtime (s)")
         elif col_name == _THROUGHPUT_METRIC:
             ax.set_ylabel("Throughput (scatterers/s)")
-        elif col_name == _SPEEDUP_METRIC:
-            ax.set_ylabel("Speedup (x, vs PyMUST)")
+        elif col_name == speedup_metric:
+            ax.set_ylabel(f"Speedup (x, vs {reference_label})")
             ax.axhline(1.0, color="black", linestyle="--", linewidth=1, alpha=0.5)
-    title = "SIMUS scaling: PyMUST vs FastSIMUS backends"
+    full_title = title
     if commit_summary:
-        title += f" {commit_summary}"
-    g.figure.suptitle(title, y=1.02)
+        full_title += f" {commit_summary}"
+    g.figure.suptitle(full_title, y=1.02)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     g.savefig(output, dpi=150, bbox_inches="tight")
@@ -337,6 +371,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--group",
         default=_DEFAULT_GROUP,
         help=f"pytest-benchmark group to plot (default: {_DEFAULT_GROUP!r}).",
+    )
+    parser.add_argument(
+        "--reference-backend",
+        default=_REFERENCE_BACKEND,
+        help=f"Backend label to use as the speedup reference (default: {_REFERENCE_BACKEND!r}).",
+    )
+    parser.add_argument(
+        "--reference-label",
+        default="PyMUST",
+        help="Display label for the speedup reference (default: 'PyMUST').",
+    )
+    parser.add_argument(
+        "--series-column",
+        choices=["backend", "machine"],
+        default="backend",
+        help="Column used for line colors (default: 'backend').",
+    )
+    parser.add_argument(
+        "--title",
+        default=_DEFAULT_TITLE,
+        help=f"Plot title before the commit summary (default: {_DEFAULT_TITLE!r}).",
     )
     commit_group = parser.add_mutually_exclusive_group()
     commit_group.add_argument(
@@ -404,7 +459,15 @@ def main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
 
-    render_plot(df, args.output, commit_summary=_commit_summary(df))
+    render_plot(
+        df,
+        args.output,
+        commit_summary=_commit_summary(df),
+        reference_backend=args.reference_backend,
+        reference_label=args.reference_label,
+        series_column=args.series_column,
+        title=args.title,
+    )
     print(
         f"Wrote {args.output} ({len(df)} rows across {df['backend'].nunique()} backend(s), "
         f"{df['machine'].nunique()} machine(s))"
