@@ -1,18 +1,19 @@
-# Handoff: NumPy SIMUS scaling benchmark (1e3–1e7) on a larger host
+# Handoff: PyMUST (NumPy SIMUS) scaling benchmark (1e3–1e7) on a larger host
 
 This document is for continuing the scaling study on a **16-core (or larger) Linux x86_64** instance with enough RAM.
-The goal is to extend the **SIMUS (NumPy)** curve to `10^6` and optionally `10^7` scatterers, then merge results with
-the existing **Proposed (CUDA)** JSON and regenerate the figure with publication-friendly labels.
+The goal is to extend the **PyMUST** baseline curve, displayed in the paper as **SIMUS (NumPy)**, to `10^6` and
+optionally `10^7` scatterers, then merge results with the existing **Proposed (CUDA)** JSON and regenerate the figure
+with publication-friendly labels.
 
 ## What is already done on the dev box
 
 - **CUDA (Proposed)** sweep `10^3 … 10^7` completed and autosaved under `.benchmarks/Linux-CPython-3.12-64bit/`. Example
   file from the last run: `0007_9127dc8e28527687d9bfed7dde17ed636a474af4_20260430_185951_uncommited-changes.json`
   (device label: `Proposed (CUDA)`).
-- **NumPy (SIMUS)** partial sweep on a **4 vCPU** slice of **AMD EPYC 7713** with **~16 GB RAM** completed only through
-  `10^5` (larger sizes were not attempted to avoid multi-hour runs and OOM risk). Example:
-  `0008_9127dc8e28527687d9bfed7dde17ed636a474af4_20260430_190438_uncommited-changes.json` (device label:
-  `SIMUS (NumPy)`).
+- **PyMUST baseline** partial sweep on a **4 vCPU** slice of **AMD EPYC 7713** with **~16 GB RAM** completed only
+  through `10^5` (larger sizes were not attempted to avoid multi-hour runs and OOM risk). Example:
+  `0008_9127dc8e28527687d9bfed7dde17ed636a474af4_20260430_190438_uncommited-changes.json` (benchmark backend: `pymust`;
+  device label: `SIMUS (NumPy)`).
 - Plot script now supports **`--reference-backend`**, **`--reference-label`**, **`--series-column machine`**, and
   **`--title`** so the legend can show `SIMUS (NumPy)` vs `Proposed (CUDA)` without renaming benchmark internals.
 
@@ -37,23 +38,27 @@ grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree):' /proc/meminfo
 Optional: set a stable hostname label for the machine (shown in JSON `machine_info.node` if you do not set
 `FASTSIMUS_DEVICE_LABEL`).
 
-## Why memory matters for NumPy SIMUS
+## Why PyMUST progress and memory matter
 
-For `SimusStrategy.PYTHON`, `simus_compute()` calls `_prepare_simus_sweep()`, which materializes large arrays whose
-dominant terms scale like **`(n_scat, n_elem, n_sub)`** per complex field (e.g. `phase_init`, `phase_step`), plus
-geometry and similar terms. For **P4-2v** with `element_splitting=1` (as in the scaling bench), `n_elem = 64`,
-`n_sub = 1`, so each complex `(n_scat, 64, 1)` tensor is about:
+This handoff is **not** asking for FastSIMUS's NumPy backend (`tests/benchmarks/bench_simus_scaling.py -k numpy`). For
+the paper comparison, the baseline is **PyMUST** (`tests/benchmarks/bench_pymust_scaling.py`), displayed as
+`SIMUS (NumPy)`.
+
+PyMUST's `simus()` delegates the expensive spectrum calculation to `pymust.pfield()`. In the 2-D P4-2v benchmark with
+`ElementSplitting=1`, the dominant arrays still scale like **`(n_scat, n_elem, n_sub)`** per complex field. With
+`n_elem = 64` and `n_sub = 1`, each complex `(n_scat, 64, 1)` tensor is about:
 
 ```text
 bytes ≈ n_scat * 64 * sizeof(complex)
 ```
 
-Use **16 bytes** if the stack resolves to `complex128` (worst case on many NumPy builds), or **8 bytes** if everything
-stays `complex64`. The sweep holds **several** such arrays plus intermediates, so treat `10^7` scatterers as **tens of
-GB** unless you have verified dtypes and peak RSS on a smaller `n_scat` first.
+Use **16 bytes** if an intermediate resolves to `complex128`, or **8 bytes** when it stays `complex64`. The sweep holds
+several such arrays plus intermediates, so treat `10^7` scatterers as **tens of GB** unless you have verified dtypes and
+peak RSS on a smaller `n_scat` first.
 
-**Rule of thumb:** if `MemAvailable` (from `/proc/meminfo`) is not comfortably above your rough tensor budget (say
-**2–3x** the estimated peak array footprint), do not run `10^7` on NumPy in one shot.
+The other failure mode is simply runtime: PyMUST advances through a frequency-sample loop in `pymust.pfield()`. If a
+larger case exceeds the extrapolated time window, it is acceptable to stop once progress logging shows that the loop is
+still moving. In that case, record the observed rate instead of waiting for a completed autosave JSON.
 
 ## Monitoring memory while a benchmark runs
 
@@ -74,7 +79,7 @@ Stop the benchmark if `MemAvailable` approaches zero and swap starts climbing un
 ### 2. Peak RSS for the pytest process (GNU time)
 
 ```bash
-/usr/bin/time -v uv run pytest ... 2>&1 | tee numpy-bench.log
+/usr/bin/time -v uv run pytest ... 2>&1 | tee pymust-bench.log
 # At end of output, look for:
 #   Maximum resident set size (kbytes): ...
 ```
@@ -99,39 +104,91 @@ cat /sys/fs/cgroup/$(cat /proc/self/cgroup | tail -1 | cut -d: -f3)/memory.max 2
 
 If this prints a finite cap, that is your hard ceiling regardless of `MemTotal`.
 
+## Optional PyMUST progress instrumentation
+
+If a large PyMUST run passes its extrapolated time window without completing, add temporary progress logging to the
+installed PyMUST source before rerunning. This is only for diagnosing whether the job is stalled or merely slow; do not
+commit changes under `.venv/`.
+
+Locate the installed sources:
+
+```bash
+uv run python - <<'PY'
+import inspect
+import pymust
+
+print(inspect.getsourcefile(pymust.simus))
+print(inspect.getsourcefile(pymust.pfield))
+PY
+```
+
+In `pymust/pfield.py`, instrument the frequency loop around `for k in range(nSampling):`. A minimal local patch is:
+
+```python
+import os
+import time
+
+# just before the loop
+progress_every = int(os.environ.get("PYMUST_PROGRESS_EVERY", "10"))
+progress_t0 = time.monotonic()
+
+for k in range(nSampling):
+    if progress_every and (k == 0 or (k + 1) % progress_every == 0 or k + 1 == nSampling):
+        elapsed = time.monotonic() - progress_t0
+        rate = (k + 1) / elapsed if elapsed else 0.0
+        remaining = (nSampling - k - 1) / rate if rate else float("inf")
+        print(
+            f"[pymust.pfield] frequency {k + 1}/{nSampling} "
+            f"elapsed={elapsed / 60:.1f}m eta={remaining / 60:.1f}m",
+            flush=True,
+        )
+```
+
+Then rerun a single large point with a coarse interval:
+
+```bash
+PYMUST_PROGRESS_EVERY=5 /usr/bin/time -v uv run pytest tests/benchmarks/bench_pymust_scaling.py \
+  --benchmark-only --benchmark-autosave -p no:xdist -m scaling \
+  -k pymust \
+  --n-scat=1000000 2>&1 | tee pymust-1e6-progress.log
+```
+
+If the log advances steadily but the ETA is too long, stop the run and keep the progress log as evidence that PyMUST is
+slow rather than stalled.
+
 ## Recommended run order (avoid wasting hours)
 
 1. **Smoke:** `--n-scat=1000` only, confirm autosave JSON appears under `.benchmarks/Linux-CPython-3.12-64bit/`.
 1. **Ladder:** `1000,10000,100000` — confirm throughput and wall time look sane.
-1. **`10^6`:** run once with `/usr/bin/time -v` and `watch` on `MemAvailable`.
-1. **`10^7`:** only if step 3 peak RSS plus headroom fits your policy; expect long runtime even on 16 cores because the
-   Python frequency loop is still **`O(n_freq)`** per scatterer batch semantics.
+1. **`10^6`:** run once with `/usr/bin/time -v`, `watch` on `MemAvailable`, and optional PyMUST progress logging.
+1. **`10^7`:** only if step 3 peak RSS plus headroom fits your policy and the progress ETA is reasonable. It is fine to
+   stop early after collecting enough progress data to show that PyMUST is still advancing.
 
-## NumPy benchmark command (full sweep)
+## PyMUST benchmark command (full sweep)
 
 Use a machine label that includes **CPU model** so the plot legend stays honest when you merge JSON from multiple hosts:
 
 ```bash
 export FASTSIMUS_DEVICE_LABEL="SIMUS (NumPy) $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2 | xargs) ($(nproc) cores)"
 
-uv run pytest tests/benchmarks/bench_simus_scaling.py \
+uv run pytest tests/benchmarks/bench_pymust_scaling.py \
   --benchmark-only --benchmark-autosave -p no:xdist -m scaling \
-  -k numpy \
+  -k pymust \
   --n-scat=1000,10000,100000,1000000,10000000
 ```
 
 If `10^7` is too heavy, split:
 
 ```bash
-uv run pytest tests/benchmarks/bench_simus_scaling.py ... -k numpy --n-scat=1000000
-uv run pytest tests/benchmarks/bench_simus_scaling.py ... -k numpy --n-scat=10000000
+uv run pytest tests/benchmarks/bench_pymust_scaling.py ... -k pymust --n-scat=1000000
+uv run pytest tests/benchmarks/bench_pymust_scaling.py ... -k pymust --n-scat=10000000
 ```
 
 Each autosave creates a new JSON; keep the ones you need for plotting.
 
 ## CUDA reference (optional re-run on same machine)
 
-If you want CUDA and NumPy from the **same commit** on the large box:
+If you want CUDA and PyMUST baseline rows from the **same commit** on the large box:
 
 ```bash
 export FASTSIMUS_DEVICE_LABEL="Proposed (CUDA) $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2 | xargs)"
@@ -149,15 +206,15 @@ From a checkout that has **both** JSON files (copy paths as needed):
 ```bash
 uv run python scripts/plot_benchmark_scaling.py \
   path/to/cuda.json \
-  path/to/numpy.json \
+  path/to/pymust.json \
   -o docs/figures/2026-04-cuda-scaling.png \
-  --reference-backend numpy \
+  --reference-backend pymust \
   --reference-label "SIMUS (NumPy)" \
   --series-column machine \
   --title "SIMUS scaling: SIMUS (NumPy) vs Proposed"
 ```
 
-Speedup panel is **vs NumPy** (`SIMUS (NumPy)`), not PyMUST.
+Speedup panel is **vs PyMUST**, which is displayed as `SIMUS (NumPy)` for the paper.
 
 ## After results exist
 
