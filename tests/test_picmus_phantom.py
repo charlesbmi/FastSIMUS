@@ -16,20 +16,16 @@ from jaxtyping import Complex, Float, jaxtyped
 from tests._picmus_phantom_shared import (
     DYNAMIC_RANGE_DB,
     L11_PICMUS_ATTENUATION_DB_CM_MHZ,
-    L11_PICMUS_BANDWIDTH_PERCENT,
-    L11_PICMUS_ELEVATION_FOCUS_M,
     L11_PICMUS_FREQ_CENTER_HZ,
-    L11_PICMUS_HEIGHT_M,
-    L11_PICMUS_N_ELEMENTS,
     L11_PICMUS_PITCH_M,
     L11_PICMUS_SAMPLING_FREQUENCY_HZ,
     L11_PICMUS_SIMUS_DB_THRESH,
     L11_PICMUS_SPEED_OF_SOUND_M_S,
     L11_PICMUS_TX_N_WAVELENGTHS,
-    L11_PICMUS_WIDTH_M,
     PICMUS_GRID_WARN_PIXELS,
     PICMUS_RECONSTRUCTION_WARN_PIXEL_FIRINGS,
     Phantom,
+    PhantomCase,
     ReconstructedIq,
     RfStacks,
     _angle_cache_key,
@@ -55,15 +51,8 @@ with contextlib.suppress(ImportError):
     plt = _matplotlib_pyplot
     HAS_MATPLOTLIB = True
 
-N_ELEMENTS = L11_PICMUS_N_ELEMENTS
 FREQ_CENTER_HZ = L11_PICMUS_FREQ_CENTER_HZ
 PITCH_M = L11_PICMUS_PITCH_M
-WIDTH_M = L11_PICMUS_WIDTH_M
-KERF_M = PITCH_M - WIDTH_M
-HEIGHT_M = L11_PICMUS_HEIGHT_M
-ELEVATION_FOCUS_M = L11_PICMUS_ELEVATION_FOCUS_M
-BANDWIDTH_PERCENT = L11_PICMUS_BANDWIDTH_PERCENT
-BANDWIDTH_FRACTION = BANDWIDTH_PERCENT / 100.0
 TX_N_WAVELENGTHS = L11_PICMUS_TX_N_WAVELENGTHS
 SPEED_OF_SOUND_M_S = L11_PICMUS_SPEED_OF_SOUND_M_S
 PICMUS_WAVELENGTH_M = SPEED_OF_SOUND_M_S / FREQ_CENTER_HZ
@@ -128,11 +117,6 @@ IMAGE_X_MAX_M = PICMUS_APERTURE_X_M
 IMAGE_Z_MIN_M = 5.0e-3
 IMAGE_Z_MAX_M = 50.0e-3
 
-CPWC_ANGLES_RAD = PICMUS_BROADSIDE_ANGLES_RAD.copy()
-PHANTOM_X_M = PICMUS_PHANTOM_X_M.copy()
-PHANTOM_Z_M = PICMUS_PHANTOM_Z_M.copy()
-PHANTOM_RC = np.ones(PHANTOM_X_M.shape, dtype=np.float64)
-
 IMAGE_X_M = np.linspace(IMAGE_X_MIN_M, IMAGE_X_MAX_M, 96)
 IMAGE_Z_M = np.linspace(IMAGE_Z_MIN_M, IMAGE_Z_MAX_M, 128)
 IQ_ATOL_PEAK = 5e-2
@@ -150,10 +134,6 @@ for constant_array in (
     PICMUS_PHANTOM_Z_M,
     PICMUS_FULL_ANGLES_RAD,
     PICMUS_BROADSIDE_ANGLES_RAD,
-    CPWC_ANGLES_RAD,
-    PHANTOM_X_M,
-    PHANTOM_Z_M,
-    PHANTOM_RC,
     IMAGE_X_M,
     IMAGE_Z_M,
 ):
@@ -165,19 +145,26 @@ def _assert_rf_stack_layout(
     fastsimus: Float[np.ndarray, "samples channels firings"],
     pymust: Float[np.ndarray, "samples channels firings"],
     angles_rad: Float[np.ndarray, "firings"],  # noqa: F821, UP037 - jaxtyping axis name.
+    *,
+    n_elements: int,
+    n_firings: int,
 ) -> None:
     """Assert RF stacks use the expected PICMUS samples/channels/firings layout."""
-    assert fastsimus.shape[1:] == (N_ELEMENTS, CPWC_ANGLES_RAD.size)
-    assert angles_rad.shape == (CPWC_ANGLES_RAD.size,)
+    assert fastsimus.shape[1:] == (n_elements, n_firings)
+    assert angles_rad.shape == (n_firings,)
 
 
 @jaxtyped(typechecker=beartype)
 def _assert_reconstructed_iq_layout(
     fastsimus: Complex[np.ndarray, "z x"],
     pymust: Complex[np.ndarray, "z x"],
+    *,
+    n_z: int,
+    n_x: int,
 ) -> None:
     """Assert reconstructed IQ images use the expected PICMUS z/x grid layout."""
-    assert fastsimus.shape == (IMAGE_Z_M.size, IMAGE_X_M.size)
+    assert fastsimus.shape == (n_z, n_x)
+    assert pymust.shape == (n_z, n_x)
 
 
 def _angles_for_plot_mode(angle_mode: str) -> np.ndarray:
@@ -187,20 +174,6 @@ def _angles_for_plot_mode(angle_mode: str) -> np.ndarray:
     if angle_mode == "full":
         return PICMUS_FULL_ANGLES_RAD.copy()
     raise ValueError(f"Unknown PICMUS phantom angle mode: {angle_mode}")
-
-
-def _image_axes_for_grid_wavelengths(grid_wavelengths: float | None) -> tuple[np.ndarray, np.ndarray]:
-    """Return image axes for either the fast test grid or a wavelength-spaced plot grid."""
-    return _shared_image_axes_for_grid_wavelengths(
-        grid_wavelengths,
-        default_x_axis_m=IMAGE_X_M,
-        default_z_axis_m=IMAGE_Z_M,
-        x_bounds_m=(IMAGE_X_MIN_M, IMAGE_X_MAX_M),
-        z_bounds_m=(IMAGE_Z_MIN_M, IMAGE_Z_MAX_M),
-        wavelength_m=PICMUS_WAVELENGTH_M,
-        warn_pixels=PICMUS_GRID_WARN_PIXELS,
-        stacklevel=3,
-    )
 
 
 def _expects_large_reconstruction_warning(
@@ -224,40 +197,134 @@ def _expects_large_reconstruction_warning(
 
 def _make_picmus_resolution_phantom() -> Phantom:
     """Create a compact in-code version of the PICMUS resolution phantom."""
-    return Phantom(PHANTOM_X_M.copy(), PHANTOM_Z_M.copy(), PHANTOM_RC.copy())
+    return Phantom(
+        PICMUS_PHANTOM_X_M.copy(),
+        PICMUS_PHANTOM_Z_M.copy(),
+        np.ones(PICMUS_PHANTOM_X_M.shape, dtype=np.float64),
+    )
+
+
+RESOLUTION_CASE = PhantomCase(
+    id="resolution",
+    cache_key=(
+        "resolution",
+        "picmus-resolution-distorsion",
+        "phantom-20-point-v1",
+        "l11-picmus-matched-v1",
+        f"fs={SAMPLING_FREQUENCY_HZ:.6g}",
+        f"tx={TX_N_WAVELENGTHS:g}",
+        f"db={SIMUS_DB_THRESH:g}",
+    ),
+    phantom_factory=_make_picmus_resolution_phantom,
+    matched_params_factory=make_l11_picmus_matched_params,
+    default_angles_rad=_angle_cache_key(PICMUS_BROADSIDE_ANGLES_RAD),
+    diagnostic_angles_rad=_angle_cache_key(PICMUS_FULL_ANGLES_RAD),
+    x_bounds_m=(IMAGE_X_MIN_M, IMAGE_X_MAX_M),
+    z_bounds_m=(IMAGE_Z_MIN_M, IMAGE_Z_MAX_M),
+    default_x_axis_m=tuple(float(x) for x in IMAGE_X_M),
+    default_z_axis_m=tuple(float(z) for z in IMAGE_Z_M),
+    wavelength_m=PICMUS_WAVELENGTH_M,
+    validation_mode="iq_residual",
+    iq_atol_peak=IQ_ATOL_PEAK,
+)
+ACTIVE_PHANTOM_CASES = (RESOLUTION_CASE,)
+IQ_RESIDUAL_CASES = tuple(case for case in ACTIVE_PHANTOM_CASES if case.validation_mode == "iq_residual")
+_CASES_BY_CACHE_KEY = {case.cache_key: case for case in ACTIVE_PHANTOM_CASES}
+
+
+def _case_for_cache_key(case_cache_key: tuple[str, ...]) -> PhantomCase:
+    """Return a registered phantom case by its explicit cache identity."""
+    return _CASES_BY_CACHE_KEY[case_cache_key]
+
+
+def _case_default_x_axis(case: PhantomCase) -> np.ndarray:
+    """Return a writable copy of a case's default lateral image axis."""
+    return np.array(case.default_x_axis_m, dtype=np.float64)
+
+
+def _case_default_z_axis(case: PhantomCase) -> np.ndarray:
+    """Return a writable copy of a case's default axial image axis."""
+    return np.array(case.default_z_axis_m, dtype=np.float64)
+
+
+def _image_axes_for_case_grid(case: PhantomCase, grid_wavelengths: float | None) -> tuple[np.ndarray, np.ndarray]:
+    """Return image axes for a case's default or wavelength-spaced grid."""
+    return _shared_image_axes_for_grid_wavelengths(
+        grid_wavelengths,
+        default_x_axis_m=_case_default_x_axis(case),
+        default_z_axis_m=_case_default_z_axis(case),
+        x_bounds_m=case.x_bounds_m,
+        z_bounds_m=case.z_bounds_m,
+        wavelength_m=case.wavelength_m,
+        warn_pixels=PICMUS_GRID_WARN_PIXELS,
+        stacklevel=3,
+    )
+
+
+def _rf_stacks_cache_key(
+    case: PhantomCase,
+    angles_key: tuple[float, ...],
+) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    """Return the RF cache key, including the case's scientific identity."""
+    return case.cache_key, angles_key
+
+
+def _reconstructed_iq_cache_key(
+    case: PhantomCase,
+    angles_key: tuple[float, ...],
+    grid_wavelengths: float | None,
+) -> tuple[tuple[str, ...], tuple[float, ...], float | None]:
+    """Return the IQ cache key, including case, angles, and grid identity."""
+    return case.cache_key, angles_key, grid_wavelengths
 
 
 @lru_cache(maxsize=1)
-def _simulate_rf_stacks() -> RfStacks:
-    """Simulate matched PyMUST and FastSIMUS RF stacks for the compact phantom."""
-    return _simulate_rf_stacks_for_angles(_angle_cache_key(CPWC_ANGLES_RAD))
+def _simulate_rf_stacks(case: PhantomCase = RESOLUTION_CASE) -> RfStacks:
+    """Simulate matched PyMUST and FastSIMUS RF stacks for a phantom case."""
+    return _simulate_rf_stacks_for_case_key(*_rf_stacks_cache_key(case, case.default_angles_rad))
 
 
 @lru_cache(maxsize=2)
-def _simulate_rf_stacks_for_angles(angles_key: tuple[float, ...]) -> RfStacks:
-    """Simulate matched RF stacks for the requested PICMUS angle sequence."""
+def _simulate_rf_stacks_for_case_key(
+    case_cache_key: tuple[str, ...],
+    angles_key: tuple[float, ...],
+) -> RfStacks:
+    """Simulate matched RF stacks for the requested case and angle sequence."""
+    case = _case_for_cache_key(case_cache_key)
     angles_rad = np.array(angles_key, dtype=np.float64)
-    phantom = _make_picmus_resolution_phantom()
-    params = make_l11_picmus_matched_params()
+    phantom = case.phantom_factory()
+    params = case.matched_params_factory()
     return _simulate_rf_stacks_for_case(phantom, params, angles_rad)
 
 
 @lru_cache(maxsize=1)
-def _reconstruct_picmus_iq() -> ReconstructedIq:
+def _reconstruct_picmus_iq(case: PhantomCase = RESOLUTION_CASE) -> ReconstructedIq:
     """Reconstruct the cached PICMUS phantom RF stacks once per test session."""
-    return _reconstruct_picmus_iq_for_grid(_angle_cache_key(CPWC_ANGLES_RAD), None)
+    return _reconstruct_picmus_iq_for_grid(case, case.default_angles_rad, None)
 
 
 @lru_cache(maxsize=4)
 def _reconstruct_picmus_iq_for_grid(
+    case: PhantomCase,
     angles_key: tuple[float, ...],
     grid_wavelengths: float | None,
 ) -> ReconstructedIq:
     """Reconstruct the PICMUS phantom for requested angles and image-grid spacing."""
-    x_axis_m, z_axis_m = _image_axes_for_grid_wavelengths(grid_wavelengths)
+    return _reconstruct_picmus_iq_for_cache_key(*_reconstructed_iq_cache_key(case, angles_key, grid_wavelengths))
+
+
+@lru_cache(maxsize=4)
+def _reconstruct_picmus_iq_for_cache_key(
+    case_cache_key: tuple[str, ...],
+    angles_key: tuple[float, ...],
+    grid_wavelengths: float | None,
+) -> ReconstructedIq:
+    """Reconstruct the PICMUS phantom for requested case, angles, and image-grid spacing."""
+    case = _case_for_cache_key(case_cache_key)
+    x_axis_m, z_axis_m = _image_axes_for_case_grid(case, grid_wavelengths)
     return _reconstruct_iq(
-        _simulate_rf_stacks_for_angles(angles_key),
-        make_l11_picmus_matched_params(),
+        _simulate_rf_stacks_for_case_key(case_cache_key, angles_key),
+        case.matched_params_factory(),
         x_axis_m=x_axis_m,
         z_axis_m=z_axis_m,
         warn_pixel_firings=PICMUS_RECONSTRUCTION_WARN_PIXEL_FIRINGS,
@@ -316,10 +383,12 @@ def _render_picmus_phantom_plot(reconstructed: ReconstructedIq, output_path: Pat
 
 def test_picmus_phantom_constants_match_hdf5_values() -> None:
     """Phantom constants are copied from the PICMUS resolution_distorsion HDF5 phantom."""
-    np.testing.assert_allclose(PHANTOM_X_M, PICMUS_PHANTOM_X_M)
-    np.testing.assert_allclose(PHANTOM_Z_M, PICMUS_PHANTOM_Z_M)
-    np.testing.assert_array_equal(PHANTOM_RC, np.ones(20, dtype=np.float64))
-    np.testing.assert_allclose(CPWC_ANGLES_RAD, PICMUS_BROADSIDE_ANGLES_RAD)
+    phantom = RESOLUTION_CASE.phantom_factory()
+
+    np.testing.assert_allclose(phantom.x, PICMUS_PHANTOM_X_M)
+    np.testing.assert_allclose(phantom.z, PICMUS_PHANTOM_Z_M)
+    np.testing.assert_array_equal(phantom.rc, np.ones(20, dtype=np.float64))
+    np.testing.assert_allclose(np.array(RESOLUTION_CASE.default_angles_rad), PICMUS_BROADSIDE_ANGLES_RAD)
     assert PICMUS_FULL_ANGLES_RAD.shape == (75,)
     assert PICMUS_FULL_ANGLES_RAD[37] == pytest.approx(0.0)
     np.testing.assert_allclose(PICMUS_FULL_ANGLES_RAD[36:39], PICMUS_BROADSIDE_ANGLES_RAD)
@@ -344,27 +413,57 @@ def test_picmus_phantom_angle_modes_select_expected_sequences() -> None:
         _angles_for_plot_mode("unsupported")
 
 
-def test_simulated_rf_stacks_are_finite_nonzero_and_matched() -> None:
-    """PyMUST and FastSIMUS produce finite, nonzero RF stacks with matched layout."""
-    stacks = _simulate_rf_stacks()
+def test_resolution_case_uses_explicit_scientific_cache_key() -> None:
+    """The first phantom case carries a stable cache key beyond its display ID."""
+    assert RESOLUTION_CASE.id == "resolution"
+    assert RESOLUTION_CASE.cache_key != (RESOLUTION_CASE.id,)
+    assert RESOLUTION_CASE.cache_key[0] == RESOLUTION_CASE.id
+    assert "picmus-resolution-distorsion" in RESOLUTION_CASE.cache_key
+    assert _rf_stacks_cache_key(RESOLUTION_CASE, RESOLUTION_CASE.default_angles_rad)[0] == RESOLUTION_CASE.cache_key
 
-    _assert_rf_stack_layout(stacks.fastsimus, stacks.pymust, stacks.angles_rad)
+
+def test_iq_residual_cases_select_supported_validation_modes() -> None:
+    """IQ residual tests only collect cases configured for complex-IQ comparison."""
+    assert IQ_RESIDUAL_CASES == (RESOLUTION_CASE,)
+    assert all(case.validation_mode == "iq_residual" for case in IQ_RESIDUAL_CASES)
+
+
+@pytest.mark.parametrize("case", IQ_RESIDUAL_CASES, ids=lambda case: case.id)
+def test_simulated_rf_stacks_are_finite_nonzero_and_matched(case) -> None:
+    """PyMUST and FastSIMUS produce finite, nonzero RF stacks with matched layout."""
+    stacks = _simulate_rf_stacks(case)
+    params = case.matched_params_factory()
+
+    _assert_rf_stack_layout(
+        stacks.fastsimus,
+        stacks.pymust,
+        stacks.angles_rad,
+        n_elements=params.fastsimus_transducer.n_elements,
+        n_firings=len(case.default_angles_rad),
+    )
     assert np.all(np.isfinite(stacks.pymust))
     assert np.all(np.isfinite(stacks.fastsimus))
     assert np.max(np.abs(stacks.pymust)) > 0.0
     assert np.max(np.abs(stacks.fastsimus)) > 0.0
 
 
-def test_reconstructed_complex_iq_matches_pymust() -> None:
+@pytest.mark.parametrize("case", IQ_RESIDUAL_CASES, ids=lambda case: case.id)
+def test_reconstructed_complex_iq_matches_pymust(case) -> None:
     """Shared DAS reconstruction returns finite complex IQ matching PyMUST."""
-    reconstructed = _reconstruct_picmus_iq()
+    reconstructed = _reconstruct_picmus_iq(case)
 
-    _assert_reconstructed_iq_layout(reconstructed.fastsimus, reconstructed.pymust)
+    _assert_reconstructed_iq_layout(
+        reconstructed.fastsimus,
+        reconstructed.pymust,
+        n_z=len(case.default_z_axis_m),
+        n_x=len(case.default_x_axis_m),
+    )
     assert np.all(np.isfinite(reconstructed.fastsimus))
     assert np.all(np.isfinite(reconstructed.pymust))
     assert np.max(np.abs(reconstructed.fastsimus)) > 0.0
     assert np.max(np.abs(reconstructed.pymust)) > 0.0
-    _assert_iq_close(reconstructed.fastsimus, reconstructed.pymust, atol_peak=IQ_ATOL_PEAK)
+    assert case.iq_atol_peak is not None
+    _assert_iq_close(reconstructed.fastsimus, reconstructed.pymust, atol_peak=case.iq_atol_peak)
 
 
 def test_optional_picmus_phantom_plot_is_written(
@@ -389,7 +488,11 @@ def test_optional_picmus_phantom_plot_is_written(
     )
     with warning_context:
         _render_picmus_phantom_plot(
-            _reconstruct_picmus_iq_for_grid(_angle_cache_key(angles_rad), picmus_phantom_grid_wavelengths),
+            _reconstruct_picmus_iq_for_grid(
+                RESOLUTION_CASE,
+                _angle_cache_key(angles_rad),
+                picmus_phantom_grid_wavelengths,
+            ),
             picmus_phantom_plot,
         )
 
