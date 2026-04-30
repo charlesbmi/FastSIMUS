@@ -1,7 +1,7 @@
 """Pytest configuration for FastSIMUS tests."""
 
 import contextlib
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -10,6 +10,16 @@ from fast_simus.simus import SimusStrategy
 from fast_simus.utils._array_api import _ArrayNamespace
 
 # Try to import array backends
+
+
+def _cupy_has_cuda_device(cupy_module: Any) -> bool:
+    """Return whether CuPy can see at least one CUDA device."""
+    try:
+        return int(cupy_module.cuda.runtime.getDeviceCount()) > 0
+    except Exception:
+        return False
+
+
 HAS_NUMPY = False
 np = None
 with contextlib.suppress(ImportError):
@@ -39,7 +49,7 @@ cp = None
 with contextlib.suppress(ImportError):
     import cupy as cp
 
-    HAS_CUPY = True
+    HAS_CUPY = _cupy_has_cuda_device(cp)
 
 
 @pytest.fixture(
@@ -60,7 +70,7 @@ with contextlib.suppress(ImportError):
         pytest.param(
             cp,
             id="cupy",
-            marks=pytest.mark.skipif(not HAS_CUPY, reason="CuPy not available"),
+            marks=pytest.mark.skipif(not HAS_CUPY, reason="CuPy CUDA device not available"),
         ),
     ]
 )

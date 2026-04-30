@@ -11,7 +11,11 @@ from typing import cast
 import numpy as np
 import pytest
 
+from tests.conftest import _cupy_has_cuda_device
+
 cp = pytest.importorskip("cupy")
+if not _cupy_has_cuda_device(cp):
+    pytest.skip("CuPy CUDA device not available", allow_module_level=True)
 
 from fast_simus.kernels.cuda_simus import _B_SCAT, _DEFAULT_SHMEM_CAP_BYTES, _get_kernel, _kernel_cache, _shmem_bytes
 from fast_simus.simus import SimusStrategy, simus
