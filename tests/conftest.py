@@ -1,6 +1,8 @@
 """Pytest configuration for FastSIMUS tests."""
 
 import contextlib
+import math
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -8,6 +10,154 @@ import pytest
 from fast_simus.pfield import PfieldStrategy
 from fast_simus.simus import SimusStrategy
 from fast_simus.utils._array_api import _ArrayNamespace
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register FastSIMUS test-specific command-line options."""
+    parser.addoption(
+        "--plot-picmus-phantom",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="Write optional reconstructed PICMUS phantom diagnostic figure to PATH.",
+    )
+    parser.addoption(
+        "--picmus-phantom-angles",
+        action="store",
+        choices=("broadside", "full"),
+        default="broadside",
+        help="Choose broadside or full 75-angle sequence for optional PICMUS phantom plots.",
+    )
+    parser.addoption(
+        "--picmus-phantom-grid-wavelengths",
+        action="store",
+        type=float,
+        default=None,
+        metavar="N_WAVELENGTHS",
+        help=(
+            "Use a diagnostic plot beamforming grid with this spacing in center-frequency wavelengths "
+            "(for example, 0.25 for lambda/4)."
+        ),
+    )
+    parser.addoption(
+        "--run-picmus-contrast",
+        action="store_true",
+        default=False,
+        help=(
+            "Run opt-in public PICMUS contrast phantom simulations. Requires --picmus-contrast-phantom and may be slow."
+        ),
+    )
+    parser.addoption(
+        "--picmus-contrast-phantom",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help=("Path to contrast_speckle_simu_phantom.hdf5 containing /US/US_DATASET0000/scatterers_positions."),
+    )
+    parser.addoption(
+        "--picmus-contrast-angle-mode",
+        action="store",
+        choices=("center", "full"),
+        default="center",
+        help=(
+            "Choose center for the broadside public contrast smoke test or full for all 75 "
+            "PICMUS contrast plane waves, which can be much slower."
+        ),
+    )
+    parser.addoption(
+        "--picmus-contrast-figure-dir",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="Directory for optional PICMUS contrast diagnostic and comparison figures.",
+    )
+    parser.addoption(
+        "--picmus-contrast-save-beamformed",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="Optional HDF5 output path for full-angle PICMUS contrast beamformed results.",
+    )
+    parser.addoption(
+        "--picmus-contrast-load-beamformed",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="Optional HDF5 input path for regenerating PICMUS contrast figures without RF simulation.",
+    )
+
+
+@pytest.fixture
+def picmus_phantom_plot(request: pytest.FixtureRequest) -> Path | None:
+    """Return the optional PICMUS phantom diagnostic plot output path."""
+    figure_path = request.config.getoption("--plot-picmus-phantom")
+    if figure_path is None:
+        return None
+    return Path(figure_path)
+
+
+@pytest.fixture
+def picmus_phantom_angles(request: pytest.FixtureRequest) -> str:
+    """Return the PICMUS phantom angle mode for optional diagnostic plots."""
+    return cast("str", request.config.getoption("--picmus-phantom-angles"))
+
+
+@pytest.fixture
+def picmus_phantom_grid_wavelengths(request: pytest.FixtureRequest) -> float | None:
+    """Return optional diagnostic plot grid spacing in center-frequency wavelengths."""
+    grid_wavelengths = cast("float | None", request.config.getoption("--picmus-phantom-grid-wavelengths"))
+    if grid_wavelengths is not None and (not math.isfinite(grid_wavelengths) or grid_wavelengths <= 0.0):
+        raise pytest.UsageError("--picmus-phantom-grid-wavelengths must be finite and positive")
+    return grid_wavelengths
+
+
+@pytest.fixture
+def run_picmus_contrast(request: pytest.FixtureRequest) -> bool:
+    """Return whether opt-in PICMUS contrast phantom simulations should run."""
+    return bool(request.config.getoption("--run-picmus-contrast"))
+
+
+@pytest.fixture
+def picmus_contrast_phantom_path(request: pytest.FixtureRequest) -> Path | None:
+    """Return the caller-supplied public PICMUS contrast phantom HDF5 path."""
+    phantom_path = cast("str | None", request.config.getoption("--picmus-contrast-phantom"))
+    if phantom_path is None:
+        return None
+    return Path(phantom_path)
+
+
+@pytest.fixture
+def picmus_contrast_angle_mode(request: pytest.FixtureRequest) -> str:
+    """Return the selected PICMUS contrast angle mode."""
+    return cast("str", request.config.getoption("--picmus-contrast-angle-mode"))
+
+
+@pytest.fixture
+def picmus_contrast_figure_dir(request: pytest.FixtureRequest) -> Path | None:
+    """Return the optional PICMUS contrast figure output directory."""
+    figure_dir = cast("str | None", request.config.getoption("--picmus-contrast-figure-dir"))
+    if figure_dir is None:
+        return None
+    return Path(figure_dir)
+
+
+@pytest.fixture
+def picmus_contrast_save_beamformed_path(request: pytest.FixtureRequest) -> Path | None:
+    """Return the optional PICMUS contrast beamformed HDF5 output path."""
+    output_path = cast("str | None", request.config.getoption("--picmus-contrast-save-beamformed"))
+    if output_path is None:
+        return None
+    return Path(output_path)
+
+
+@pytest.fixture
+def picmus_contrast_load_beamformed_path(request: pytest.FixtureRequest) -> Path | None:
+    """Return the optional PICMUS contrast beamformed HDF5 input path."""
+    input_path = cast("str | None", request.config.getoption("--picmus-contrast-load-beamformed"))
+    if input_path is None:
+        return None
+    return Path(input_path)
+
 
 # Try to import array backends
 
@@ -81,7 +231,7 @@ def xp(request) -> _ArrayNamespace:
     Does not include array-api-strict, which can be used in place of a parametrized backend
     for Array API compliance testing.
     """
-    return cast(_ArrayNamespace, request.param)
+    return cast("_ArrayNamespace", request.param)
 
 
 @pytest.fixture(
@@ -90,7 +240,7 @@ def xp(request) -> _ArrayNamespace:
         pytest.param(PfieldStrategy.VECTORIZED, id="vectorized"),
         pytest.param(PfieldStrategy.SCAN, id="scan"),
         pytest.param(PfieldStrategy.METAL, id="metal"),
-    ]
+    ],
 )
 def strategy(request) -> PfieldStrategy | None:
     """Fixture providing different pfield strategies."""
