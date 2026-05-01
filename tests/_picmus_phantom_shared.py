@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import warnings
 from collections.abc import Callable
@@ -13,6 +14,16 @@ import pymust
 
 from fast_simus import MediumParams, TransducerParams, element_positions, plane_wave, simus_compute, simus_precompute
 from fast_simus.utils._array_api import _ArrayNamespace
+
+HAS_MLX = False
+mx = None
+with contextlib.suppress(ImportError):
+    import mlx.core as mx
+
+    from fast_simus.backends.mlx import ensure_compat
+
+    ensure_compat(mx)
+    HAS_MLX = True
 
 L11_PICMUS_N_ELEMENTS = 128
 L11_PICMUS_FREQ_CENTER_HZ = 5.208e6
@@ -31,6 +42,13 @@ DYNAMIC_RANGE_DB = 60.0
 PICMUS_GRID_WARN_PIXELS = 1_000_000
 PICMUS_RECONSTRUCTION_WARN_PIXEL_FIRINGS = 5_000_000
 XP_STRICT = cast("_ArrayNamespace", array_api_strict)
+
+
+def _fastsimus_array_namespace() -> _ArrayNamespace:
+    """Return the preferred FastSIMUS backend for artifact-producing helpers."""
+    if HAS_MLX:
+        return cast("_ArrayNamespace", mx)
+    return XP_STRICT
 
 
 class Phantom(NamedTuple):
@@ -284,12 +302,15 @@ def _simulate_pymust_rf(
     *,
     n_elements: int,
     db_thresh: float,
+    progress_label: str | None = None,
 ) -> np.ndarray:
     """Simulate one PyMUST RF firing per configured plane-wave delay."""
     options = pymust.utils.Options()
     options.dBThresh = db_thresh
     firings = []
-    for firing_delays in delays:
+    for firing_idx, firing_delays in enumerate(delays):
+        if progress_label is not None:
+            print(f"{progress_label}: PyMUST RF firing {firing_idx + 1}/{delays.shape[0]}", flush=True)
         rf, _ = pymust.simus(phantom.x, phantom.z, phantom.rc, firing_delays, param, options)
         firings.append(np.asarray(rf))
     return _stack_rf_firings(firings, n_elements)
@@ -299,15 +320,24 @@ def _simulate_fastsimus_rf(
     phantom: Phantom,
     params: MatchedSimulatorParams,
     delays: np.ndarray,
+    *,
+    progress_label: str | None = None,
 ) -> np.ndarray:
     """Simulate one FastSIMUS RF firing per configured plane-wave delay."""
-    scatterers = XP_STRICT.asarray(np.stack([phantom.x, phantom.z], axis=-1))
-    rc = XP_STRICT.asarray(phantom.rc)
-    delays_xp = [XP_STRICT.asarray(firing_delays) for firing_delays in delays]
+    xp = _fastsimus_array_namespace()
+    scatterers = xp.asarray(np.stack([phantom.x, phantom.z], axis=-1))
+    rc = xp.asarray(phantom.rc)
+    delays_xp = [xp.asarray(firing_delays) for firing_delays in delays]
     delay_spans = np.ptp(delays, axis=1)
     precompute_idx = int(np.argmax(delay_spans))
     assert np.all(delay_spans <= delay_spans[precompute_idx])
 
+    if progress_label is not None:
+        backend_label = "Metal" if HAS_MLX else "Array API strict"
+        print(
+            f"{progress_label}: FastSIMUS {backend_label} precompute firing {precompute_idx + 1}/{delays.shape[0]}",
+            flush=True,
+        )
     plan = simus_precompute(
         scatterers,
         rc,
@@ -318,19 +348,22 @@ def _simulate_fastsimus_rf(
         tx_n_wavelengths=params.tx_n_wavelengths,
         db_thresh=params.simus_db_thresh,
     )
-    firings = [
-        np.asarray(
-            simus_compute(
-                scatterers,
-                rc,
-                firing_delays,
-                plan,
-                params.fastsimus_transducer,
-                params.fastsimus_medium,
-            ).rf,
+    firings = []
+    for firing_idx, firing_delays in enumerate(delays_xp):
+        if progress_label is not None:
+            print(f"{progress_label}: FastSIMUS RF firing {firing_idx + 1}/{len(delays_xp)}", flush=True)
+        firings.append(
+            np.asarray(
+                simus_compute(
+                    scatterers,
+                    rc,
+                    firing_delays,
+                    plan,
+                    params.fastsimus_transducer,
+                    params.fastsimus_medium,
+                ).rf,
+            ),
         )
-        for firing_delays in delays_xp
-    ]
     return _stack_rf_firings(firings, params.fastsimus_transducer.n_elements)
 
 
@@ -338,6 +371,8 @@ def _simulate_rf_stacks_for_case(
     phantom: Phantom,
     params: MatchedSimulatorParams,
     angles_rad: np.ndarray,
+    *,
+    progress_label: str | None = None,
 ) -> RfStacks:
     """Simulate matched RF stacks for a concrete phantom and angle sequence."""
     pymust_delays = _pymust_plane_wave_delays(params.pymust_param, angles_rad)
@@ -353,8 +388,9 @@ def _simulate_rf_stacks_for_case(
         pymust_delays,
         n_elements=params.fastsimus_transducer.n_elements,
         db_thresh=params.simus_db_thresh,
+        progress_label=progress_label,
     )
-    fastsimus_rf = _simulate_fastsimus_rf(phantom, params, fastsimus_delays)
+    fastsimus_rf = _simulate_fastsimus_rf(phantom, params, fastsimus_delays, progress_label=progress_label)
     n_samples = max(pymust_rf.shape[0], fastsimus_rf.shape[0])
 
     result = RfStacks(
@@ -375,6 +411,7 @@ def _reconstruct_iq(
     x_axis_m: np.ndarray,
     z_axis_m: np.ndarray,
     warn_pixel_firings: int = PICMUS_RECONSTRUCTION_WARN_PIXEL_FIRINGS,
+    progress_label: str | None = None,
 ) -> ReconstructedIq:
     """Reconstruct FastSIMUS and PyMUST RF stacks through the same PyMUST DAS matrices."""
     param_for_das = copy.copy(params.pymust_param)
@@ -390,6 +427,8 @@ def _reconstruct_iq(
     pymust_image = np.zeros(x_grid.shape, dtype=np.complex128)
 
     for firing_idx, firing_delays in enumerate(pymust_delays):
+        if progress_label is not None:
+            print(f"{progress_label}: DAS firing {firing_idx + 1}/{pymust_delays.shape[0]}", flush=True)
         fastsimus_iq = pymust.rf2iq(
             stacks.fastsimus[..., firing_idx],
             params.sampling_frequency_hz,

@@ -88,10 +88,15 @@ test = [
     "mlx>=0.31; platform_system == 'Darwin'",
     "cupy-cuda12x>=13.0; platform_system == 'Linux'",
     "pymust>=0.1.9",
+    "h5py>=3.16.0",
 ]
 test-parallel = [
     { include-group = "test" },
     "pytest-xdist>=3.8.0",
+]
+test-plot = [
+    { include-group = "test" },
+    { include-group = "plot" },
 ]
 bench = [
     { include-group = "test" },
@@ -145,6 +150,26 @@ help = "Test all code (no benchmarks)"
 cmd = "pytest tests/ --ignore=tests/benchmarks -n auto --cov --cov-config=pyproject.toml --cov-report=xml -p no:benchmark"
 # Need isolated = true to avoid conflicts with pytest-benchmark
 executor = { group = "test-parallel" }
+
+[tool.poe.tasks.test-picmus-contrast]
+help = "Run the gated PICMUS contrast center-angle RF smoke test; set PICMUS_CONTRAST_PHANTOM to contrast_speckle_simu_phantom.hdf5"
+cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-phantom \"$PICMUS_CONTRAST_PHANTOM\" --picmus-contrast-angle-mode center -p no:benchmark"
+executor = { group = "test" }
+
+[tool.poe.tasks.test-picmus-contrast-full]
+help = "Run the gated PICMUS contrast full 75-angle RF comparison; set PICMUS_CONTRAST_PHANTOM"
+cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-phantom \"$PICMUS_CONTRAST_PHANTOM\" --picmus-contrast-angle-mode full -p no:benchmark"
+executor = { group = "test" }
+
+[tool.poe.tasks.test-picmus-contrast-artifacts]
+help = "Run full 75-angle contrast RF, save beamformed HDF5, and generate figures; set PICMUS_CONTRAST_PHANTOM"
+cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-phantom \"$PICMUS_CONTRAST_PHANTOM\" --picmus-contrast-angle-mode full --picmus-contrast-figure-dir \"${PICMUS_CONTRAST_FIGURE_DIR:-.artifacts/picmus_contrast}\" --picmus-contrast-save-beamformed \"${PICMUS_CONTRAST_BEAMFORMED:-.artifacts/picmus_contrast/picmus_contrast_beamformed_75_angle.hdf5}\" -p no:benchmark"
+executor = { group = "test-plot" }
+
+[tool.poe.tasks.plot-picmus-contrast-artifacts]
+help = "Regenerate PICMUS contrast figures from saved beamformed HDF5; set PICMUS_CONTRAST_PHANTOM"
+cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-phantom \"$PICMUS_CONTRAST_PHANTOM\" --picmus-contrast-figure-dir \"${PICMUS_CONTRAST_FIGURE_DIR:-.artifacts/picmus_contrast}\" --picmus-contrast-load-beamformed \"${PICMUS_CONTRAST_BEAMFORMED:-.artifacts/picmus_contrast/picmus_contrast_beamformed_75_angle.hdf5}\" -p no:benchmark"
+executor = { group = "test-plot" }
 
 [tool.poe.tasks.benchmark]
 help = "Run performance benchmarks"

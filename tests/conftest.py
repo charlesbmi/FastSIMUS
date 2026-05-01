@@ -39,6 +39,52 @@ def pytest_addoption(parser: pytest.Parser) -> None:
             "(for example, 0.25 for lambda/4)."
         ),
     )
+    parser.addoption(
+        "--run-picmus-contrast",
+        action="store_true",
+        default=False,
+        help=(
+            "Run opt-in public PICMUS contrast phantom simulations. Requires --picmus-contrast-phantom and may be slow."
+        ),
+    )
+    parser.addoption(
+        "--picmus-contrast-phantom",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help=("Path to contrast_speckle_simu_phantom.hdf5 containing /US/US_DATASET0000/scatterers_positions."),
+    )
+    parser.addoption(
+        "--picmus-contrast-angle-mode",
+        action="store",
+        choices=("center", "full"),
+        default="center",
+        help=(
+            "Choose center for the broadside public contrast smoke test or full for all 75 "
+            "PICMUS contrast plane waves, which can be much slower."
+        ),
+    )
+    parser.addoption(
+        "--picmus-contrast-figure-dir",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="Directory for optional PICMUS contrast diagnostic and comparison figures.",
+    )
+    parser.addoption(
+        "--picmus-contrast-save-beamformed",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="Optional HDF5 output path for full-angle PICMUS contrast beamformed results.",
+    )
+    parser.addoption(
+        "--picmus-contrast-load-beamformed",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="Optional HDF5 input path for regenerating PICMUS contrast figures without RF simulation.",
+    )
 
 
 @pytest.fixture
@@ -63,6 +109,54 @@ def picmus_phantom_grid_wavelengths(request: pytest.FixtureRequest) -> float | N
     if grid_wavelengths is not None and (not math.isfinite(grid_wavelengths) or grid_wavelengths <= 0.0):
         raise pytest.UsageError("--picmus-phantom-grid-wavelengths must be finite and positive")
     return grid_wavelengths
+
+
+@pytest.fixture
+def run_picmus_contrast(request: pytest.FixtureRequest) -> bool:
+    """Return whether opt-in PICMUS contrast phantom simulations should run."""
+    return bool(request.config.getoption("--run-picmus-contrast"))
+
+
+@pytest.fixture
+def picmus_contrast_phantom_path(request: pytest.FixtureRequest) -> Path | None:
+    """Return the caller-supplied public PICMUS contrast phantom HDF5 path."""
+    phantom_path = cast("str | None", request.config.getoption("--picmus-contrast-phantom"))
+    if phantom_path is None:
+        return None
+    return Path(phantom_path)
+
+
+@pytest.fixture
+def picmus_contrast_angle_mode(request: pytest.FixtureRequest) -> str:
+    """Return the selected PICMUS contrast angle mode."""
+    return cast("str", request.config.getoption("--picmus-contrast-angle-mode"))
+
+
+@pytest.fixture
+def picmus_contrast_figure_dir(request: pytest.FixtureRequest) -> Path | None:
+    """Return the optional PICMUS contrast figure output directory."""
+    figure_dir = cast("str | None", request.config.getoption("--picmus-contrast-figure-dir"))
+    if figure_dir is None:
+        return None
+    return Path(figure_dir)
+
+
+@pytest.fixture
+def picmus_contrast_save_beamformed_path(request: pytest.FixtureRequest) -> Path | None:
+    """Return the optional PICMUS contrast beamformed HDF5 output path."""
+    output_path = cast("str | None", request.config.getoption("--picmus-contrast-save-beamformed"))
+    if output_path is None:
+        return None
+    return Path(output_path)
+
+
+@pytest.fixture
+def picmus_contrast_load_beamformed_path(request: pytest.FixtureRequest) -> Path | None:
+    """Return the optional PICMUS contrast beamformed HDF5 input path."""
+    input_path = cast("str | None", request.config.getoption("--picmus-contrast-load-beamformed"))
+    if input_path is None:
+        return None
+    return Path(input_path)
 
 
 # Try to import array backends
