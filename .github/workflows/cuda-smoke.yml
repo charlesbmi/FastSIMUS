@@ -24,7 +24,7 @@ jobs:
   smoke:
     runs-on: [self-hosted, cuda]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Sync bench dependencies (CuPy + pytest-benchmark)
         run: uv sync --group bench --frozen
