@@ -126,13 +126,13 @@ def test_simus_cuda_matches_python_strategy():
 
 
 def test_simus_cuda_l11_5v_recompile():
-    """L11-5v has 128 elements; verifies a second NVRTC compile path works."""
+    """L11-5v verifies a distinct 128-element NVRTC compile path."""
     params = L11_5v()
     n_scat = 4
     scat = cp.asarray(np.stack([np.zeros(n_scat), np.linspace(1e-2, 4e-2, n_scat)], axis=-1).astype(np.float32))
     rc = cp.ones(n_scat, dtype=cp.float32)
     delays = cp.zeros(params.n_elements, dtype=cp.float32)
 
-    result = simus(scat, rc, delays, params, strategy=SimusStrategy.CUDA)
+    result = simus(scat, rc, delays, params, strategy=SimusStrategy.CUDA, element_splitting=1)
     assert result.rf.shape[1] == params.n_elements
     assert bool(cp.all(cp.isfinite(result.rf)))

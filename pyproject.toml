@@ -195,8 +195,16 @@ sequence = [
 
 [tool.poe.tasks.profile-cuda]
 help = "Profile a CUDA simus benchmark under Nsight Compute. Pass -k <expr> -o <out>."
-shell = "sudo $(which python) scripts/ncu_pytest.py $@"
+shell = "env NCU=\"${NCU:-$(command -v ncu)}\" \"$(which python)\" scripts/ncu_pytest.py -k \"$K\" -o \"$OUTPUT\" --launch-skip \"$LAUNCH_SKIP\" --launch-count \"$LAUNCH_COUNT\" --set \"$SET\" --bench-path \"$BENCH_PATH\""
 executor = { group = "bench" }
+args = [
+    { name = "K", options = ["-k"], help = "pytest -k expression passed to the profiled benchmark" },
+    { name = "OUTPUT", options = ["-o", "--output"], help = ".ncu-rep output path" },
+    { name = "LAUNCH_SKIP", options = ["--launch-skip"], default = "5", help = "Number of kernel launches to skip" },
+    { name = "LAUNCH_COUNT", options = ["--launch-count"], default = "1", help = "Number of kernel launches to capture" },
+    { name = "SET", options = ["--set"], default = "full", help = "Nsight Compute metric set" },
+    { name = "BENCH_PATH", options = ["--bench-path"], default = "tests/benchmarks/bench_simus_scaling.py", help = "pytest benchmark target" },
+]
 
 [tool.poe.tasks.build]
 help = "Build wheel file"

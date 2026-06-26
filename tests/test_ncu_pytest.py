@@ -18,6 +18,7 @@ def test_build_ncu_command_uses_ncu_compatible_options() -> None:
         ncu="/usr/local/cuda/bin/ncu",
         bench_path="tests/benchmarks/bench_simus_scaling.py",
         set="full",
+        section_folder=None,
     )
 
     cmd = ncu_pytest._build_ncu_command(args, python_executable="python")
@@ -29,3 +30,22 @@ def test_build_ncu_command_uses_ncu_compatible_options() -> None:
     assert "--export" in cmd
     assert "reports/4090_fastpath_100k.ncu-rep" in cmd
     assert cmd[cmd.index("-k") + 1] == "test_bench_simus_scaling and 100000 and cupy"
+
+
+def test_build_ncu_command_includes_section_folder_when_provided() -> None:
+    """Flox-packaged NCU can be pointed at its packaged section files."""
+    args = argparse.Namespace(
+        k="cupy",
+        output="reports/smoke.ncu-rep",
+        launch_skip=0,
+        launch_count=1,
+        kernel_regex="simus_fused_kernel",
+        ncu="ncu",
+        bench_path="tests/benchmarks/bench_simus_scaling.py",
+        set="speedOfLight",
+        section_folder="/nix/store/example-nsight-compute/sections",
+    )
+
+    cmd = ncu_pytest._build_ncu_command(args, python_executable="python")
+
+    assert cmd[1:3] == ["--section-folder", "/nix/store/example-nsight-compute/sections"]

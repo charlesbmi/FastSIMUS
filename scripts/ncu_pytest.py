@@ -8,7 +8,7 @@ on the experimentation branch -- any benchmark in ``tests/benchmarks/`` can
 now be deeply profiled with one command.
 
 Example:
-    sudo $(which python) scripts/ncu_pytest.py \
+    env NCU=$(command -v ncu) $(which python) scripts/ncu_pytest.py \
         -k "test_bench_simus_scaling and 100000 and cupy" \
         -o /tmp/4090_simus_100k.ncu-rep
 """
@@ -17,15 +17,30 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 
-NCU_DEFAULT = "/usr/local/cuda/bin/ncu"
+NCU_DEFAULT = shutil.which("ncu") or "/usr/local/cuda/bin/ncu"
+
+
+def _default_section_folder(ncu_path: str) -> str | None:
+    """Return Flox/Nix-packaged Nsight Compute sections directory when present."""
+    resolved = Path(ncu_path).resolve()
+    candidates = [
+        resolved.parent.parent / "sections",
+        resolved.parent / "sections",
+    ]
+    for candidate in candidates:
+        if candidate.is_dir():
+            return str(candidate)
+    return None
 
 
 def _build_ncu_command(args: argparse.Namespace, *, python_executable: str) -> list[str]:
     """Build an Nsight Compute command for profiling a pytest benchmark."""
-    return [
+    command = [
         args.ncu,
         "--target-processes",
         "all",
@@ -54,6 +69,9 @@ def _build_ncu_command(args: argparse.Namespace, *, python_executable: str) -> l
         "--benchmark-min-rounds=1",
         "--benchmark-min-time=0",
     ]
+    if section_folder := getattr(args, "section_folder", None):
+        command[1:1] = ["--section-folder", section_folder]
+    return command
 
 
 def main() -> int:
@@ -94,8 +112,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--bench-path",
-        default="tests/benchmarks/",
-        help="pytest target path. Default: tests/benchmarks/.",
+        default="tests/benchmarks/bench_simus_scaling.py",
+        help="pytest target path. Default: tests/benchmarks/bench_simus_scaling.py.",
+    )
+    parser.add_argument(
+        "--section-folder",
+        default=os.environ.get("NCU_SECTION_FOLDER"),
+        help="Nsight Compute section folder. Defaults to $NCU_SECTION_FOLDER or Flox package sections when found.",
     )
     parser.add_argument(
         "--set",
@@ -103,6 +126,8 @@ def main() -> int:
         help="ncu --set value. Default: full.",
     )
     args = parser.parse_args()
+    if args.section_folder is None:
+        args.section_folder = _default_section_folder(args.ncu)
 
     cmd = _build_ncu_command(args, python_executable=sys.executable)
     print("Running:", " ".join(cmd), flush=True)
