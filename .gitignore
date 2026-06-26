@@ -11,6 +11,10 @@ prd.md
 .scratchpad/
 thoughts/
 
+# Flox local state
+.flox/cache/
+.flox/log/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -68,6 +72,8 @@ coverage.xml
 cover/
 .benchmarks/
 *.lprof
+*.ncu-rep
+*.ncu-csv
 
 # Translations
 *.mo
