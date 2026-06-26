@@ -206,6 +206,16 @@ args = [
     { name = "BENCH_PATH", options = ["--bench-path"], default = "tests/benchmarks/bench_simus_scaling.py", help = "pytest benchmark target" },
 ]
 
+[tool.poe.tasks.profile-cuda-legacy]
+help = "Profile a CUDA simus benchmark with nvprof for Pascal GPUs. Pass -k <expr> -o <log>."
+shell = "NVPROF=\"${NVPROF:-$(command -v nvprof)}\"; if [ -z \"$NVPROF\" ]; then echo 'nvprof not found; install a host CUDA toolkit that still provides nvprof for Pascal GPUs.' >&2; exit 127; fi; \"$NVPROF\" --print-gpu-trace --log-file \"$OUTPUT\" \"$(which python)\" -m pytest \"$BENCH_PATH\" --benchmark-only -p no:xdist -k \"$K\" --benchmark-min-rounds=1 --benchmark-min-time=0"
+executor = { group = "bench" }
+args = [
+    { name = "K", options = ["-k"], help = "pytest -k expression passed to the profiled benchmark" },
+    { name = "OUTPUT", options = ["-o", "--output"], help = "nvprof text log output path" },
+    { name = "BENCH_PATH", options = ["--bench-path"], default = "tests/benchmarks/bench_simus_scaling.py", help = "pytest benchmark target" },
+]
+
 [tool.poe.tasks.build]
 help = "Build wheel file"
 sequence = [

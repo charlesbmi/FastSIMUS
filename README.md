@@ -50,6 +50,13 @@ flox activate -c 'python -c "import cupy as cp; print(cp.cuda.runtime.getDeviceC
 flox activate -c 'command -v ncu && ncu --version'
 ```
 
+Nsight Compute supports Volta and newer GPUs. On Pascal GPUs such as GTX 1060, use the legacy `nvprof` task with a host
+CUDA toolkit that still provides `nvprof`:
+
+```bash
+flox activate -c 'poe profile-cuda-legacy -k "cupy and 1000" -o /tmp/fastsimus-nvprof.log'
+```
+
 ### Pre-commit Hooks
 
 This project uses [prek](https://prek.j178.dev/) (a faster Rust-based alternative to pre-commit):

@@ -74,6 +74,8 @@ cover/
 *.lprof
 *.ncu-rep
 *.ncu-csv
+*.nvprof
+*.nvprof.txt
 
 # Translations
 *.mo
