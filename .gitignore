@@ -7,8 +7,13 @@ attic/
 .kash/
 prd.md
 .taskmaster/
-.agents/
+.agents/scratchpad/
+.scratchpad/
 thoughts/
+
+# Flox local state
+.flox/cache/
+.flox/log/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -67,6 +72,10 @@ coverage.xml
 cover/
 .benchmarks/
 *.lprof
+*.ncu-rep
+*.ncu-csv
+*.nvprof
+*.nvprof.txt
 
 # Translations
 *.mo

@@ -156,6 +156,17 @@ print(f"Array device: {x_jax.device()}")
 
 ## CuPy-Specific Profiling
 
+### CUDA Development on Linux
+
+The Flox environment installs CUDA 12.2 runtime/NVRTC libraries and Nsight Compute. The NVIDIA driver still comes from
+the host.
+
+```bash
+flox activate -c 'nvidia-smi'
+flox activate -c 'python -c "import cupy as cp; print(cp.cuda.runtime.getDeviceCount())"'
+flox activate -c 'command -v ncu && ncu --version'
+```
+
 ### CUDA Events
 
 ```python
@@ -173,12 +184,24 @@ elapsed_ms = cp.cuda.get_elapsed_time(start, end)
 print(f"GPU time: {elapsed_ms:.2f}ms")
 ```
 
-### nvprof / Nsight
+### Nsight Compute (Volta and newer)
+
+Nsight Compute supports Volta and newer GPUs. Profile a simus benchmark:
 
 ```bash
-nvprof python script.py
-# or
-nsys profile python script.py
+flox activate -c 'poe profile-cuda -k "cupy and 1000" -o /tmp/fastsimus.ncu-rep'
+```
+
+The task wraps `scripts/ncu_pytest.py`, which auto-detects Flox-packaged `ncu` and its `sections/` folder. Non-root
+profiling requires host driver policy `RmProfilingAdminOnly=0` (or sudo/CAP_SYS_ADMIN).
+
+### nvprof (Pascal GPUs)
+
+On Pascal GPUs such as GTX 1060, modern Nsight Compute reports "Profiling is not supported on device 0". Use the
+legacy `nvprof` task with a host CUDA toolkit that still provides `nvprof`:
+
+```bash
+flox activate -c 'poe profile-cuda-legacy -k "cupy and 1000" -o /tmp/fastsimus-nvprof.log'
 ```
 
 ## Benchmark Patterns

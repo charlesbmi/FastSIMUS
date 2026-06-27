@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "flox-cuda": {
+      "source": "flox/flox-agentic",
+      "sourceType": "github",
+      "skillPath": "flox-plugin/skills/flox-cuda/SKILL.md",
+      "computedHash": "00f3f285685ea3fc03fee5ca695d87a935067abe1d11a3ddb9814e560a59b04a"
+    },
+    "flox-environments": {
+      "source": "flox/flox-agentic",
+      "sourceType": "github",
+      "skillPath": "flox-plugin/skills/flox-environments/SKILL.md",
+      "computedHash": "7fe84cd1e484410a0ca9a2de3548e1b3eda80a8d41996eb72e9d669a1939d8f4"
+    }
+  }
+}

@@ -1,8 +1,7 @@
 name: cuda-smoke
 
 # Self-hosted CUDA runner workflow. The runner must be registered with
-# labels [self-hosted, cuda] and have a CUDA-capable GPU (4090 dev box).
-# See docs/dev/cuda-runner.md for setup notes.
+# labels [self-hosted, cuda] and have a CUDA-capable GPU.
 #
 # Triggers on PRs that touch the CUDA paths and on manual dispatch.
 
@@ -17,6 +16,8 @@ on:
       - "tests/benchmarks/_bench_sync.py"
       - "pyproject.toml"
       - "uv.lock"
+      - ".flox/env/manifest.toml"
+      - ".flox/env/manifest.lock"
       - ".github/workflows/cuda-smoke.yml"
   workflow_dispatch:
 
@@ -26,24 +27,29 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Sync bench dependencies (CuPy + pytest-benchmark)
-        run: uv sync --group bench --frozen
+      - name: Install Flox
+        uses: flox/install-flox-action@v2
+        with:
+          trusted-environments: flox/python-uv
+
+      - name: Install Flox packages
+        run: flox activate -c true
 
       - name: Verify CuPy + GPU
         run: |
-          uv run python -c "import cupy as cp; \
+          flox activate -c 'python -c "import cupy as cp; \
               p = cp.cuda.runtime.getDeviceProperties(0); \
-              print('GPU:', p['name'].decode() if isinstance(p['name'], bytes) else p['name']); \
-              print('CC:', cp.cuda.Device(0).compute_capability)"
+              print(\"GPU:\", p[\"name\"].decode() if isinstance(p[\"name\"], bytes) else p[\"name\"]); \
+              print(\"CC:\", cp.cuda.Device(0).compute_capability)"'
 
       - name: Run CuPy backend tests
         run: |
-          uv run pytest tests/backend/test_cupy.py tests/test_simus.py \
-            -v -k cupy -p no:xdist -p no:testmon
+          flox activate -c 'pytest tests/backend/test_cupy.py tests/test_simus.py \
+            -v -k cupy -p no:xdist -p no:testmon'
 
       - name: Smoke scaling bench (1K + 10K only)
         run: |
-          uv run pytest tests/benchmarks/bench_simus_scaling.py \
+          flox activate -c 'pytest tests/benchmarks/bench_simus_scaling.py \
             --benchmark-only -p no:xdist -m scaling \
             -k "cupy and (1000 or 10000)" \
-            --benchmark-min-rounds=1 --benchmark-min-time=0
+            --benchmark-min-rounds=1 --benchmark-min-time=0'

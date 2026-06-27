@@ -11,6 +11,19 @@ respectively.
 - 200-400 lines typical, 800 max per file
 - No emojis in code, comments, or documentation
 - `uv` package manager
+- [Flox](https://flox.dev/download) for reproducible system dependencies (Python, uv, CUDA on Linux)
+
+## Development Setup
+
+Preferred local setup:
+
+```bash
+flox activate
+```
+
+Common commands inside Flox: `poe test`, `poe lint`
+
+uv-only fallback: `uv run poe test`, `uv run poe lint`
 
 ## Key Constraints
 
