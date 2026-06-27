@@ -35,23 +35,23 @@ wheels = [
 
 [[package]]
 name = "array-api-compat"
-version = "1.13.0"
+version = "1.15.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/68/36/f799b36d7025a92a23819f9f06541babdb84b6fd0bd4253f8be2eca348a4/array_api_compat-1.13.0.tar.gz", hash = "sha256:8b83a56aa8b9477472fee37f7731968dd213e20c198a05ac49caeff9b03f48a6", size = 103065, upload-time = "2025-12-28T11:26:57.734Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/86/12/65d297d3e425cb7fe5247b7ec14b4ed83539e9b5e89b65c15ea7ee274182/array_api_compat-1.15.0.tar.gz", hash = "sha256:53c5f922491bf15f62847afafc4e39eedfae57d218988fefb8cce39c2a9b3dea", size = 129305, upload-time = "2026-06-07T20:53:24.964Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/5d/493b1b5528ab5072feae30821ff3a07b7a0474213d548efb1fdf135f85c1/array_api_compat-1.13.0-py3-none-any.whl", hash = "sha256:c15026a0ddec42815383f07da285472e1b1ff2e632eb7afbcfe9b08fcbad9bf1", size = 58585, upload-time = "2025-12-28T11:26:56.081Z" },
+    { url = "https://files.pythonhosted.org/packages/86/16/1a8fd2b19544b84575cf84ef7aa3ad4c173b756d5f087c91f85d1b295777/array_api_compat-1.15.0-py3-none-any.whl", hash = "sha256:7b1b9c53269061403fd5f45a8de349f16e7887653328bfa0c5f2d45299ff0a8e", size = 79113, upload-time = "2026-06-07T20:53:23.621Z" },
 ]
 
 [[package]]
 name = "array-api-extra"
-version = "0.10.1"
+version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "array-api-compat" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/25/77/2ef35219b7cf612366da9b26c95307d8b3b0bb0c0e9767314554a15f4117/array_api_extra-0.10.1.tar.gz", hash = "sha256:712ea45bd122d51c05085fc5fa30cdf66a10cc5d1af81d3e7beaff620ef1e1f2", size = 89510, upload-time = "2026-02-27T17:14:47.06Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/d7/3e8128c33291ae1c71dc55c79a729dde84fde8724083a2b86d582f362f9f/array_api_extra-0.11.0.tar.gz", hash = "sha256:b4c0410ab19ba9a4d5e39e6ea3538c78caf31be7faf1081fb5ba0b15bfc9c517", size = 94989, upload-time = "2026-06-10T09:56:05.134Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/46/f7/9e14be985fd77ae26fee9136c9735e8987772e0ecf5f1f4e6e2b84cadc46/array_api_extra-0.10.1-py3-none-any.whl", hash = "sha256:9c2003079ccd2a0c92b1cf797b5867b9d7ea9428e75f70c7f78c1c0842d54368", size = 88377, upload-time = "2026-02-27T17:14:45.422Z" },
+    { url = "https://files.pythonhosted.org/packages/22/6a/3aa1055b4a5dc3195e79687bbe4fb2188e400c44c181b5843de81fee7553/array_api_extra-0.11.0-py3-none-any.whl", hash = "sha256:84e7349176ec0b2e03000f1a6f9c88556e29ec959e0de5ef21dc5925e4b44a05", size = 92019, upload-time = "2026-06-10T09:56:03.81Z" },
 ]
 
 [[package]]
@@ -613,7 +613,7 @@ test-plot = [
 [package.metadata]
 requires-dist = [
     { name = "array-api-compat", specifier = ">=1.13" },
-    { name = "array-api-extra", specifier = "==0.10.1" },
+    { name = "array-api-extra", specifier = "==0.11.0" },
     { name = "beartype", specifier = ">=0.19.0" },
     { name = "jaxtyping", specifier = ">=0.2.37" },
     { name = "pydantic", specifier = ">=2.0,<3.0" },
