@@ -25,7 +25,7 @@ jobs:
   smoke:
     runs-on: [self-hosted, cuda]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install Flox
         uses: flox/install-flox-action@v2
