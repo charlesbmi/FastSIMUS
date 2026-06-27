@@ -195,7 +195,7 @@ sequence = [
 
 [tool.poe.tasks.profile-cuda]
 help = "Profile a CUDA simus benchmark under Nsight Compute. Pass -k <expr> -o <out>."
-shell = "env NCU=\"${NCU:-$(command -v ncu)}\" \"$(which python)\" scripts/ncu_pytest.py -k \"$K\" -o \"$OUTPUT\" --launch-skip \"$LAUNCH_SKIP\" --launch-count \"$LAUNCH_COUNT\" --set \"$SET\" --bench-path \"$BENCH_PATH\""
+shell = "\"$(which python)\" scripts/ncu_pytest.py -k \"$K\" -o \"$OUTPUT\" --launch-skip \"$LAUNCH_SKIP\" --launch-count \"$LAUNCH_COUNT\" --set \"$SET\" --bench-path \"$BENCH_PATH\""
 executor = { group = "bench" }
 args = [
     { name = "K", options = ["-k"], help = "pytest -k expression passed to the profiled benchmark" },

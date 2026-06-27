@@ -8,7 +8,7 @@ on the experimentation branch -- any benchmark in ``tests/benchmarks/`` can
 now be deeply profiled with one command.
 
 Example:
-    env NCU=$(command -v ncu) $(which python) scripts/ncu_pytest.py \
+    $(which python) scripts/ncu_pytest.py \
         -k "test_bench_simus_scaling and 100000 and cupy" \
         -o /tmp/4090_simus_100k.ncu-rep
 """
@@ -27,7 +27,8 @@ NCU_DEFAULT = shutil.which("ncu") or "/usr/local/cuda/bin/ncu"
 
 def _default_section_folder(ncu_path: str) -> str | None:
     """Return Flox/Nix-packaged Nsight Compute sections directory when present."""
-    resolved = Path(ncu_path).resolve()
+    resolved_binary = shutil.which(ncu_path) or ncu_path
+    resolved = Path(resolved_binary).resolve()
     candidates = [
         resolved.parent.parent / "sections",
         resolved.parent / "sections",
