@@ -54,6 +54,8 @@ jobs:
           python-version: "3.11"
 
       # machine.dev runners ship CUDA 13.x; use matching CuPy + CTK wheels (not cupy-cuda12x).
+      # TODO: migrate whole pyproject.toml to use CUDA 13 so we don't need this workaround
+      # TODO: remove --no-sync flag
       - name: Install CuPy for host CUDA 13
         run: |
           uv pip uninstall cupy-cuda12x
