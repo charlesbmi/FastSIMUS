@@ -63,6 +63,8 @@ def _build_ncu_command(args: argparse.Namespace, *, python_executable: str) -> l
         "--benchmark-only",
         "-p",
         "no:xdist",
+        "-p",
+        "no:testmon",
         "-k",
         args.k,
         # Keep pytest-benchmark from rerunning the timing loop -- NCU

@@ -44,9 +44,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .testmondata
-          key: testmon-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'src/**/*.py', 'tests/**/*.py') }}
-          restore-keys: |
-            testmon-${{ runner.os }}-py${{ matrix.python-version }}-
+          key: testmon-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'uv.lock', 'src/**/*.py', 'tests/**/*.py') }}
 
       - name: Run tests with testmon
         run: uv run poe test
