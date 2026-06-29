@@ -45,6 +45,10 @@ jobs:
       - name: GPU diagnostics
         run: nvidia-smi
 
+      # uv/pip wheels (NumPy/CuPy) need host zlib on the ephemeral machine.dev image.
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y zlib1g
+
       - name: Install Flox
         uses: flox/install-flox-action@v2
         with:
