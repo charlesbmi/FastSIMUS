@@ -29,6 +29,14 @@ _N_SCAT_OPTION = "--n-scat"
 _DEFAULT_N_SCAT: tuple[int, ...] = (1_000, 10_000, 100_000, 1_000_000)
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Ignore empty-benchmark autosave warnings (pytest-benchmark is bench-only)."""
+    config.addinivalue_line(
+        "filterwarnings",
+        "ignore:Not saving anything, no benchmarks have been run:pytest_benchmark.logger.PytestBenchmarkWarning",
+    )
+
+
 def pytest_benchmark_update_machine_info(config: object, machine_info: dict[str, Any]) -> None:
     """Inject ``FASTSIMUS_DEVICE_LABEL`` (if set) into pytest-benchmark machine_info."""
     label = os.environ.get(_DEVICE_LABEL_ENV_VAR, "")

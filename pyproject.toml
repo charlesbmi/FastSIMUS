@@ -332,7 +332,6 @@ filterwarnings = [
     # a leading .* to match messages like '"\\m" is an invalid escape sequence...'.
     "ignore:.*invalid escape sequence:DeprecationWarning",
     "ignore:.*invalid escape sequence:SyntaxWarning",
-    "ignore:Not saving anything, no benchmarks have been run:pytest_benchmark.logger.PytestBenchmarkWarning",
 ]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]

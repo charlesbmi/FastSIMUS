@@ -137,7 +137,7 @@ def _prepare_inputs(
     n_freq = int(plan.selected_freqs.shape[0])
 
     # element_positions with `xp=cp` returns CuPy arrays directly.
-    xp_cp: _ArrayNamespace = cp  # type: ignore[assignment]
+    xp_cp = cast(_ArrayNamespace, cp)
     elem_pos, theta_e, apex_offset = element_positions(n_elem, params.pitch, params.radius, xp_cp)
     if theta_e is None:
         theta_e = cp.zeros(n_elem, dtype=cp.float32)
