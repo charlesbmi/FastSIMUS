@@ -1,8 +1,9 @@
 # FastSIMUS
 
-[![Release](https://img.shields.io/github/v/release/charlesbmi/FastSIMUS)](https://img.shields.io/github/v/release/charlesbmi/FastSIMUS)
-[![Build status](https://img.shields.io/github/actions/workflow/status/charlesbmi/FastSIMUS/ci.yml?branch=main)](https://github.com/charlesbmi/FastSIMUS/actions/workflows/ci.yml?query=branch%3Amain)
-[![License](https://img.shields.io/github/license/charlesbmi/FastSIMUS)](https://img.shields.io/github/license/charlesbmi/FastSIMUS)
+[![PyPI](https://img.shields.io/pypi/v/fastsimus)](https://pypi.org/project/fastsimus/)
+[![Check](https://github.com/charlesbmi/FastSIMUS/actions/workflows/check.yml/badge.svg)](https://github.com/charlesbmi/FastSIMUS/actions/workflows/check.yml)
+[![Test](https://github.com/charlesbmi/FastSIMUS/actions/workflows/test.yml/badge.svg)](https://github.com/charlesbmi/FastSIMUS/actions/workflows/test.yml)
+[![License](https://img.shields.io/github/license/charlesbmi/FastSIMUS)](https://github.com/charlesbmi/FastSIMUS/blob/main/LICENSE)
 
 Fast simulator for medical ultrasound, based on SIMUS/MUST
 
