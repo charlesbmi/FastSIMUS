@@ -1,6 +1,6 @@
 # FastSIMUS
 
-[![Release](https://img.shields.io/pypi/v/fastsimus)](https://pypi.org/project/fastsimus/)
+[![PyPI](https://img.shields.io/pypi/v/fastsimus)](https://pypi.org/project/fastsimus/)
 [![Check](https://github.com/charlesbmi/FastSIMUS/actions/workflows/check.yml/badge.svg)](https://github.com/charlesbmi/FastSIMUS/actions/workflows/check.yml)
 [![Test](https://github.com/charlesbmi/FastSIMUS/actions/workflows/test.yml/badge.svg)](https://github.com/charlesbmi/FastSIMUS/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/charlesbmi/FastSIMUS)](https://github.com/charlesbmi/FastSIMUS/blob/main/LICENSE)
