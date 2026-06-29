@@ -158,14 +158,26 @@ print(f"Array device: {x_jax.device()}")
 
 ### CUDA Development on Linux
 
-The Flox environment installs CUDA 12.2 runtime/NVRTC libraries and Nsight Compute. The NVIDIA driver still comes from
-the host.
+The default Flox environment keeps CUDA 12.x runtime/NVRTC libraries for
+Pascal-compatible local development. CUDA 13 profiling is for Turing-or-newer
+hosts with driver 580+ and should use `.flox/cuda13` plus the `cuda13` Python dependency group.
+The NVIDIA driver still comes from the host.
 
 ```bash
 flox activate -c 'nvidia-smi'
 flox activate -c 'python -c "import cupy as cp; print(cp.cuda.runtime.getDeviceCount())"'
 flox activate -c 'command -v ncu && ncu --version'
 ```
+
+CUDA 12 is the default Python dependency group. To use CUDA 13 on a compatible host:
+
+```bash
+FASTSIMUS_CUDA_GROUP=cuda13 uv run poe install
+uv run poe install --cuda-group cuda13
+flox activate -d .flox/cuda13 -c 'uv run --directory "$PWD" --group cuda13 pytest tests/backend/test_cupy.py -v -p no:xdist -p no:testmon'
+```
+
+For a persistent local override, add `export FASTSIMUS_CUDA_GROUP=cuda13` to an uncommitted `.envrc`.
 
 ### CUDA Events
 

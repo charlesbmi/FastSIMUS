@@ -1,14 +1,10 @@
 schema-version = "1.12.0"
 
 [options]
-systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]
+systems = ["x86_64-linux", "aarch64-linux"]
 
-# FastSIMUS development environment.
-#
-#   flox activate
-#
-# Python + uv from FloxHub; CUDA packages are Linux-only.
-# macOS uses MLX/Metal through Python packages and system frameworks.
+# CUDA 13 environment for newer GPU hosts and CI.
+# The default project environment remains CUDA 12-compatible for Pascal GPUs.
 
 [include]
 environments = [{ remote = "flox/python-uv" }]
@@ -21,27 +17,22 @@ python.pkg-group = "fastsimus-python"
 git.pkg-path = "git"
 curl.pkg-path = "curl"
 
-cuda_cudart.pkg-path = "flox-cuda/cudaPackages_12_2.cuda_cudart"
+cuda_cudart.pkg-path = "flox-cuda/cudaPackages_13.cuda_cudart"
 cuda_cudart.pkg-group = "cuda"
 cuda_cudart.systems = ["x86_64-linux", "aarch64-linux"]
 cuda_cudart.priority = 2
 cuda_cudart.outputs = "all"
 
-cuda_nvrtc.pkg-path = "flox-cuda/cudaPackages_12_2.cuda_nvrtc"
+cuda_nvrtc.pkg-path = "flox-cuda/cudaPackages_13.cuda_nvrtc"
 cuda_nvrtc.pkg-group = "cuda"
 cuda_nvrtc.systems = ["x86_64-linux", "aarch64-linux"]
 cuda_nvrtc.priority = 1
 cuda_nvrtc.outputs = "all"
 
-cudatoolkit.pkg-path = "flox-cuda/cudaPackages_12_2.cudatoolkit"
+cudatoolkit.pkg-path = "flox-cuda/cudaPackages_13.cudatoolkit"
 cudatoolkit.pkg-group = "cuda"
 cudatoolkit.systems = ["x86_64-linux", "aarch64-linux"]
 cudatoolkit.priority = 3
-
-nsight_compute.pkg-path = "flox-cuda/cudaPackages_12_2.nsight_compute"
-nsight_compute.pkg-group = "cuda-tools"
-nsight_compute.systems = ["x86_64-linux", "aarch64-linux"]
-nsight_compute.priority = 4
 
 gcc-unwrapped.pkg-path = "gcc-unwrapped"
 gcc-unwrapped.pkg-group = "libraries"
@@ -54,10 +45,6 @@ zlib.systems = ["x86_64-linux", "aarch64-linux"]
 zlib.priority = 6
 
 [vars]
-CUDA_VERSION = "12.2"
+CUDA_VERSION = "13"
+FASTSIMUS_CUDA_GROUP = "cuda13"
 PYTHON_AUTO_INSTALL = "false"
-
-[hook]
-on-activate = '''
-uv run --directory "$FLOX_ENV_PROJECT" poe install
-'''

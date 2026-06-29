@@ -12,7 +12,8 @@ Phase-1 geometry from a flat input set, so the
 ``(n_scat, n_elem, n_sub)`` phase tensors that ``_simus_freq_outer_python``
 consumes are *not* fed in here.
 
-Requires: cupy (``cupy-cuda12x`` or ``cupy-cuda11x``) on a CUDA host.
+Requires: CuPy on a CUDA host. Use ``cupy-cuda12x`` for CUDA 12/Pascal
+hosts and ``cupy-cuda13x`` for CUDA 13/Turing-or-newer hosts.
 """
 
 from __future__ import annotations

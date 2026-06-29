@@ -77,7 +77,7 @@
     },
     "vars": {
       "CUDA_VERSION": "12.2",
-      "PYTHON_AUTO_INSTALL": "true"
+      "PYTHON_AUTO_INSTALL": "false"
     },
     "hook": {
       "on-activate": "export UV_CACHE=\"$FLOX_ENV_CACHE/python-uv\"\nexport UV_VENV=\"$UV_CACHE/venv\"\nexport UV_PROJECT_ENVIRONMENT=\"$UV_VENV\"\n\nmkdir -p \"$UV_CACHE\"\n\nCURRENT_INTERP=\"$(realpath \"$(which python3)\")\"\nCACHED_INTERP=\"$(cat \"$UV_CACHE/venv.interpreter\" \\\n  2>/dev/null || echo none)\"\n\nif [ ! -d \"$UV_VENV\" ] \\\n    || [ \"$CURRENT_INTERP\" != \"$CACHED_INTERP\" ]; then\n  uv venv -p python3 \"$UV_VENV\"\n  echo \"$CURRENT_INTERP\" > \"$UV_CACHE/venv.interpreter\"\nfi\n\nunset VIRTUAL_ENV\nsource \"$UV_VENV/bin/activate\"\n\nif [ \"$PYTHON_AUTO_INSTALL\" = \"true\" ] \\\n    && [ -f uv.lock ]; then\n  HASH=$(md5sum uv.lock 2>/dev/null \\\n    || md5 -q uv.lock)\n  HASH=$(echo \"$HASH\" | cut -d\" \" -f1)\n  LAST=$(cat \"$UV_VENV/.deps_hash\" 2>/dev/null)\n  if [ \"$HASH\" != \"$LAST\" ]; then\n    uv sync\n    echo \"$HASH\" > \"$UV_VENV/.deps_hash\"\n  fi\nfi\n\nuv run --directory \"$FLOX_ENV_PROJECT\" poe install\n"
@@ -1002,7 +1002,8 @@
         }
       },
       "vars": {
-        "CUDA_VERSION": "12.2"
+        "CUDA_VERSION": "12.2",
+        "PYTHON_AUTO_INSTALL": "false"
       },
       "hook": {
         "on-activate": "uv run --directory \"$FLOX_ENV_PROJECT\" poe install\n"
@@ -1061,6 +1062,15 @@
           "Overriding": [
             "install",
             "python"
+          ]
+        },
+        "higher_priority_name": "Current manifest"
+      },
+      {
+        "warning": {
+          "Overriding": [
+            "vars",
+            "PYTHON_AUTO_INSTALL"
           ]
         },
         "higher_priority_name": "Current manifest"
