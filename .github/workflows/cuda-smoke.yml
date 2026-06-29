@@ -59,30 +59,30 @@ jobs:
 
       - name: Install Flox packages
         run: |
-          flox activate -c "export LD_LIBRARY_PATH=${FLOX_HOST_LIB_DIR}:\${LD_LIBRARY_PATH:-}; true"
+          flox activate -c "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH:-}:${FLOX_HOST_LIB_DIR}; true"
 
       - name: Verify CuPy + GPU
         run: |
-          flox activate -c "export LD_LIBRARY_PATH=${FLOX_HOST_LIB_DIR}:\${LD_LIBRARY_PATH:-}; python -c \"import cupy as cp; \
+          flox activate -c "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH:-}:${FLOX_HOST_LIB_DIR}; python -c \"import cupy as cp; \
               p = cp.cuda.runtime.getDeviceProperties(0); \
               print('GPU:', p['name'].decode() if isinstance(p['name'], bytes) else p['name']); \
               print('CC:', cp.cuda.Device(0).compute_capability)\""
 
       - name: Run CuPy backend tests
         run: |
-          flox activate -c "export LD_LIBRARY_PATH=${FLOX_HOST_LIB_DIR}:\${LD_LIBRARY_PATH:-}; \
+          flox activate -c "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH:-}:${FLOX_HOST_LIB_DIR}; \
             pytest tests/backend/test_cupy.py -v -p no:xdist -p no:testmon"
 
       - name: Run CuPy simus integration tests
         if: github.event_name == 'push'
         run: |
-          flox activate -c "export LD_LIBRARY_PATH=${FLOX_HOST_LIB_DIR}:\${LD_LIBRARY_PATH:-}; \
+          flox activate -c "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH:-}:${FLOX_HOST_LIB_DIR}; \
             pytest tests/test_simus.py -v -k cupy -p no:xdist -p no:testmon"
 
       - name: Smoke scaling bench (1K + 10K only)
         if: github.event_name == 'workflow_dispatch' && inputs.run_scaling_bench
         run: |
-          flox activate -c "export LD_LIBRARY_PATH=${FLOX_HOST_LIB_DIR}:\${LD_LIBRARY_PATH:-}; \
+          flox activate -c "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH:-}:${FLOX_HOST_LIB_DIR}; \
             pytest tests/benchmarks/bench_simus_scaling.py \
             --benchmark-only -p no:xdist -p no:testmon -m scaling \
             -k 'cupy and (1000 or 10000)' \
