@@ -1,31 +1,49 @@
 name: cuda-smoke
 
-# Self-hosted CUDA runner workflow. The runner must be registered with
-# labels [self-hosted, cuda] and have a CUDA-capable GPU.
+# CUDA smoke on machine.dev GPU runners (T4G spot). PRs get a narrow CuPy check;
+# pushes to main add broader CuPy integration tests. Scaling benchmarks are manual only.
 #
-# Triggers on PRs that touch the CUDA paths and on manual dispatch.
+# Setup: https://machine.dev/docs/guides/workflow-setup/
+# Fallback if T4G ARM64 fails: machine/gpu=t4/tenancy=spot/id=${{ github.run_id }}
 
 on:
   pull_request:
-    paths:
-      - "src/fast_simus/kernels/cuda_simus.py"
-      - "src/fast_simus/kernels/simus_fused.cu"
-      - "src/fast_simus/simus.py"
-      - "tests/backend/test_cupy.py"
-      - "tests/conftest.py"
-      - "tests/benchmarks/_bench_sync.py"
+    paths: &cuda_smoke_paths
+      - "src/**/*.py"
+      - "src/**/*.cu"
+      - "tests/**/*.py"
       - "pyproject.toml"
       - "uv.lock"
       - ".flox/env/manifest.toml"
       - ".flox/env/manifest.lock"
       - ".github/workflows/cuda-smoke.yml"
+  push:
+    branches:
+      - main
+    paths: *cuda_smoke_paths
   workflow_dispatch:
+    inputs:
+      run_scaling_bench:
+        description: Run scaling benchmark (1K + 10K CuPy only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cuda-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   smoke:
-    runs-on: [self-hosted, cuda]
+    runs-on: machine/gpu=t4g/tenancy=spot/id=${{ github.run_id }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+
+      - name: GPU diagnostics
+        run: nvidia-smi
 
       - name: Install Flox
         uses: flox/install-flox-action@v2
@@ -44,10 +62,17 @@ jobs:
 
       - name: Run CuPy backend tests
         run: |
-          flox activate -c 'pytest tests/backend/test_cupy.py tests/test_simus.py \
+          flox activate -c 'pytest tests/backend/test_cupy.py \
+            -v -p no:xdist -p no:testmon'
+
+      - name: Run CuPy simus integration tests
+        if: github.event_name == 'push'
+        run: |
+          flox activate -c 'pytest tests/test_simus.py \
             -v -k cupy -p no:xdist -p no:testmon'
 
       - name: Smoke scaling bench (1K + 10K only)
+        if: github.event_name == 'workflow_dispatch' && inputs.run_scaling_bench
         run: |
           flox activate -c 'pytest tests/benchmarks/bench_simus_scaling.py \
             --benchmark-only -p no:xdist -p no:testmon -m scaling \
