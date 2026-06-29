@@ -9,10 +9,10 @@ Exposes two concerns:
   can use to distinguish series.
 
 * **Configurable scatterer sweep** — adds a ``--n-scat`` pytest CLI
-  option. Any benchmark that takes an ``n_scat`` fixture is parametrized
-  over either the default sweep or the caller-supplied comma-separated
-  list. Keeps dense / custom sweeps out of each bench file and central
-  to one place.
+  option. Benchmarks marked ``@pytest.mark.scaling`` that take an
+  ``n_scat`` fixture are parametrized over either the default sweep or
+  the caller-supplied comma-separated list. Keeps dense / custom sweeps
+  out of each bench file and central to one place.
 """
 
 from __future__ import annotations
@@ -27,6 +27,14 @@ _DEVICE_LABEL_MACHINE_INFO_KEY = "fast_simus_device_label"
 
 _N_SCAT_OPTION = "--n-scat"
 _DEFAULT_N_SCAT: tuple[int, ...] = (1_000, 10_000, 100_000, 1_000_000)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Ignore empty-benchmark autosave warnings (pytest-benchmark is bench-only)."""
+    config.addinivalue_line(
+        "filterwarnings",
+        "ignore:Not saving anything, no benchmarks have been run:pytest_benchmark.logger.PytestBenchmarkWarning",
+    )
 
 
 def pytest_benchmark_update_machine_info(config: object, machine_info: dict[str, Any]) -> None:
@@ -83,8 +91,10 @@ def parse_n_scat_option(raw: str | None) -> tuple[int, ...]:
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
-    """Parametrize any benchmark taking ``n_scat`` with the resolved sweep."""
+    """Parametrize scaling benchmarks taking ``n_scat`` with the resolved sweep."""
     if "n_scat" not in metafunc.fixturenames:
+        return
+    if not metafunc.definition.get_closest_marker("scaling"):
         return
     raw = metafunc.config.getoption("n_scat")
     values = parse_n_scat_option(raw)

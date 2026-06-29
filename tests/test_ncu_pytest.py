@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 
+import pytest
+
 from scripts import ncu_pytest
 
 
@@ -51,7 +53,7 @@ def test_build_ncu_command_includes_section_folder_when_provided() -> None:
     assert cmd[1:3] == ["--section-folder", "/nix/store/example-nsight-compute/sections"]
 
 
-def test_default_section_folder_resolves_bare_binary_name(tmp_path) -> None:
+def test_default_section_folder_resolves_bare_binary_name(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Section-folder autodetection should resolve bare command names via PATH lookup."""
     ncu_bin = tmp_path / "bin" / "ncu"
     ncu_bin.parent.mkdir(parents=True)
@@ -59,9 +61,9 @@ def test_default_section_folder_resolves_bare_binary_name(tmp_path) -> None:
     sections = tmp_path / "sections"
     sections.mkdir()
 
-    original_which = ncu_pytest.shutil.which
-    ncu_pytest.shutil.which = lambda name: str(ncu_bin) if name == "ncu" else None
-    try:
-        assert ncu_pytest._default_section_folder("ncu") == str(sections)
-    finally:
-        ncu_pytest.shutil.which = original_which
+    monkeypatch.setattr(
+        ncu_pytest.shutil,
+        "which",
+        lambda name: str(ncu_bin) if name == "ncu" else None,
+    )
+    assert ncu_pytest._default_section_folder("ncu") == str(sections)
