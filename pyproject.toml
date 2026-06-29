@@ -86,7 +86,6 @@ test = [
     "jax>=0.9",
     "equinox>=0.11",
     "mlx>=0.31; platform_system == 'Darwin'",
-    "cupy-cuda12x>=13.0; platform_system == 'Linux'",
     "pymust>=0.1.9",
     "h5py>=3.16.0",
 ]
@@ -109,6 +108,20 @@ plot = [
     "pandas>=2.2",
     "seaborn>=0.13",
 ]
+cuda12 = [
+    "cupy-cuda12x>=13.0; platform_system == 'Linux'",
+]
+cuda13 = [
+    "cupy-cuda13x[ctk]>=13.0; platform_system == 'Linux'",
+]
+
+[tool.uv]
+conflicts = [
+    [
+        { group = "cuda12" },
+        { group = "cuda13" },
+    ],
+]
 
 
 # ---- Poe the Poet task runner ----
@@ -120,7 +133,10 @@ executor = "uv"
 
 [tool.poe.tasks.install]
 help = "Install the virtual environment using uv"
-cmd = "uv sync"
+shell = "uv sync --group \"${CUDA_GROUP:-${FASTSIMUS_CUDA_GROUP:-cuda12}}\""
+args = [
+    { name = "CUDA_GROUP", options = ["--cuda-group"], help = "uv CUDA dependency group to sync (cuda12 or cuda13)" },
+]
 
 [tool.poe.tasks.pre-commit]
 help = "Run pre-commit hooks on all files"
@@ -299,6 +315,7 @@ convention = "google"
 pytest-benchmark = "pytest_benchmark"
 mlx = "mlx"
 cupy-cuda12x = "cupy"
+cupy-cuda13x = "cupy"
 
 [tool.deptry.per_rule_ignores]
 DEP004 = ["jax", "mlx", "cupy"]

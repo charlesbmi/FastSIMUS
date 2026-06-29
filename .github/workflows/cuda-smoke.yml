@@ -1,7 +1,7 @@
 name: cuda-smoke
 
-# CUDA smoke on machine.dev GPU runners (T4G spot). Uses host CUDA from the runner;
-# Flox is not used here because its nix CUDA stub libraries shadow the real driver.
+# CUDA smoke on machine.dev GPU runners (T4G spot). Uses the checked-in CUDA 13
+# Flox environment variant; the default project Flox env remains CUDA 12.
 #
 # PRs: narrow CuPy backend smoke. Push to main: broader CuPy integration tests.
 # Scaling benchmarks: manual workflow_dispatch only.
@@ -19,6 +19,8 @@ on:
       - "uv.lock"
       - ".flox/env/manifest.toml"
       - ".flox/env/manifest.lock"
+      - ".flox/cuda13/.flox/env/manifest.toml"
+      - ".flox/cuda13/.flox/env/manifest.lock"
       - ".github/workflows/cuda-smoke.yml"
   push:
     branches:
@@ -48,37 +50,34 @@ jobs:
       - name: GPU diagnostics
         run: nvidia-smi
 
-      - name: Set up the environment
-        uses: ./.github/actions/setup-python-env
+      - name: Install Flox
+        uses: flox/install-flox-action@v2
         with:
-          python-version: "3.11"
+          trusted-environments: flox/python-uv
 
-      # machine.dev runners ship CUDA 13.x; use matching CuPy + CTK wheels (not cupy-cuda12x).
-      # TODO: migrate whole pyproject.toml to use CUDA 13 so we don't need this workaround
-      # TODO: remove --no-sync flag
-      - name: Install CuPy for host CUDA 13
-        run: |
-          uv pip uninstall cupy-cuda12x
-          uv pip install 'cupy-cuda13x[ctk]>=13.0'
+      - name: Install Flox packages
+        run: flox activate -d .flox/cuda13 -c 'uv run --directory "$GITHUB_WORKSPACE" poe install'
 
       - name: Verify CuPy + GPU
         run: |
-          uv run --no-sync python -c "import cupy as cp; \
+          flox activate -d .flox/cuda13 -c 'uv run --directory "$GITHUB_WORKSPACE" --group "$FASTSIMUS_CUDA_GROUP" python -c "import cupy as cp; \
               p = cp.cuda.runtime.getDeviceProperties(0); \
-              print('GPU:', p['name'].decode() if isinstance(p['name'], bytes) else p['name']); \
-              print('CC:', cp.cuda.Device(0).compute_capability)"
+              print(\"GPU:\", p[\"name\"].decode() if isinstance(p[\"name\"], bytes) else p[\"name\"]); \
+              print(\"CC:\", cp.cuda.Device(0).compute_capability)"'
 
       - name: Run CuPy backend tests
-        run: uv run --no-sync pytest tests/backend/test_cupy.py -v -p no:xdist -p no:testmon
+        run: |
+          flox activate -d .flox/cuda13 -c 'uv run --directory "$GITHUB_WORKSPACE" --group "$FASTSIMUS_CUDA_GROUP" pytest tests/backend/test_cupy.py -v -p no:xdist -p no:testmon'
 
       - name: Run CuPy simus integration tests
         if: github.event_name == 'push'
-        run: uv run --no-sync pytest tests/test_simus.py -v -k cupy -p no:xdist -p no:testmon
+        run: |
+          flox activate -d .flox/cuda13 -c 'uv run --directory "$GITHUB_WORKSPACE" --group "$FASTSIMUS_CUDA_GROUP" pytest tests/test_simus.py -v -k cupy -p no:xdist -p no:testmon'
 
       - name: Smoke scaling bench (1K + 10K only)
         if: github.event_name == 'workflow_dispatch' && inputs.run_scaling_bench == 'true'
         run: |
-          uv run --no-sync pytest tests/benchmarks/bench_simus_scaling.py \
+          flox activate -d .flox/cuda13 -c 'uv run --directory "$GITHUB_WORKSPACE" --group "$FASTSIMUS_CUDA_GROUP" --group bench pytest tests/benchmarks/bench_simus_scaling.py \
             --benchmark-only -p no:xdist -p no:testmon -m scaling \
             -k "cupy and (1000 or 10000)" \
-            --benchmark-min-rounds=1 --benchmark-min-time=0
+            --benchmark-min-rounds=1 --benchmark-min-time=0'

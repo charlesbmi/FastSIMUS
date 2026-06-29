@@ -87,6 +87,26 @@ gcc-unwrapped.priority = 5
 
 ## CUDA Version Selection
 
+### FastSIMUS CUDA 12/13 Pattern
+
+FastSIMUS keeps CUDA-version-specific Python packages in uv groups and keeps CUDA system packages in separate Flox
+environments:
+
+- Default local environment: `flox activate`, CUDA 12 packages, `cuda12` uv group by default.
+- CUDA 13 environment: `flox activate -d .flox/cuda13`, CUDA 13 packages, `cuda13` uv group.
+- Group selection: `FASTSIMUS_CUDA_GROUP=cuda13 uv run poe install` or `uv run poe install --cuda-group cuda13`.
+- Persistent local selection: use an uncommitted `.envrc` with `export FASTSIMUS_CUDA_GROUP=cuda13`.
+
+Do not put `cudaPackages_12_*` and `cudaPackages_13_*` into one Flox environment. Flox system packages are selected
+when the environment is built; hooks and env vars can choose uv groups, but they cannot switch the already-built system
+CUDA package set.
+
+CUDA 13 requires driver 580+ and Turing-or-newer hardware. GTX 1060/Pascal development must stay on CUDA 12.
+
+For future nanobind/pybind CUDA extensions, build and test inside the matching active Flox CUDA major, use the matching
+uv group, and add `cuda_nvcc` only when offline compilation is actually required. NVRTC-only CuPy kernels do not need
+`cuda_nvcc`.
+
 ### CUDA 12.x (Current)
 
 ```toml

@@ -1,0 +1,804 @@
+{
+  "lockfile-version": 1,
+  "manifest": {
+    "schema-version": "1.12.0",
+    "install": {
+      "cuda_cudart": {
+        "pkg-path": "flox-cuda/cudaPackages_13.cuda_cudart",
+        "pkg-group": "cuda",
+        "priority": 2,
+        "systems": [
+          "x86_64-linux",
+          "aarch64-linux"
+        ],
+        "outputs": "all"
+      },
+      "cuda_nvrtc": {
+        "pkg-path": "flox-cuda/cudaPackages_13.cuda_nvrtc",
+        "pkg-group": "cuda",
+        "priority": 1,
+        "systems": [
+          "x86_64-linux",
+          "aarch64-linux"
+        ],
+        "outputs": "all"
+      },
+      "cudatoolkit": {
+        "pkg-path": "flox-cuda/cudaPackages_13.cudatoolkit",
+        "pkg-group": "cuda",
+        "priority": 3,
+        "systems": [
+          "x86_64-linux",
+          "aarch64-linux"
+        ]
+      },
+      "curl": {
+        "pkg-path": "curl"
+      },
+      "gcc-unwrapped": {
+        "pkg-path": "gcc-unwrapped",
+        "pkg-group": "libraries",
+        "priority": 5,
+        "systems": [
+          "x86_64-linux",
+          "aarch64-linux"
+        ]
+      },
+      "git": {
+        "pkg-path": "git"
+      },
+      "python": {
+        "pkg-path": "python311Full",
+        "pkg-group": "fastsimus-python",
+        "version": "python3-3.11.13"
+      },
+      "uv": {
+        "pkg-path": "uv",
+        "pkg-group": "python-uv"
+      },
+      "zlib": {
+        "pkg-path": "zlib",
+        "pkg-group": "libraries",
+        "priority": 6,
+        "systems": [
+          "x86_64-linux",
+          "aarch64-linux"
+        ]
+      }
+    },
+    "vars": {
+      "CUDA_VERSION": "13",
+      "FASTSIMUS_CUDA_GROUP": "cuda13",
+      "PYTHON_AUTO_INSTALL": "false"
+    },
+    "hook": {
+      "on-activate": "export UV_CACHE=\"$FLOX_ENV_CACHE/python-uv\"\nexport UV_VENV=\"$UV_CACHE/venv\"\nexport UV_PROJECT_ENVIRONMENT=\"$UV_VENV\"\n\nmkdir -p \"$UV_CACHE\"\n\nCURRENT_INTERP=\"$(realpath \"$(which python3)\")\"\nCACHED_INTERP=\"$(cat \"$UV_CACHE/venv.interpreter\" \\\n  2>/dev/null || echo none)\"\n\nif [ ! -d \"$UV_VENV\" ] \\\n    || [ \"$CURRENT_INTERP\" != \"$CACHED_INTERP\" ]; then\n  uv venv -p python3 \"$UV_VENV\"\n  echo \"$CURRENT_INTERP\" > \"$UV_CACHE/venv.interpreter\"\nfi\n\nunset VIRTUAL_ENV\nsource \"$UV_VENV/bin/activate\"\n\nif [ \"$PYTHON_AUTO_INSTALL\" = \"true\" ] \\\n    && [ -f uv.lock ]; then\n  HASH=$(md5sum uv.lock 2>/dev/null \\\n    || md5 -q uv.lock)\n  HASH=$(echo \"$HASH\" | cut -d\" \" -f1)\n  LAST=$(cat \"$UV_VENV/.deps_hash\" 2>/dev/null)\n  if [ \"$HASH\" != \"$LAST\" ]; then\n    uv sync\n    echo \"$HASH\" > \"$UV_VENV/.deps_hash\"\n  fi\nfi\n"
+    },
+    "profile": {
+      "bash": "source \"$FLOX_ENV_CACHE/python-uv/venv/bin/activate\"\n",
+      "zsh": "source \"$FLOX_ENV_CACHE/python-uv/venv/bin/activate\"\n",
+      "fish": "source \"$FLOX_ENV_CACHE/python-uv/venv/bin/activate.fish\"\n",
+      "tcsh": "source \"$FLOX_ENV_CACHE/python-uv/venv/bin/activate.csh\"\n"
+    },
+    "options": {
+      "systems": [
+        "x86_64-linux",
+        "aarch64-linux"
+      ]
+    }
+  },
+  "packages": [
+    {
+      "attr_path": "cudaPackages_13.cuda_cudart",
+      "broken": false,
+      "derivation": "/nix/store/4dqyz4cicqfhdq131g2vrhbvxvbz2w9g-cuda13.2-cuda_cudart-13.2.75.drv",
+      "description": "CUDA Runtime",
+      "install_id": "cuda_cudart",
+      "license": "[ CUDA Toolkit End User License Agreement (EULA) ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "name": "cuda13.2-cuda_cudart-13.2.75",
+      "pname": "cuda_cudart",
+      "rev": "331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "rev_count": 1008282,
+      "rev_date": "2026-05-31T16:09:29Z",
+      "scrape_date": "2026-06-29T23:28:10.718015229Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": true,
+      "version": "13.2.75",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/mybgig7abjslndqf8p4qwyq6jmcr1rz3-cuda13.2-cuda_cudart-13.2.75"
+      },
+      "system": "aarch64-linux",
+      "group": "cuda",
+      "priority": 2
+    },
+    {
+      "attr_path": "cudaPackages_13.cuda_cudart",
+      "broken": false,
+      "derivation": "/nix/store/pbgsxzyhppv939nyi70alx45vriq4190-cuda13.2-cuda_cudart-13.2.75.drv",
+      "description": "CUDA Runtime",
+      "install_id": "cuda_cudart",
+      "license": "[ CUDA Toolkit End User License Agreement (EULA) ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "name": "cuda13.2-cuda_cudart-13.2.75",
+      "pname": "cuda_cudart",
+      "rev": "331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "rev_count": 1008282,
+      "rev_date": "2026-05-31T16:09:29Z",
+      "scrape_date": "2026-06-29T23:28:10.718024068Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": true,
+      "version": "13.2.75",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/mx7dxafb20z9nz8fvrynykw16i52hn6r-cuda13.2-cuda_cudart-13.2.75"
+      },
+      "system": "x86_64-linux",
+      "group": "cuda",
+      "priority": 2
+    },
+    {
+      "attr_path": "cudaPackages_13.cuda_nvrtc",
+      "broken": false,
+      "derivation": "/nix/store/zi4cnh45w3wrkxdkyiw8d724hpzg6v9g-cuda13.2-cuda_nvrtc-13.2.78.drv",
+      "description": "Runtime compilation library for CUDA C++",
+      "install_id": "cuda_nvrtc",
+      "license": "[ CUDA Toolkit End User License Agreement (EULA) ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "name": "cuda13.2-cuda_nvrtc-13.2.78",
+      "pname": "cuda_nvrtc",
+      "rev": "331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "rev_count": 1008282,
+      "rev_date": "2026-05-31T16:09:29Z",
+      "scrape_date": "2026-06-29T23:28:10.718028046Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": true,
+      "version": "13.2.78",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/mqw507vjncgxinkwq011zsx4c20hypa8-cuda13.2-cuda_nvrtc-13.2.78-dev",
+        "include": "/nix/store/05xd0h9wzmavs8v45d3khy7qw3ack2d5-cuda13.2-cuda_nvrtc-13.2.78-include",
+        "lib": "/nix/store/9rfzxw3842aqwmgss5s59hw2rhdi3ym2-cuda13.2-cuda_nvrtc-13.2.78-lib",
+        "out": "/nix/store/kbaw3fdrx71y3m51alg1d8knh5z6r4c8-cuda13.2-cuda_nvrtc-13.2.78",
+        "static": "/nix/store/nxfzqmd2z4gzwr7gz8qxxp097aycg7hz-cuda13.2-cuda_nvrtc-13.2.78-static",
+        "stubs": "/nix/store/rid4hkxyclwm8kmy9f7pgnqypl9crn6y-cuda13.2-cuda_nvrtc-13.2.78-stubs"
+      },
+      "system": "aarch64-linux",
+      "group": "cuda",
+      "priority": 1
+    },
+    {
+      "attr_path": "cudaPackages_13.cuda_nvrtc",
+      "broken": false,
+      "derivation": "/nix/store/jkrh06hwp53iga4qrja9rhwbnpgkd58l-cuda13.2-cuda_nvrtc-13.2.78.drv",
+      "description": "Runtime compilation library for CUDA C++",
+      "install_id": "cuda_nvrtc",
+      "license": "[ CUDA Toolkit End User License Agreement (EULA) ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "name": "cuda13.2-cuda_nvrtc-13.2.78",
+      "pname": "cuda_nvrtc",
+      "rev": "331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "rev_count": 1008282,
+      "rev_date": "2026-05-31T16:09:29Z",
+      "scrape_date": "2026-06-29T23:28:10.718031204Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": true,
+      "version": "13.2.78",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/7whzxcd7xvx0m5dgnx0ik37vv332nn6r-cuda13.2-cuda_nvrtc-13.2.78-dev",
+        "include": "/nix/store/16pvzvs1l4xgn53v5gxpkmp6j65ql8sx-cuda13.2-cuda_nvrtc-13.2.78-include",
+        "lib": "/nix/store/6mhbq3mzyzcf0214510as3ayi5j7akyy-cuda13.2-cuda_nvrtc-13.2.78-lib",
+        "out": "/nix/store/h5d3ylhhydp6l889r0ddxq6jbx3v187v-cuda13.2-cuda_nvrtc-13.2.78",
+        "static": "/nix/store/2xs12920lpbgyzi9f7b5dlijnr53b1cn-cuda13.2-cuda_nvrtc-13.2.78-static",
+        "stubs": "/nix/store/n2h3h7g4n34cj783jg4f4kvmr2dvk2yx-cuda13.2-cuda_nvrtc-13.2.78-stubs"
+      },
+      "system": "x86_64-linux",
+      "group": "cuda",
+      "priority": 1
+    },
+    {
+      "attr_path": "cudaPackages_13.cudatoolkit",
+      "broken": false,
+      "derivation": "/nix/store/6wvif8id5qxrljh0hcar67772v4xvk55-cuda-merged-13.2.drv",
+      "description": "Wrapper substituting the deprecated runfile-based CUDA installation",
+      "install_id": "cudatoolkit",
+      "license": "CUDA Toolkit End User License Agreement (EULA)",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "name": "cuda-merged-13.2",
+      "pname": "cuda-merged",
+      "rev": "331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "rev_count": 1008282,
+      "rev_date": "2026-05-31T16:09:29Z",
+      "scrape_date": "2026-06-29T23:28:10.718033346Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": true,
+      "version": "13.2",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/76sc5xp10fpdcbx0gb6s2xc18xfb177q-cuda-merged-13.2"
+      },
+      "system": "aarch64-linux",
+      "group": "cuda",
+      "priority": 3
+    },
+    {
+      "attr_path": "cudaPackages_13.cudatoolkit",
+      "broken": false,
+      "derivation": "/nix/store/8qa86yp8q31668m19v79bqcxp77jn0ar-cuda-merged-13.2.drv",
+      "description": "Wrapper substituting the deprecated runfile-based CUDA installation",
+      "install_id": "cudatoolkit",
+      "license": "CUDA Toolkit End User License Agreement (EULA)",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "name": "cuda-merged-13.2",
+      "pname": "cuda-merged",
+      "rev": "331800de5053fcebacf6813adb5db9c9dca22a0c",
+      "rev_count": 1008282,
+      "rev_date": "2026-05-31T16:09:29Z",
+      "scrape_date": "2026-06-29T23:28:10.718036743Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": true,
+      "version": "13.2",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/pz6968fvc25cyrpnx3yx1wcida0vnk0m-cuda-merged-13.2"
+      },
+      "system": "x86_64-linux",
+      "group": "cuda",
+      "priority": 3
+    },
+    {
+      "attr_path": "python311Full",
+      "broken": false,
+      "derivation": "/nix/store/44d9l6xf33ywn2dax01k0x3600pn5975-python3-3.11.13.drv",
+      "description": "High-level dynamically-typed programming language",
+      "install_id": "python",
+      "license": "Python-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d0fc30899600b9b3466ddb260fd83deb486c32f1",
+      "name": "python3-3.11.13",
+      "pname": "python311Full",
+      "rev": "d0fc30899600b9b3466ddb260fd83deb486c32f1",
+      "rev_count": 855242,
+      "rev_date": "2025-09-02T04:28:08Z",
+      "scrape_date": "2025-09-04T03:46:50.111892Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "python3-3.11.13",
+      "outputs_to_install": [
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/8vh5r9clxhjvc1r0nf8rjzqj4wmwwpmg-python3-3.11.13-debug",
+        "out": "/nix/store/mnhn2lxw2pkwb91qik4rlwqyqqpg96gk-python3-3.11.13"
+      },
+      "system": "aarch64-linux",
+      "group": "fastsimus-python",
+      "priority": 5
+    },
+    {
+      "attr_path": "python311Full",
+      "broken": false,
+      "derivation": "/nix/store/rsgc682hsfqyqdw52vapypdfz729gxqg-python3-3.11.13.drv",
+      "description": "High-level dynamically-typed programming language",
+      "install_id": "python",
+      "license": "Python-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d0fc30899600b9b3466ddb260fd83deb486c32f1",
+      "name": "python3-3.11.13",
+      "pname": "python311Full",
+      "rev": "d0fc30899600b9b3466ddb260fd83deb486c32f1",
+      "rev_count": 855242,
+      "rev_date": "2025-09-02T04:28:08Z",
+      "scrape_date": "2025-09-04T04:07:40.068256Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "python3-3.11.13",
+      "outputs_to_install": [
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/rr2adfxzjbkzakzjbjjvc3xi2yvcqshr-python3-3.11.13-debug",
+        "out": "/nix/store/y3kf2zx3a1d5gii8zaf9k19mh4qjzql0-python3-3.11.13"
+      },
+      "system": "x86_64-linux",
+      "group": "fastsimus-python",
+      "priority": 5
+    },
+    {
+      "attr_path": "gcc-unwrapped",
+      "broken": false,
+      "derivation": "/nix/store/bmcdjrmrqkrwfv16d039mnn9974fhch1-gcc-15.2.0.drv",
+      "description": "GNU Compiler Collection, version 15.2.0",
+      "install_id": "gcc-unwrapped",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "name": "gcc-15.2.0",
+      "pname": "gcc-unwrapped",
+      "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "rev_count": 1022855,
+      "rev_date": "2026-06-26T09:58:34Z",
+      "scrape_date": "2026-06-27T03:49:24.152482Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "15.2.0",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "checksum": "/nix/store/6igpfz2rx7xxsr5kvxwlc57d5iafaabz-gcc-15.2.0-checksum",
+        "info": "/nix/store/khkipdd1fmlcbxnza01582fh7j2mfnf3-gcc-15.2.0-info",
+        "lib": "/nix/store/m3v5jbl1y7hxb1yimlyp0067acslkxf2-gcc-15.2.0-lib",
+        "libgcc": "/nix/store/5scis26lfzmcsbgbs3b1i4wraxg28pbp-gcc-15.2.0-libgcc",
+        "man": "/nix/store/bny95l0diywfwvg1lnwhm1m9fsxdm5pl-gcc-15.2.0-man",
+        "out": "/nix/store/8hwmjrgdixn4612zrlabmych64ix89mx-gcc-15.2.0"
+      },
+      "system": "aarch64-linux",
+      "group": "libraries",
+      "priority": 5
+    },
+    {
+      "attr_path": "gcc-unwrapped",
+      "broken": false,
+      "derivation": "/nix/store/qlb1647jp7grq5fgp66fhk5qr9rzr1j6-gcc-15.2.0.drv",
+      "description": "GNU Compiler Collection, version 15.2.0",
+      "install_id": "gcc-unwrapped",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "name": "gcc-15.2.0",
+      "pname": "gcc-unwrapped",
+      "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "rev_count": 1022855,
+      "rev_date": "2026-06-26T09:58:34Z",
+      "scrape_date": "2026-06-27T04:55:45.908488Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "15.2.0",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "checksum": "/nix/store/scnas3kx869pfc8mz3fjqmfvl9m9sn6a-gcc-15.2.0-checksum",
+        "info": "/nix/store/2hbjnbfhaq4gq6p55xi9qvj6lx7x4g04-gcc-15.2.0-info",
+        "lib": "/nix/store/hngmi01i8wgi25a0byrxcn4ysz5j79mw-gcc-15.2.0-lib",
+        "libgcc": "/nix/store/7nww4d4yl7jzf66qllvyn61xb21vp7ry-gcc-15.2.0-libgcc",
+        "man": "/nix/store/5r95b3z75rc980dws0wp5ylawgzfkj6l-gcc-15.2.0-man",
+        "out": "/nix/store/sq0nrnfwhkc5ljvklnrk5ps4358g4nbj-gcc-15.2.0"
+      },
+      "system": "x86_64-linux",
+      "group": "libraries",
+      "priority": 5
+    },
+    {
+      "attr_path": "zlib",
+      "broken": false,
+      "derivation": "/nix/store/wph0cdg2l4y5zmvy0j4gb1d4kxgppvwl-zlib-1.3.2.drv",
+      "description": "Lossless data-compression library",
+      "install_id": "zlib",
+      "license": "Zlib",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "name": "zlib-1.3.2",
+      "pname": "zlib",
+      "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "rev_count": 1022855,
+      "rev_date": "2026-06-26T09:58:34Z",
+      "scrape_date": "2026-06-27T03:53:07.307775Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.3.2",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/jqsz5xhpkn55w6q2pxa5a8s598ic122p-zlib-1.3.2-dev",
+        "out": "/nix/store/dxiaz7djzlgkqi9bzd95x25lhvixvdph-zlib-1.3.2",
+        "static": "/nix/store/dcv5x6yfz0x2w56nn4lixhc1kdynas5g-zlib-1.3.2-static"
+      },
+      "system": "aarch64-linux",
+      "group": "libraries",
+      "priority": 6
+    },
+    {
+      "attr_path": "zlib",
+      "broken": false,
+      "derivation": "/nix/store/92yhjpd6g9n92dxn52xv2f29h55g6n4z-zlib-1.3.2.drv",
+      "description": "Lossless data-compression library",
+      "install_id": "zlib",
+      "license": "Zlib",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "name": "zlib-1.3.2",
+      "pname": "zlib",
+      "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "rev_count": 1022855,
+      "rev_date": "2026-06-26T09:58:34Z",
+      "scrape_date": "2026-06-27T04:59:40.437236Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.3.2",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/a9psmsc93llkravrd50rrv8k3dwdw60x-zlib-1.3.2-dev",
+        "out": "/nix/store/dbz6pb9g67kpgpl95k8d85kzpxm1c32p-zlib-1.3.2",
+        "static": "/nix/store/7y3nkp1ygncjr2gbyxc3lj4zim1m7qnz-zlib-1.3.2-static"
+      },
+      "system": "x86_64-linux",
+      "group": "libraries",
+      "priority": 6
+    },
+    {
+      "attr_path": "uv",
+      "broken": false,
+      "derivation": "/nix/store/xg4cnnd59dl36i4jfpmh1lgc1hlwqbzi-uv-0.11.22.drv",
+      "description": "Extremely fast Python package installer and resolver, written in Rust",
+      "install_id": "uv",
+      "license": "[ Apache-2.0, MIT ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "name": "uv-0.11.22",
+      "pname": "uv",
+      "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "rev_count": 1022855,
+      "rev_date": "2026-06-26T09:58:34Z",
+      "scrape_date": "2026-06-27T03:52:46.169502Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.11.22",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/cd0vkwix6pbcf4a4r7hqnizwxwcgcwhq-uv-0.11.22"
+      },
+      "system": "aarch64-linux",
+      "group": "python-uv",
+      "priority": 5
+    },
+    {
+      "attr_path": "uv",
+      "broken": false,
+      "derivation": "/nix/store/gpw9nl8wpan0h9h9h8r9g0mjgs8xvj0x-uv-0.11.22.drv",
+      "description": "Extremely fast Python package installer and resolver, written in Rust",
+      "install_id": "uv",
+      "license": "[ Apache-2.0, MIT ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "name": "uv-0.11.22",
+      "pname": "uv",
+      "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "rev_count": 1022855,
+      "rev_date": "2026-06-26T09:58:34Z",
+      "scrape_date": "2026-06-27T04:59:17.645183Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.11.22",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/5x45h9xpizfv25k60k136v3pblks7hmr-uv-0.11.22"
+      },
+      "system": "x86_64-linux",
+      "group": "python-uv",
+      "priority": 5
+    },
+    {
+      "attr_path": "curl",
+      "broken": false,
+      "derivation": "/nix/store/8gcf1s8bi6kiywg1hl6i3v4nx3c7wrqp-curl-8.20.0.drv",
+      "description": "Command line tool for transferring files with URL syntax",
+      "install_id": "curl",
+      "license": "curl",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "name": "curl-8.20.0",
+      "pname": "curl",
+      "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "rev_count": 1022855,
+      "rev_date": "2026-06-26T09:58:34Z",
+      "scrape_date": "2026-06-27T03:49:23.161294Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "8.20.0",
+      "outputs_to_install": [
+        "bin",
+        "man"
+      ],
+      "outputs": {
+        "bin": "/nix/store/8gdgwydsf6gia9j178nymxwm2bl0z3m3-curl-8.20.0-bin",
+        "debug": "/nix/store/rlffdmmrgy46gwvx8ap35gdiyd772vxj-curl-8.20.0-debug",
+        "dev": "/nix/store/01pp0l8ijps75bfk8x75iz2yg4n9klqh-curl-8.20.0-dev",
+        "devdoc": "/nix/store/yzn91bf7vwv8l5migzld5vphr87kfiwn-curl-8.20.0-devdoc",
+        "man": "/nix/store/fivfywp5nlas8zqmiqdar15s20v1llv7-curl-8.20.0-man",
+        "out": "/nix/store/v9dm55hnfslwma8x0vkrb12rc7xgw4br-curl-8.20.0"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "curl",
+      "broken": false,
+      "derivation": "/nix/store/zqkrwwbym85n95fd4xl1x2x2sg3iyihc-curl-8.20.0.drv",
+      "description": "Command line tool for transferring files with URL syntax",
+      "install_id": "curl",
+      "license": "curl",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "name": "curl-8.20.0",
+      "pname": "curl",
+      "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "rev_count": 1022855,
+      "rev_date": "2026-06-26T09:58:34Z",
+      "scrape_date": "2026-06-27T04:55:44.793243Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "8.20.0",
+      "outputs_to_install": [
+        "bin",
+        "man"
+      ],
+      "outputs": {
+        "bin": "/nix/store/w36yf3psz1zhgabw03hlag8bw0rdfsav-curl-8.20.0-bin",
+        "debug": "/nix/store/6bd4xhi8pgwng74338wc82bqw5ncs7xs-curl-8.20.0-debug",
+        "dev": "/nix/store/mgf0n27lnygx9f2n4riyw34g2lqm9rhy-curl-8.20.0-dev",
+        "devdoc": "/nix/store/5dxy29mjl0wjakfignhm1q2h04qnl5j1-curl-8.20.0-devdoc",
+        "man": "/nix/store/df7hisry2sni9b7dx84df75m3mr15idz-curl-8.20.0-man",
+        "out": "/nix/store/5ji5924yd02lmva6bmp7k65gfs2696z7-curl-8.20.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "git",
+      "broken": false,
+      "derivation": "/nix/store/ag214zi09yzxh7wby5nj6b31803ha9d4-git-2.54.0.drv",
+      "description": "Distributed version control system",
+      "install_id": "git",
+      "license": "GPL-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "name": "git-2.54.0",
+      "pname": "git",
+      "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "rev_count": 1022855,
+      "rev_date": "2026-06-26T09:58:34Z",
+      "scrape_date": "2026-06-27T03:49:24.293907Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.54.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/hi8y2a7kxz94pmnfh3k2gp2mzr57xmqd-git-2.54.0-debug",
+        "doc": "/nix/store/ms4bxp0svz53yzxqwfzp5lwp22v11m7d-git-2.54.0-doc",
+        "out": "/nix/store/j76bc0jffq323b6kvrckky5152h0pfdk-git-2.54.0"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "git",
+      "broken": false,
+      "derivation": "/nix/store/214n5nb1k4qzynzgw7xpsp4fp19vni8i-git-2.54.0.drv",
+      "description": "Distributed version control system",
+      "install_id": "git",
+      "license": "GPL-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "name": "git-2.54.0",
+      "pname": "git",
+      "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+      "rev_count": 1022855,
+      "rev_date": "2026-06-26T09:58:34Z",
+      "scrape_date": "2026-06-27T04:55:46.065253Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.54.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/7bjwn43x9gcaf249d8l651083ri033dy-git-2.54.0-debug",
+        "doc": "/nix/store/9a0f1mfx8n1b8y64qx9999pq70j48ms6-git-2.54.0-doc",
+        "out": "/nix/store/k3wl6cg7q50zkx47af3msmg1yrg1f203-git-2.54.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    }
+  ],
+  "compose": {
+    "composer": {
+      "schema-version": "1.12.0",
+      "install": {
+        "cuda_cudart": {
+          "pkg-path": "flox-cuda/cudaPackages_13.cuda_cudart",
+          "pkg-group": "cuda",
+          "priority": 2,
+          "systems": [
+            "x86_64-linux",
+            "aarch64-linux"
+          ],
+          "outputs": "all"
+        },
+        "cuda_nvrtc": {
+          "pkg-path": "flox-cuda/cudaPackages_13.cuda_nvrtc",
+          "pkg-group": "cuda",
+          "priority": 1,
+          "systems": [
+            "x86_64-linux",
+            "aarch64-linux"
+          ],
+          "outputs": "all"
+        },
+        "cudatoolkit": {
+          "pkg-path": "flox-cuda/cudaPackages_13.cudatoolkit",
+          "pkg-group": "cuda",
+          "priority": 3,
+          "systems": [
+            "x86_64-linux",
+            "aarch64-linux"
+          ]
+        },
+        "curl": {
+          "pkg-path": "curl"
+        },
+        "gcc-unwrapped": {
+          "pkg-path": "gcc-unwrapped",
+          "pkg-group": "libraries",
+          "priority": 5,
+          "systems": [
+            "x86_64-linux",
+            "aarch64-linux"
+          ]
+        },
+        "git": {
+          "pkg-path": "git"
+        },
+        "python": {
+          "pkg-path": "python311Full",
+          "pkg-group": "fastsimus-python",
+          "version": "python3-3.11.13"
+        },
+        "zlib": {
+          "pkg-path": "zlib",
+          "pkg-group": "libraries",
+          "priority": 6,
+          "systems": [
+            "x86_64-linux",
+            "aarch64-linux"
+          ]
+        }
+      },
+      "vars": {
+        "CUDA_VERSION": "13",
+        "FASTSIMUS_CUDA_GROUP": "cuda13",
+        "PYTHON_AUTO_INSTALL": "false"
+      },
+      "options": {
+        "systems": [
+          "x86_64-linux",
+          "aarch64-linux"
+        ]
+      },
+      "include": {
+        "environments": [
+          {
+            "remote": "flox/python-uv"
+          }
+        ]
+      }
+    },
+    "include": [
+      {
+        "manifest": {
+          "schema-version": "1.10.0",
+          "install": {
+            "python": {
+              "pkg-path": "python3"
+            },
+            "uv": {
+              "pkg-path": "uv",
+              "pkg-group": "python-uv"
+            }
+          },
+          "vars": {
+            "PYTHON_AUTO_INSTALL": "true"
+          },
+          "hook": {
+            "on-activate": "export UV_CACHE=\"$FLOX_ENV_CACHE/python-uv\"\nexport UV_VENV=\"$UV_CACHE/venv\"\nexport UV_PROJECT_ENVIRONMENT=\"$UV_VENV\"\n\nmkdir -p \"$UV_CACHE\"\n\nCURRENT_INTERP=\"$(realpath \"$(which python3)\")\"\nCACHED_INTERP=\"$(cat \"$UV_CACHE/venv.interpreter\" \\\n  2>/dev/null || echo none)\"\n\nif [ ! -d \"$UV_VENV\" ] \\\n    || [ \"$CURRENT_INTERP\" != \"$CACHED_INTERP\" ]; then\n  uv venv -p python3 \"$UV_VENV\"\n  echo \"$CURRENT_INTERP\" > \"$UV_CACHE/venv.interpreter\"\nfi\n\nunset VIRTUAL_ENV\nsource \"$UV_VENV/bin/activate\"\n\nif [ \"$PYTHON_AUTO_INSTALL\" = \"true\" ] \\\n    && [ -f uv.lock ]; then\n  HASH=$(md5sum uv.lock 2>/dev/null \\\n    || md5 -q uv.lock)\n  HASH=$(echo \"$HASH\" | cut -d\" \" -f1)\n  LAST=$(cat \"$UV_VENV/.deps_hash\" 2>/dev/null)\n  if [ \"$HASH\" != \"$LAST\" ]; then\n    uv sync\n    echo \"$HASH\" > \"$UV_VENV/.deps_hash\"\n  fi\nfi\n"
+          },
+          "profile": {
+            "bash": "source \"$FLOX_ENV_CACHE/python-uv/venv/bin/activate\"\n",
+            "zsh": "source \"$FLOX_ENV_CACHE/python-uv/venv/bin/activate\"\n",
+            "fish": "source \"$FLOX_ENV_CACHE/python-uv/venv/bin/activate.fish\"\n",
+            "tcsh": "source \"$FLOX_ENV_CACHE/python-uv/venv/bin/activate.csh\"\n"
+          },
+          "options": {}
+        },
+        "name": "python-uv",
+        "descriptor": {
+          "remote": "flox/python-uv"
+        }
+      }
+    ],
+    "warnings": [
+      {
+        "warning": {
+          "Overriding": [
+            "install",
+            "python"
+          ]
+        },
+        "higher_priority_name": "Current manifest"
+      },
+      {
+        "warning": {
+          "Overriding": [
+            "vars",
+            "PYTHON_AUTO_INSTALL"
+          ]
+        },
+        "higher_priority_name": "Current manifest"
+      }
+    ]
+  }
+}
