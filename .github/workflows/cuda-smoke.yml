@@ -45,45 +45,36 @@ jobs:
       - name: GPU diagnostics
         run: nvidia-smi
 
-      # uv/pip wheels (NumPy/CuPy) link against host zlib; Flox's nix LD_LIBRARY_PATH
-      # does not include /usr/lib by default on ephemeral machine.dev images.
-      - name: Install system libraries
-        run: |
-          sudo apt-get update && sudo apt-get install -y zlib1g
-          echo "FLOX_HOST_LIB_DIR=/usr/lib/$(uname -m)-linux-gnu" >> "$GITHUB_ENV"
-
       - name: Install Flox
         uses: flox/install-flox-action@v2
         with:
           trusted-environments: flox/python-uv
 
       - name: Install Flox packages
-        run: |
-          flox activate -c "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH:-}:${FLOX_HOST_LIB_DIR}; true"
+        run: flox activate -c true
 
       - name: Verify CuPy + GPU
         run: |
-          flox activate -c "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH:-}:${FLOX_HOST_LIB_DIR}; python -c \"import cupy as cp; \
+          flox activate -c 'python -c "import cupy as cp; \
               p = cp.cuda.runtime.getDeviceProperties(0); \
-              print('GPU:', p['name'].decode() if isinstance(p['name'], bytes) else p['name']); \
-              print('CC:', cp.cuda.Device(0).compute_capability)\""
+              print(\"GPU:\", p[\"name\"].decode() if isinstance(p[\"name\"], bytes) else p[\"name\"]); \
+              print(\"CC:\", cp.cuda.Device(0).compute_capability)"'
 
       - name: Run CuPy backend tests
         run: |
-          flox activate -c "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH:-}:${FLOX_HOST_LIB_DIR}; \
-            pytest tests/backend/test_cupy.py -v -p no:xdist -p no:testmon"
+          flox activate -c 'pytest tests/backend/test_cupy.py \
+            -v -p no:xdist -p no:testmon'
 
       - name: Run CuPy simus integration tests
         if: github.event_name == 'push'
         run: |
-          flox activate -c "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH:-}:${FLOX_HOST_LIB_DIR}; \
-            pytest tests/test_simus.py -v -k cupy -p no:xdist -p no:testmon"
+          flox activate -c 'pytest tests/test_simus.py \
+            -v -k cupy -p no:xdist -p no:testmon'
 
       - name: Smoke scaling bench (1K + 10K only)
         if: github.event_name == 'workflow_dispatch' && inputs.run_scaling_bench
         run: |
-          flox activate -c "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH:-}:${FLOX_HOST_LIB_DIR}; \
-            pytest tests/benchmarks/bench_simus_scaling.py \
+          flox activate -c 'pytest tests/benchmarks/bench_simus_scaling.py \
             --benchmark-only -p no:xdist -p no:testmon -m scaling \
-            -k 'cupy and (1000 or 10000)' \
-            --benchmark-min-rounds=1 --benchmark-min-time=0"
+            -k "cupy and (1000 or 10000)" \
+            --benchmark-min-rounds=1 --benchmark-min-time=0'

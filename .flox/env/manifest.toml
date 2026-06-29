@@ -48,6 +48,11 @@ gcc-unwrapped.pkg-group = "libraries"
 gcc-unwrapped.systems = ["x86_64-linux", "aarch64-linux"]
 gcc-unwrapped.priority = 5
 
+zlib.pkg-path = "zlib"
+zlib.pkg-group = "libraries"
+zlib.systems = ["x86_64-linux", "aarch64-linux"]
+zlib.priority = 6
+
 [vars]
 CUDA_VERSION = "12.2"
 
