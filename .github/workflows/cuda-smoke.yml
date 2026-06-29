@@ -53,6 +53,12 @@ jobs:
         with:
           python-version: "3.11"
 
+      # machine.dev runners ship CUDA 13.x; use matching CuPy + CTK wheels (not cupy-cuda12x).
+      - name: Install CuPy for host CUDA 13
+        run: |
+          uv pip uninstall -y cupy-cuda12x cupy 2>/dev/null || true
+          uv pip install 'cupy-cuda13x[ctk]>=13.0'
+
       - name: Verify CuPy + GPU
         run: |
           uv run python -c "import cupy as cp; \
