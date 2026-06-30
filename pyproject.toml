@@ -45,6 +45,12 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "fast_simus"
 
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+
 
 # ---- Dev dependencies ----
 
@@ -236,7 +242,7 @@ args = [
 help = "Build wheel file"
 sequence = [
     { ref = "clean" },
-    { cmd = "uv build" },
+    { cmd = "uv build --no-sources" },
 ]
 
 [tool.poe.tasks.clean]
