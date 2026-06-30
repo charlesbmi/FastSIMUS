@@ -4,15 +4,6 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      target:
-        description: Publish target
-        required: true
-        default: testpypi
-        type: choice
-        options:
-          - testpypi
-          - pypi
 
 concurrency:
   group: publish-pypi
@@ -38,10 +29,5 @@ jobs:
       - name: Build package
         run: uv run poe build
 
-      - name: Publish to TestPyPI
-        if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
-        run: uv publish --index testpypi --trusted-publishing always
-
       - name: Publish to PyPI
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
         run: uv publish --trusted-publishing always
