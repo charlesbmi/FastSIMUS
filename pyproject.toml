@@ -236,7 +236,7 @@ args = [
 help = "Build wheel file"
 sequence = [
     { ref = "clean" },
-    { cmd = "uv build" },
+    { cmd = "uv build --no-sources" },
 ]
 
 [tool.poe.tasks.clean]
