@@ -82,7 +82,7 @@ class PicmusContrastFigurePaths(NamedTuple):
 
 
 PICMUS_CONTRAST_GRID_WAVELENGTHS = 0.25
-PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB = 100.0
+PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB = DYNAMIC_RANGE_DB
 PICMUS_CONTRAST_FIGURE_HEIGHT_IN = 2.4
 PICMUS_CONTRAST_COMPARISON_FIGSIZE_IN = (7.2, PICMUS_CONTRAST_FIGURE_HEIGHT_IN)
 PICMUS_CONTRAST_TWO_PANEL_FIGSIZE_IN = (4.6, PICMUS_CONTRAST_FIGURE_HEIGHT_IN)
@@ -245,7 +245,7 @@ def picmus_contrast_comparison_panel_specs(
             cmap="magma",
             vmin_db=-PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB,
             vmax_db=0.0,
-            colorbar_label="Residual [dB, -100 dB floor]",
+            colorbar_label="Residual [dB]",
         ),
     )
 
@@ -421,15 +421,27 @@ def _render_picmus_contrast_comparison(
     pyplot = cast("Any", plt)
     extent_mm = _picmus_contrast_extent_mm(data)
     panel_specs = picmus_contrast_comparison_panel_specs(data)
-    fig, axes = pyplot.subplots(1, 3, figsize=PICMUS_CONTRAST_COMPARISON_FIGSIZE_IN, constrained_layout=True)
+    fig, axes = pyplot.subplots(
+        1,
+        3,
+        figsize=PICMUS_CONTRAST_COMPARISON_FIGSIZE_IN,
+        constrained_layout=True,
+        gridspec_kw={"wspace": PICMUS_CONTRAST_TWO_PANEL_WSPACE},
+        sharex=True,
+        sharey=True,
+    )
+    images = []
     for ax, spec in zip(axes, panel_specs, strict=True):
-        im = _imshow_contrast_panel(ax, spec, extent_mm)
+        images.append(_imshow_contrast_panel(ax, spec, extent_mm))
         if overlay_cysts:
             overlay_contrast_cysts(ax, phantom_data)
         ax.set_title(spec.title)
-        ax.set_xlabel("Lateral [mm]")
-        ax.set_ylabel("Depth [mm]")
-        fig.colorbar(im, ax=ax, label=spec.colorbar_label)
+        ax.set_xlabel("")
+        ax.set_ylabel("")
+    axes[0].set_ylabel("Depth [mm]", labelpad=PICMUS_CONTRAST_TWO_PANEL_YLABEL_PAD)
+    fig.supxlabel("Lateral [mm]")
+    fig.colorbar(images[1], ax=axes[:2], label="Amplitude [dB]", shrink=0.84, pad=0.015)
+    fig.colorbar(images[2], ax=axes[2], label=panel_specs[2].colorbar_label, shrink=0.84, pad=0.015)
     fig.savefig(output_path, dpi=PICMUS_CONTRAST_PLOT_DPI, bbox_inches="tight")
     pyplot.close(fig)
 

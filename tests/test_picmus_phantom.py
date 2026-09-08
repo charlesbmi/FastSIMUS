@@ -796,7 +796,7 @@ def test_picmus_contrast_beamformed_hdf5_rejects_unknown_format(tmp_path: Path) 
 
 
 def test_picmus_contrast_comparison_panel_specs_use_configured_titles_and_residual_floor() -> None:
-    """The comparison figure uses configured titles and a -100 dB residual floor."""
+    """The comparison figure uses configured titles and a -60 dB residual floor."""
     beamformed = ContrastBeamformedData(
         fastsimus_iq=np.array([[1.0 + 0.0j, 0.1 + 0.0j]]),
         pymust_iq=np.array([[0.5 + 0.0j, 0.1 + 0.0j]]),
@@ -815,6 +815,7 @@ def test_picmus_contrast_comparison_panel_specs_use_configured_titles_and_residu
     )
     assert panel_specs[0].vmin_db == -DYNAMIC_RANGE_DB
     assert panel_specs[1].vmin_db == -DYNAMIC_RANGE_DB
+    assert panel_specs[2].vmin_db == -DYNAMIC_RANGE_DB
     assert panel_specs[2].vmin_db == -PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB
     assert float(np.min(panel_specs[2].image_db)) == -PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB
     assert panel_specs[2].image_db[0, 0] == pytest.approx(20.0 * np.log10(0.5))
