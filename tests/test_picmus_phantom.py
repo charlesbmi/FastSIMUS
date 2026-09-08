@@ -853,20 +853,18 @@ def test_picmus_contrast_figures_are_written_without_default_overlays(
 
     monkeypatch.setattr("tests._picmus_contrast_artifacts.overlay_contrast_cysts", count_overlay)
 
-    fastsimus_path, comparison_path, two_panel_path, debug_path = render_picmus_contrast_figures(
+    paths = render_picmus_contrast_figures(
         beamformed,
         phantom_data,
         tmp_path,
     )
 
-    assert fastsimus_path.name == "picmus_contrast_fastsimus_mlx_75_angle.png"
-    assert comparison_path.name == "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle.png"
-    assert two_panel_path.name == "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle_two_panel.png"
-    assert debug_path.name == "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle_debug_cysts.png"
-    assert fastsimus_path.is_file()
-    assert comparison_path.is_file()
-    assert two_panel_path.is_file()
-    assert debug_path.is_file()
+    assert paths.fastsimus.name == "picmus_contrast_fastsimus_mlx_75_angle.png"
+    assert paths.comparison.name == "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle.png"
+    assert paths.two_panel.name == "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle_two_panel.png"
+    assert paths.residual.name == "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle_residual.png"
+    assert paths.debug_comparison.name == "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle_debug_cysts.png"
+    assert all(path.is_file() for path in paths)
     assert overlay_calls == 3
     assert PICMUS_CONTRAST_IMAGE_ASPECT == "equal"
 
