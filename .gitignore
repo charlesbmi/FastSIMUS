@@ -201,6 +201,7 @@ __marimo__/
 # Claude
 .claude/settings.local.json
 .tmp/
+.artifacts/
 
 # Brainstorm docs (research artifacts, not shipped)
 docs/brainstorms/

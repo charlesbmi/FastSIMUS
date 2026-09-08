@@ -17,9 +17,9 @@ from jaxtyping import Complex, Float, jaxtyped
 
 from tests._picmus_contrast_artifacts import (
     PICMUS_CONTRAST_BEAMFORMED_CACHE_VERSION,
+    PICMUS_CONTRAST_FASTSIMUS_TITLE,
     PICMUS_CONTRAST_GRID_WAVELENGTHS,
     PICMUS_CONTRAST_IMAGE_ASPECT,
-    PICMUS_CONTRAST_PROPOSED_TITLE,
     PICMUS_CONTRAST_REFERENCE_TITLE,
     PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB,
     PICMUS_CONTRAST_RESIDUAL_TITLE,
@@ -146,9 +146,9 @@ IMAGE_Z_MAX_M = 50.0e-3
 IMAGE_X_M = np.linspace(IMAGE_X_MIN_M, IMAGE_X_MAX_M, 96)
 IMAGE_Z_M = np.linspace(IMAGE_Z_MIN_M, IMAGE_Z_MAX_M, 128)
 IQ_ATOL_PEAK = 5e-2
-PROPOSED_LABEL = "Proposed"
+FASTSIMUS_LABEL = "FastSIMUS"
 REFERENCE_LABEL = "PyMUST"
-RESIDUAL_LABEL = f"|{PROPOSED_LABEL} - {REFERENCE_LABEL}|"
+RESIDUAL_LABEL = f"|{FASTSIMUS_LABEL} - {REFERENCE_LABEL}|"
 # 12 in x 360 dpi gives a 4320 px-wide three-panel PNG, close to a 4k export target.
 PICMUS_PLOT_FIGSIZE_IN = (12.0, 4.0)
 PICMUS_PLOT_MIN_WIDTH_PX = 4096
@@ -560,9 +560,9 @@ def _render_picmus_phantom_plot(reconstructed: ReconstructedIq, output_path: Pat
 
     fig, axes = pyplot.subplots(1, 3, figsize=PICMUS_PLOT_FIGSIZE_IN, constrained_layout=True)
     panel_specs = (
-        (PROPOSED_LABEL, fastsimus_db, "gray", -DYNAMIC_RANGE_DB, 0.0, "Amplitude [dB]"),
+        (FASTSIMUS_LABEL, fastsimus_db, "gray", -DYNAMIC_RANGE_DB, 0.0, "Amplitude [dB]"),
         (REFERENCE_LABEL, pymust_db, "gray", -DYNAMIC_RANGE_DB, 0.0, "Amplitude [dB]"),
-        (RESIDUAL_LABEL, residual_db, "magma", -DYNAMIC_RANGE_DB, 0.0, "Residual amplitude [dB]"),
+        (RESIDUAL_LABEL, residual_db, "gray", -DYNAMIC_RANGE_DB, 0.0, "Residual amplitude [dB]"),
     )
     for ax, (title, image, cmap, vmin, vmax, colorbar_label) in zip(axes, panel_specs, strict=True):
         im = ax.imshow(
@@ -810,13 +810,14 @@ def test_picmus_contrast_comparison_panel_specs_use_configured_titles_and_residu
 
     assert tuple(spec.title for spec in panel_specs) == (
         PICMUS_CONTRAST_REFERENCE_TITLE,
-        PICMUS_CONTRAST_PROPOSED_TITLE,
+        PICMUS_CONTRAST_FASTSIMUS_TITLE,
         PICMUS_CONTRAST_RESIDUAL_TITLE,
     )
     assert panel_specs[0].vmin_db == -DYNAMIC_RANGE_DB
     assert panel_specs[1].vmin_db == -DYNAMIC_RANGE_DB
     assert panel_specs[2].vmin_db == -DYNAMIC_RANGE_DB
     assert panel_specs[2].vmin_db == -PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB
+    assert all(spec.cmap == "gray" for spec in panel_specs)
     assert float(np.min(panel_specs[2].image_db)) == -PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB
     assert panel_specs[2].image_db[0, 0] == pytest.approx(20.0 * np.log10(0.5))
 
@@ -862,8 +863,6 @@ def test_picmus_contrast_figures_are_written_without_default_overlays(
 
     assert paths.fastsimus.name == "picmus_contrast_fastsimus_mlx_75_angle.png"
     assert paths.comparison.name == "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle.png"
-    assert paths.two_panel.name == "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle_two_panel.png"
-    assert paths.residual.name == "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle_residual.png"
     assert paths.debug_comparison.name == "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle_debug_cysts.png"
     assert all(path.is_file() for path in paths)
     assert overlay_calls == 3
