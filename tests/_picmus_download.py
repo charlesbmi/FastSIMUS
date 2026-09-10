@@ -1,23 +1,26 @@
-"""Download and cache public PICMUS HDF5 files for contrast figure generation."""
+"""Download and cache public PICMUS HDF5 files for contrast figure generation.
+
+The scatterer phantom and scan axes are hosted as a GitHub Release artifact so
+callers do not download the 564 MB CREATIS challenge zip. The files remain
+PICMUS challenge data: free of use with attribution. See
+https://www.creatis.insa-lyon.fr/Challenge/IEEE_IUS_2016/node/48 and
+Liebgott et al., IEEE IUS 2016, https://doi.org/10.1109/ULTSYM.2016.7728908.
+"""
 
 from __future__ import annotations
 
-import zipfile
 from pathlib import Path
 from urllib.request import urlopen
 
 CACHE_DIR = Path.home() / ".cache" / "fast_simus" / "picmus"
-PICMUS_ARCHIVE_URL = (
-    "https://www.creatis.insa-lyon.fr/Challenge/IEEE_IUS_2016/sites/"
-    "www.creatis.insa-lyon.fr.Challenge.IEEE_IUS_2016/files/archive_to_download.zip"
-)
-PICMUS_ARCHIVE_EXPECTED_SIZE = 564_074_891
-PICMUS_CONTRAST_PHANTOM_MEMBER = (
-    "archive_to_download/database/simulation/contrast_speckle/contrast_speckle_simu_phantom.hdf5"
-)
-PICMUS_CONTRAST_SCAN_MEMBER = "archive_to_download/database/simulation/contrast_speckle/contrast_speckle_simu_scan.hdf5"
+PICMUS_RELEASE_TAG = "picmus-contrast-artifacts-v1"
+PICMUS_RELEASE_DOWNLOAD_BASE = f"https://github.com/charlesbmi/FastSIMUS/releases/download/{PICMUS_RELEASE_TAG}"
 PICMUS_CONTRAST_PHANTOM_NAME = "contrast_speckle_simu_phantom.hdf5"
 PICMUS_CONTRAST_SCAN_NAME = "contrast_speckle_simu_scan.hdf5"
+PICMUS_CONTRAST_PHANTOM_URL = f"{PICMUS_RELEASE_DOWNLOAD_BASE}/{PICMUS_CONTRAST_PHANTOM_NAME}"
+PICMUS_CONTRAST_SCAN_URL = f"{PICMUS_RELEASE_DOWNLOAD_BASE}/{PICMUS_CONTRAST_SCAN_NAME}"
+PICMUS_CONTRAST_PHANTOM_EXPECTED_SIZE = 2_304_364
+PICMUS_CONTRAST_SCAN_EXPECTED_SIZE = 16_360
 
 
 def cached_download(url: str, output_path: Path, *, expected_size: int | None = None) -> Path:
@@ -42,42 +45,22 @@ def cached_download(url: str, output_path: Path, *, expected_size: int | None = 
 
 def cached_picmus_contrast_phantom(*, cache_dir: Path | None = None) -> Path:
     """Return the public PICMUS contrast scatterer phantom, downloading if needed."""
-    return _cached_picmus_member(
-        PICMUS_CONTRAST_PHANTOM_MEMBER,
-        PICMUS_CONTRAST_PHANTOM_NAME,
-        cache_dir=cache_dir,
+    dest_dir = CACHE_DIR if cache_dir is None else Path(cache_dir)
+    return cached_download(
+        PICMUS_CONTRAST_PHANTOM_URL,
+        dest_dir / PICMUS_CONTRAST_PHANTOM_NAME,
+        expected_size=PICMUS_CONTRAST_PHANTOM_EXPECTED_SIZE,
     )
 
 
 def cached_picmus_contrast_scan(*, cache_dir: Path | None = None) -> Path:
     """Return the public PICMUS contrast scan axes file, downloading if needed."""
-    return _cached_picmus_member(
-        PICMUS_CONTRAST_SCAN_MEMBER,
-        PICMUS_CONTRAST_SCAN_NAME,
-        cache_dir=cache_dir,
-    )
-
-
-def _cached_picmus_member(member: str, filename: str, *, cache_dir: Path | None) -> Path:
     dest_dir = CACHE_DIR if cache_dir is None else Path(cache_dir)
-    dest = dest_dir / filename
-    if dest.is_file() and dest.stat().st_size > 0:
-        return dest
-    archive = cached_download(
-        PICMUS_ARCHIVE_URL,
-        dest_dir / "archive_to_download.zip",
-        expected_size=PICMUS_ARCHIVE_EXPECTED_SIZE,
+    return cached_download(
+        PICMUS_CONTRAST_SCAN_URL,
+        dest_dir / PICMUS_CONTRAST_SCAN_NAME,
+        expected_size=PICMUS_CONTRAST_SCAN_EXPECTED_SIZE,
     )
-    _extract_zip_member(archive, member, dest)
-    return dest
-
-
-def _extract_zip_member(archive: Path, member: str, dest: Path) -> Path:
-    """Extract one archive member to `dest`."""
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(archive) as handle, handle.open(member) as source, dest.open("wb") as output:
-        output.write(source.read())
-    return dest
 
 
 def _cached_file_matches(path: Path, *, expected_size: int | None) -> bool:

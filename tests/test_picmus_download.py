@@ -1,13 +1,20 @@
-"""Tests for cached PICMUS archive downloads."""
+"""Tests for cached PICMUS GitHub Release downloads."""
 
 from __future__ import annotations
 
-import zipfile
 from pathlib import Path
 
 import pytest
 
-from tests._picmus_download import _extract_zip_member, cached_download, cached_picmus_contrast_phantom
+from tests._picmus_download import (
+    PICMUS_CONTRAST_PHANTOM_EXPECTED_SIZE,
+    PICMUS_CONTRAST_PHANTOM_URL,
+    PICMUS_CONTRAST_SCAN_EXPECTED_SIZE,
+    PICMUS_CONTRAST_SCAN_URL,
+    cached_download,
+    cached_picmus_contrast_phantom,
+    cached_picmus_contrast_scan,
+)
 
 
 def test_cached_download_skips_existing_file_with_matching_size(
@@ -39,25 +46,66 @@ def test_cached_picmus_contrast_phantom_uses_existing_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An already-cached phantom is returned without contacting the archive."""
+    """An already-cached phantom is returned without contacting GitHub."""
     dest = tmp_path / "contrast_speckle_simu_phantom.hdf5"
-    dest.write_bytes(b"cached-phantom")
+    dest.write_bytes(b"x" * PICMUS_CONTRAST_PHANTOM_EXPECTED_SIZE)
 
-    def fail_download(*_args: object, **_kwargs: object) -> Path:
-        raise AssertionError("cached phantom should not download the archive")
+    def fail_urlopen(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("urlopen should not run for a valid phantom cache")
 
-    monkeypatch.setattr("tests._picmus_download.cached_download", fail_download)
+    monkeypatch.setattr("tests._picmus_download.urlopen", fail_urlopen)
 
     result = cached_picmus_contrast_phantom(cache_dir=tmp_path)
-    assert result.read_bytes() == b"cached-phantom"
+    assert result == dest
 
 
-def test_extract_zip_member_writes_named_file(tmp_path: Path) -> None:
-    """Zip member extraction writes the requested file to the destination."""
-    archive = tmp_path / "archive.zip"
-    member = "database/simulation/contrast_speckle/contrast_speckle_simu_phantom.hdf5"
-    with zipfile.ZipFile(archive, "w") as handle:
-        handle.writestr(member, b"phantom-bytes")
-    dest = tmp_path / "contrast_speckle_simu_phantom.hdf5"
-    written = _extract_zip_member(archive, member, dest)
-    assert written.read_bytes() == b"phantom-bytes"
+def test_cached_picmus_contrast_phantom_downloads_github_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing phantom is fetched from the public GitHub Release asset URL."""
+    calls: list[tuple[str, Path, int | None]] = []
+
+    def fake_download(url: str, output_path: Path, *, expected_size: int | None = None) -> Path:
+        calls.append((url, output_path, expected_size))
+        output_path.write_bytes(b"phantom")
+        return output_path
+
+    monkeypatch.setattr("tests._picmus_download.cached_download", fake_download)
+
+    result = cached_picmus_contrast_phantom(cache_dir=tmp_path)
+    assert result.name == "contrast_speckle_simu_phantom.hdf5"
+    assert calls == [
+        (
+            PICMUS_CONTRAST_PHANTOM_URL,
+            tmp_path / "contrast_speckle_simu_phantom.hdf5",
+            PICMUS_CONTRAST_PHANTOM_EXPECTED_SIZE,
+        )
+    ]
+    assert PICMUS_CONTRAST_PHANTOM_URL.startswith("https://github.com/charlesbmi/FastSIMUS/releases/download/")
+
+
+def test_cached_picmus_contrast_scan_downloads_github_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing scan file is fetched from the public GitHub Release asset URL."""
+    calls: list[tuple[str, Path, int | None]] = []
+
+    def fake_download(url: str, output_path: Path, *, expected_size: int | None = None) -> Path:
+        calls.append((url, output_path, expected_size))
+        output_path.write_bytes(b"scan")
+        return output_path
+
+    monkeypatch.setattr("tests._picmus_download.cached_download", fake_download)
+
+    result = cached_picmus_contrast_scan(cache_dir=tmp_path)
+    assert result.name == "contrast_speckle_simu_scan.hdf5"
+    assert calls == [
+        (
+            PICMUS_CONTRAST_SCAN_URL,
+            tmp_path / "contrast_speckle_simu_scan.hdf5",
+            PICMUS_CONTRAST_SCAN_EXPECTED_SIZE,
+        )
+    ]
+    assert PICMUS_CONTRAST_SCAN_URL.startswith("https://github.com/charlesbmi/FastSIMUS/releases/download/")
