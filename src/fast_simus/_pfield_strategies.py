@@ -18,6 +18,32 @@ from jaxtyping import Bool, Complex, Float, jaxtyped
 from fast_simus.utils._array_api import Array, _ArrayNamespace
 
 
+def _pressure_at_freq(
+    phase: Complex[Array, " *grid n_sources"],
+    spectrum_k: complex | Array,
+    xp: _ArrayNamespace,
+    *,
+    directivity_k: Float[Array, " *grid n_sources"] | None = None,
+) -> Complex[Array, " *grid"]:
+    """Complex acoustic pressure at one frequency: contract sources, apply spectrum weight.
+
+    Single source of truth for the per-frequency physics, shared by the RMS
+    drivers and the complex-spectrum driver. Source points are already
+    flattened (n_elements * n_sub) with 1/n_sub absorbed.
+
+    Args:
+        phase: Current phase state (geometric progression).
+        spectrum_k: Combined pulse*probe spectrum weight for this frequency.
+        xp: Array namespace.
+        directivity_k: Per-source directivity for this frequency (optional).
+
+    Returns:
+        Complex pressure P_k at this frequency.
+    """
+    phase_weighted = phase if directivity_k is None else phase * directivity_k
+    return spectrum_k * xp.sum(phase_weighted, axis=-1)
+
+
 def _freq_step_body(
     phase: Complex[Array, " *grid n_sources"],
     phase_step: Complex[Array, " *grid n_sources"],
@@ -27,9 +53,6 @@ def _freq_step_body(
     directivity_k: Float[Array, " *grid n_sources"] | None = None,
 ) -> tuple[Complex[Array, " *grid n_sources"], Float[Array, " *grid"]]:
     """One frequency step: geometric update, source contraction, spectrum weight.
-
-    Single source of truth for per-frequency math. Source points are
-    already flattened (n_elements * n_sub) with 1/n_sub absorbed.
 
     Args:
         phase: Current phase state (geometric progression).
@@ -41,11 +64,7 @@ def _freq_step_body(
     Returns:
         Tuple of (updated_phase, rp_k) where rp_k = |P_k|^2 at this frequency.
     """
-    if directivity_k is not None:
-        phase_weighted = phase * directivity_k
-    else:
-        phase_weighted = phase
-    pressure_k = spectrum_k * xp.sum(phase_weighted, axis=-1)
+    pressure_k = _pressure_at_freq(phase, spectrum_k, xp, directivity_k=directivity_k)
     phase = phase * phase_step
     return phase, xp.real(pressure_k * xp.conj(pressure_k))
 
@@ -86,6 +105,43 @@ def _freq_outer_python(
             rp = rp + xp.where(is_out, zero, rp_k)
 
     return rp
+
+
+def _freq_outer_python_complex(
+    phase_decay_init: Complex[Array, " *grid n_sources"],
+    phase_decay_step: Complex[Array, " *grid n_sources"],
+    is_out: Bool[Array, " *grid"],
+    wavenumbers: Float[Array, " n_freq"],
+    pulse_spect: Complex[Array, " n_freq"],
+    probe_spect: Float[Array, " n_freq"],
+    seg_length: float,
+    sin_theta: Float[Array, " *grid n_sources"],
+    full_frequency_directivity: bool,
+    xp: _ArrayNamespace,
+) -> Complex[Array, " *grid n_freq"]:
+    """Python for-loop driver that keeps the complex pressure at every frequency.
+
+    Same sweep as _freq_outer_python, but stores P_k instead of accumulating
+    |P_k|^2. Peak memory is therefore O(grid * n_freq) rather than O(grid),
+    which is why pfield keeps its own accumulating driver.
+    """
+    spectra = pulse_spect * probe_spect
+    n_freq = int(wavenumbers.shape[0])
+    zero = xp.asarray(0.0 + 0.0j)
+
+    phase = phase_decay_init
+    pressure_per_freq = []
+
+    for k in range(n_freq):
+        directivity_k = None
+        if full_frequency_directivity:
+            sinc_arg = wavenumbers[k] * seg_length / 2.0 * sin_theta / pi
+            directivity_k = xpx.sinc(sinc_arg, xp=xp)
+        pressure_k = _pressure_at_freq(phase, spectra[k], xp, directivity_k=directivity_k)
+        phase = phase * phase_decay_step
+        pressure_per_freq.append(xp.where(is_out, zero, pressure_k))
+
+    return xp.stack(pressure_per_freq, axis=-1)
 
 
 @jaxtyped(typechecker=typechecker)

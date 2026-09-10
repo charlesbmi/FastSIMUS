@@ -110,6 +110,8 @@ bench = [
 ]
 # Plotting deps are separate so `bench` users who only need raw JSON can skip them.
 plot = [
+    "anyplotlib>=0.7",
+    "marimo>=0.24.0",
     "matplotlib>=3.10",
     "pandas>=2.2",
     "seaborn>=0.13",
@@ -313,6 +315,8 @@ ignore = [
 "src/fast_simus/_pfield_strategies.py" = ["PLC0415"]
 "src/fast_simus/backends/mlx.py" = ["PLC0415"]
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
+# Marimo notebooks are a DAG of cells; imports live inside cells by design.
+"examples/wavefield_explorer.py" = ["PLC0415", "B018", "D103", "RUF046", "RUF059"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

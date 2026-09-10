@@ -177,6 +177,20 @@ def _cupy_has_cuda_device(cupy_module: Any) -> bool:
         return False
 
 
+def to_numpy(arr: Any) -> Any:
+    """Copy an array to host NumPy.
+
+    NumPy, JAX, and MLX implement the array protocol, so ``np.asarray`` works.
+    CuPy does not: ``np.asarray(cupy_array)`` raises, and the host copy is
+    ``arr.get()``.
+    """
+    import numpy as numpy
+
+    if type(arr).__module__.startswith("cupy"):
+        return arr.get()
+    return numpy.asarray(arr)
+
+
 HAS_NUMPY = False
 np = None
 with contextlib.suppress(ImportError):
