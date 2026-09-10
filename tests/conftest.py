@@ -45,7 +45,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help=(
             "Run opt-in public PICMUS contrast phantom simulations. Downloads the public "
-            "PICMUS contrast phantom if --picmus-contrast-phantom is omitted. May be slow."
+            "PICMUS contrast scatterer phantom and scan axes from GitHub Releases if "
+            "--picmus-contrast-phantom is omitted. May be slow."
         ),
     )
     parser.addoption(
@@ -126,7 +127,7 @@ def picmus_contrast_phantom_path(request: pytest.FixtureRequest) -> Path | None:
         return Path(phantom_path)
     if not request.config.getoption("--run-picmus-contrast"):
         return None
-    from tests._picmus_download import cached_picmus_contrast_phantom, cached_picmus_contrast_scan
+    from fast_simus.io.picmus import cached_picmus_contrast_phantom, cached_picmus_contrast_scan
 
     cached_picmus_contrast_scan()
     return cached_picmus_contrast_phantom()

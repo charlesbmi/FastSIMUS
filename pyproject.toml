@@ -174,23 +174,23 @@ cmd = "pytest tests/ --ignore=tests/benchmarks -n auto --cov --cov-config=pyproj
 executor = { group = "test-parallel" }
 
 [tool.poe.tasks.test-picmus-contrast]
-help = "Run the gated PICMUS contrast center-angle RF smoke test; downloads the public phantom if PICMUS_CONTRAST_PHANTOM is unset"
-cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-phantom \"$PICMUS_CONTRAST_PHANTOM\" --picmus-contrast-angle-mode center -p no:benchmark"
+help = "Run the gated PICMUS contrast center-angle RF smoke test; downloads the public phantom from GitHub Releases when --picmus-contrast-phantom is omitted"
+cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-angle-mode center -p no:benchmark"
 executor = { group = "test" }
 
 [tool.poe.tasks.test-picmus-contrast-full]
-help = "Run the gated PICMUS contrast full 75-angle RF comparison; downloads the public phantom if PICMUS_CONTRAST_PHANTOM is unset"
-cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-phantom \"$PICMUS_CONTRAST_PHANTOM\" --picmus-contrast-angle-mode full -p no:benchmark"
+help = "Run the gated PICMUS contrast full 75-angle RF comparison; downloads the public phantom from GitHub Releases when --picmus-contrast-phantom is omitted"
+cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-angle-mode full -p no:benchmark"
 executor = { group = "test" }
 
 [tool.poe.tasks.test-picmus-contrast-artifacts]
-help = "Run full 75-angle contrast RF, save beamformed HDF5, and generate figures; downloads the public phantom if PICMUS_CONTRAST_PHANTOM is unset"
-cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-phantom \"$PICMUS_CONTRAST_PHANTOM\" --picmus-contrast-angle-mode full --picmus-contrast-figure-dir \"${PICMUS_CONTRAST_FIGURE_DIR:-.artifacts/picmus_contrast}\" --picmus-contrast-save-beamformed \"${PICMUS_CONTRAST_BEAMFORMED:-.artifacts/picmus_contrast/picmus_contrast_beamformed_75_angle.hdf5}\" -p no:benchmark"
+help = "Run full 75-angle contrast RF, save beamformed HDF5, and generate figures; downloads the public phantom from GitHub Releases when --picmus-contrast-phantom is omitted"
+cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-angle-mode full --picmus-contrast-figure-dir \"${PICMUS_CONTRAST_FIGURE_DIR:-.artifacts/picmus_contrast}\" --picmus-contrast-save-beamformed \"${PICMUS_CONTRAST_BEAMFORMED:-.artifacts/picmus_contrast/picmus_contrast_beamformed_75_angle.hdf5}\" -p no:benchmark"
 executor = { group = "test-plot" }
 
 [tool.poe.tasks.plot-picmus-contrast-artifacts]
-help = "Regenerate PICMUS contrast figures from saved beamformed HDF5; downloads the public phantom if PICMUS_CONTRAST_PHANTOM is unset"
-cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-phantom \"$PICMUS_CONTRAST_PHANTOM\" --picmus-contrast-figure-dir \"${PICMUS_CONTRAST_FIGURE_DIR:-.artifacts/picmus_contrast}\" --picmus-contrast-load-beamformed \"${PICMUS_CONTRAST_BEAMFORMED:-.artifacts/picmus_contrast/picmus_contrast_beamformed_75_angle.hdf5}\" -p no:benchmark"
+help = "Regenerate PICMUS contrast figures from saved beamformed HDF5; downloads the public phantom from GitHub Releases when --picmus-contrast-phantom is omitted"
+cmd = "pytest -s tests/test_picmus_phantom.py::test_picmus_contrast_public_rf_simulation_is_gated -m slow --run-picmus-contrast --picmus-contrast-figure-dir \"${PICMUS_CONTRAST_FIGURE_DIR:-.artifacts/picmus_contrast}\" --picmus-contrast-load-beamformed \"${PICMUS_CONTRAST_BEAMFORMED:-.artifacts/picmus_contrast/picmus_contrast_beamformed_75_angle.hdf5}\" -p no:benchmark"
 executor = { group = "test-plot" }
 
 [tool.poe.tasks.benchmark]
