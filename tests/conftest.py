@@ -45,7 +45,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help=(
             "Run opt-in public PICMUS contrast phantom simulations. Downloads the public "
-            "PICMUS contrast scatterer phantom from GitHub Releases if "
+            "PICMUS contrast scatterer phantom and scan axes from GitHub Releases if "
             "--picmus-contrast-phantom is omitted. May be slow."
         ),
     )
