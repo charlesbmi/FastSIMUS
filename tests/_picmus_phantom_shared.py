@@ -48,7 +48,7 @@ def _fastsimus_array_namespace() -> _ArrayNamespace:
     """Return the preferred FastSIMUS backend for artifact-producing helpers."""
     if HAS_MLX:
         return cast("_ArrayNamespace", mx)
-    return XP_STRICT
+    return cast("_ArrayNamespace", np)
 
 
 class Phantom(NamedTuple):
@@ -333,7 +333,7 @@ def _simulate_fastsimus_rf(
     assert np.all(delay_spans <= delay_spans[precompute_idx])
 
     if progress_label is not None:
-        backend_label = "Metal" if HAS_MLX else "Array API strict"
+        backend_label = "Metal" if HAS_MLX else "NumPy"
         print(
             f"{progress_label}: FastSIMUS {backend_label} precompute firing {precompute_idx + 1}/{delays.shape[0]}",
             flush=True,

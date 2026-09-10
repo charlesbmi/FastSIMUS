@@ -71,21 +71,33 @@ class PicmusContrastScanAxes(NamedTuple):
     z_axis_m: np.ndarray
 
 
+class PicmusContrastFigurePaths(NamedTuple):
+    """Output paths written by `render_picmus_contrast_figures`."""
+
+    fastsimus: Path
+    comparison: Path
+    debug_comparison: Path
+
+
 PICMUS_CONTRAST_GRID_WAVELENGTHS = 0.25
-PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB = 100.0
+PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB = DYNAMIC_RANGE_DB
 PICMUS_CONTRAST_FIGURE_HEIGHT_IN = 2.4
 PICMUS_CONTRAST_COMPARISON_FIGSIZE_IN = (7.2, PICMUS_CONTRAST_FIGURE_HEIGHT_IN)
-PICMUS_CONTRAST_TWO_PANEL_FIGSIZE_IN = (4.6, PICMUS_CONTRAST_FIGURE_HEIGHT_IN)
-PICMUS_CONTRAST_TWO_PANEL_WSPACE = 0.02
-PICMUS_CONTRAST_TWO_PANEL_YLABEL_PAD = 2.0
+PICMUS_CONTRAST_PANEL_WSPACE = 0.02
+PICMUS_CONTRAST_YLABEL_PAD = 2.0
 PICMUS_CONTRAST_FASTSIMUS_FIGSIZE_IN = (2.4, PICMUS_CONTRAST_FIGURE_HEIGHT_IN)
 PICMUS_CONTRAST_IMAGE_ASPECT = "equal"
 PICMUS_CONTRAST_SCAN_FILENAME = "contrast_speckle_simu_scan.hdf5"
 PICMUS_CONTRAST_BEAMFORMED_CACHE_VERSION = "picmus-contrast-beamformed-v1"
 PICMUS_CONTRAST_REFERENCE_TITLE = "PyMUST SIMUS baseline"
-PICMUS_CONTRAST_PROPOSED_TITLE = "Proposed"
+PICMUS_CONTRAST_FASTSIMUS_TITLE = "FastSIMUS"
 PICMUS_CONTRAST_RESIDUAL_TITLE = "Residual"
+PICMUS_CONTRAST_FASTSIMUS_FIGURE_NAME = "picmus_contrast_fastsimus_mlx_75_angle.png"
+PICMUS_CONTRAST_COMPARISON_FIGURE_NAME = "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle.png"
 PICMUS_CONTRAST_DEBUG_CYST_SUFFIX = "_debug_cysts"
+PICMUS_CONTRAST_DEBUG_COMPARISON_FIGURE_NAME = (
+    f"picmus_contrast_pymust_vs_fastsimus_mlx_75_angle{PICMUS_CONTRAST_DEBUG_CYST_SUFFIX}.png"
+)
 PICMUS_CONTRAST_PLOT_DPI = 360
 PICMUS_CONTRAST_PLOT_INTERPOLATION = "nearest"
 PICMUS_CONTRAST_WAVELENGTH_M = L11_PICMUS_SPEED_OF_SOUND_M_S / L11_PICMUS_FREQ_CENTER_HZ
@@ -155,7 +167,7 @@ def save_picmus_contrast_beamformed(path: Path, data: ContrastBeamformedData) ->
         handle.attrs["grid_wavelengths"] = PICMUS_CONTRAST_GRID_WAVELENGTHS
         handle.attrs["residual_dynamic_range_db"] = PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB
         handle.attrs["reference_title"] = PICMUS_CONTRAST_REFERENCE_TITLE
-        handle.attrs["proposed_title"] = PICMUS_CONTRAST_PROPOSED_TITLE
+        handle.attrs["fastsimus_title"] = PICMUS_CONTRAST_FASTSIMUS_TITLE
         handle.attrs["residual_title"] = PICMUS_CONTRAST_RESIDUAL_TITLE
         handle.create_dataset("x_axis_m", data=data.x_axis_m)
         handle.create_dataset("z_axis_m", data=data.z_axis_m)
@@ -211,7 +223,7 @@ def picmus_contrast_comparison_panel_specs(
             colorbar_label="Amplitude [dB]",
         ),
         PicmusContrastPanelSpec(
-            title=PICMUS_CONTRAST_PROPOSED_TITLE,
+            title=PICMUS_CONTRAST_FASTSIMUS_TITLE,
             image_db=_iq_to_display_db(data.fastsimus_iq, reference_peak=reference_peak),
             cmap="gray",
             vmin_db=-DYNAMIC_RANGE_DB,
@@ -225,10 +237,10 @@ def picmus_contrast_comparison_panel_specs(
                 data.pymust_iq,
                 reference_peak=reference_peak,
             ),
-            cmap="magma",
+            cmap="gray",
             vmin_db=-PICMUS_CONTRAST_RESIDUAL_DYNAMIC_RANGE_DB,
             vmax_db=0.0,
-            colorbar_label="Residual [dB, -100 dB floor]",
+            colorbar_label="Amplitude [dB]",
         ),
     )
 
@@ -237,52 +249,39 @@ def render_picmus_contrast_figures(
     data: ContrastBeamformedData,
     phantom_data: ContrastPhantomData,
     figure_dir: Path,
-) -> tuple[Path, Path, Path, Path]:
+) -> PicmusContrastFigurePaths:
     """Render FastSIMUS-only and PyMUST-vs-FastSIMUS contrast figures."""
     if plt is None:
         pytest.skip("PICMUS contrast figure generation requires matplotlib")
 
-    pyplot = cast("Any", plt)
     figure_dir.mkdir(parents=True, exist_ok=True)
-    fastsimus_path = figure_dir / "picmus_contrast_fastsimus_mlx_75_angle.png"
-    comparison_path = figure_dir / "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle.png"
-    two_panel_path = figure_dir / "picmus_contrast_pymust_vs_fastsimus_mlx_75_angle_two_panel.png"
-    debug_comparison_path = (
-        figure_dir / f"picmus_contrast_pymust_vs_fastsimus_mlx_75_angle{PICMUS_CONTRAST_DEBUG_CYST_SUFFIX}.png"
+    paths = PicmusContrastFigurePaths(
+        fastsimus=figure_dir / PICMUS_CONTRAST_FASTSIMUS_FIGURE_NAME,
+        comparison=figure_dir / PICMUS_CONTRAST_COMPARISON_FIGURE_NAME,
+        debug_comparison=figure_dir / PICMUS_CONTRAST_DEBUG_COMPARISON_FIGURE_NAME,
     )
     extent_mm = _picmus_contrast_extent_mm(data)
+    fastsimus_peak = float(np.max(np.abs(data.fastsimus_iq)))
 
     style_context = cast("Any", sns).axes_style("ticks") if sns is not None else contextlib.nullcontext()
     paper_context = cast("Any", sns).plotting_context("paper") if sns is not None else contextlib.nullcontext()
     with style_context, paper_context:
-        fastsimus_peak = float(np.max(np.abs(data.fastsimus_iq)))
-        fastsimus_db = _iq_to_display_db(data.fastsimus_iq, reference_peak=fastsimus_peak)
-        fig, ax = pyplot.subplots(
-            1,
-            1,
+        _render_picmus_contrast_single_panel(
+            PicmusContrastPanelSpec(
+                title=PICMUS_CONTRAST_FASTSIMUS_TITLE,
+                image_db=_iq_to_display_db(data.fastsimus_iq, reference_peak=fastsimus_peak),
+                cmap="gray",
+                vmin_db=-DYNAMIC_RANGE_DB,
+                vmax_db=0.0,
+                colorbar_label="Amplitude [dB]",
+            ),
+            extent_mm,
+            paths.fastsimus,
             figsize=PICMUS_CONTRAST_FASTSIMUS_FIGSIZE_IN,
-            constrained_layout=True,
         )
-        im = ax.imshow(
-            fastsimus_db,
-            extent=extent_mm,
-            cmap="gray",
-            vmin=-DYNAMIC_RANGE_DB,
-            vmax=0.0,
-            aspect=PICMUS_CONTRAST_IMAGE_ASPECT,
-            interpolation=PICMUS_CONTRAST_PLOT_INTERPOLATION,
-        )
-        ax.set_title(PICMUS_CONTRAST_PROPOSED_TITLE)
-        ax.set_xlabel("Lateral [mm]")
-        ax.set_ylabel("Depth [mm]")
-        fig.colorbar(im, ax=ax, label="Amplitude [dB]")
-        fig.savefig(fastsimus_path, dpi=PICMUS_CONTRAST_PLOT_DPI, bbox_inches="tight")
-        pyplot.close(fig)
-
-        _render_picmus_contrast_comparison(data, phantom_data, comparison_path, overlay_cysts=False)
-        _render_picmus_contrast_two_panel(data, two_panel_path)
-        _render_picmus_contrast_comparison(data, phantom_data, debug_comparison_path, overlay_cysts=True)
-    return fastsimus_path, comparison_path, two_panel_path, debug_comparison_path
+        _render_picmus_contrast_comparison(data, phantom_data, paths.comparison, overlay_cysts=False)
+        _render_picmus_contrast_comparison(data, phantom_data, paths.debug_comparison, overlay_cysts=True)
+    return paths
 
 
 def overlay_contrast_cysts(ax: Any, phantom_data: ContrastPhantomData) -> None:
@@ -360,6 +359,42 @@ def _picmus_contrast_residual_display_db(
     )
 
 
+def _imshow_contrast_panel(
+    ax: Any,
+    spec: PicmusContrastPanelSpec,
+    extent_mm: tuple[float, float, float, float],
+) -> Any:
+    """Draw one contrast panel and return the image artist."""
+    return ax.imshow(
+        spec.image_db,
+        extent=extent_mm,
+        cmap=spec.cmap,
+        vmin=spec.vmin_db,
+        vmax=spec.vmax_db,
+        aspect=PICMUS_CONTRAST_IMAGE_ASPECT,
+        interpolation=PICMUS_CONTRAST_PLOT_INTERPOLATION,
+    )
+
+
+def _render_picmus_contrast_single_panel(
+    spec: PicmusContrastPanelSpec,
+    extent_mm: tuple[float, float, float, float],
+    output_path: Path,
+    *,
+    figsize: tuple[float, float],
+) -> None:
+    """Render one paper-style contrast panel."""
+    pyplot = cast("Any", plt)
+    fig, ax = pyplot.subplots(1, 1, figsize=figsize, constrained_layout=True)
+    im = _imshow_contrast_panel(ax, spec, extent_mm)
+    ax.set_title(spec.title)
+    ax.set_xlabel("Lateral [mm]")
+    ax.set_ylabel("Depth [mm]")
+    fig.colorbar(im, ax=ax, label=spec.colorbar_label)
+    fig.savefig(output_path, dpi=PICMUS_CONTRAST_PLOT_DPI, bbox_inches="tight")
+    pyplot.close(fig)
+
+
 def _render_picmus_contrast_comparison(
     data: ContrastBeamformedData,
     phantom_data: ContrastPhantomData,
@@ -371,57 +406,25 @@ def _render_picmus_contrast_comparison(
     pyplot = cast("Any", plt)
     extent_mm = _picmus_contrast_extent_mm(data)
     panel_specs = picmus_contrast_comparison_panel_specs(data)
-    fig, axes = pyplot.subplots(1, 3, figsize=PICMUS_CONTRAST_COMPARISON_FIGSIZE_IN, constrained_layout=True)
-    for ax, spec in zip(axes, panel_specs, strict=True):
-        im = ax.imshow(
-            spec.image_db,
-            extent=extent_mm,
-            cmap=spec.cmap,
-            vmin=spec.vmin_db,
-            vmax=spec.vmax_db,
-            aspect=PICMUS_CONTRAST_IMAGE_ASPECT,
-            interpolation=PICMUS_CONTRAST_PLOT_INTERPOLATION,
-        )
-        if overlay_cysts:
-            overlay_contrast_cysts(ax, phantom_data)
-        ax.set_title(spec.title)
-        ax.set_xlabel("Lateral [mm]")
-        ax.set_ylabel("Depth [mm]")
-        fig.colorbar(im, ax=ax, label=spec.colorbar_label)
-    fig.savefig(output_path, dpi=PICMUS_CONTRAST_PLOT_DPI, bbox_inches="tight")
-    pyplot.close(fig)
-
-
-def _render_picmus_contrast_two_panel(data: ContrastBeamformedData, output_path: Path) -> None:
-    """Render PyMUST and proposed images with shared axes labels and colorbar."""
-    pyplot = cast("Any", plt)
-    extent_mm = _picmus_contrast_extent_mm(data)
-    panel_specs = picmus_contrast_comparison_panel_specs(data)[:2]
     fig, axes = pyplot.subplots(
         1,
-        2,
-        figsize=PICMUS_CONTRAST_TWO_PANEL_FIGSIZE_IN,
+        3,
+        figsize=PICMUS_CONTRAST_COMPARISON_FIGSIZE_IN,
         constrained_layout=True,
-        gridspec_kw={"wspace": PICMUS_CONTRAST_TWO_PANEL_WSPACE},
+        gridspec_kw={"wspace": PICMUS_CONTRAST_PANEL_WSPACE},
         sharex=True,
         sharey=True,
     )
-    last_image = None
+    images = []
     for ax, spec in zip(axes, panel_specs, strict=True):
-        last_image = ax.imshow(
-            spec.image_db,
-            extent=extent_mm,
-            cmap=spec.cmap,
-            vmin=spec.vmin_db,
-            vmax=spec.vmax_db,
-            aspect=PICMUS_CONTRAST_IMAGE_ASPECT,
-            interpolation=PICMUS_CONTRAST_PLOT_INTERPOLATION,
-        )
+        images.append(_imshow_contrast_panel(ax, spec, extent_mm))
+        if overlay_cysts:
+            overlay_contrast_cysts(ax, phantom_data)
         ax.set_title(spec.title)
         ax.set_xlabel("")
         ax.set_ylabel("")
-    axes[0].set_ylabel("Depth [mm]", labelpad=PICMUS_CONTRAST_TWO_PANEL_YLABEL_PAD)
+    axes[0].set_ylabel("Depth [mm]", labelpad=PICMUS_CONTRAST_YLABEL_PAD)
     fig.supxlabel("Lateral [mm]")
-    fig.colorbar(last_image, ax=axes, label="Amplitude [dB]", shrink=0.84, pad=0.015)
+    fig.colorbar(images[-1], ax=axes, label="Amplitude [dB]", shrink=0.84, pad=0.015)
     fig.savefig(output_path, dpi=PICMUS_CONTRAST_PLOT_DPI, bbox_inches="tight")
     pyplot.close(fig)

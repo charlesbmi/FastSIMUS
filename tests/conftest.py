@@ -44,7 +44,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         default=False,
         help=(
-            "Run opt-in public PICMUS contrast phantom simulations. Requires --picmus-contrast-phantom and may be slow."
+            "Run opt-in public PICMUS contrast phantom simulations. Downloads the public "
+            "PICMUS contrast phantom if --picmus-contrast-phantom is omitted. May be slow."
         ),
     )
     parser.addoption(
@@ -119,11 +120,16 @@ def run_picmus_contrast(request: pytest.FixtureRequest) -> bool:
 
 @pytest.fixture
 def picmus_contrast_phantom_path(request: pytest.FixtureRequest) -> Path | None:
-    """Return the caller-supplied public PICMUS contrast phantom HDF5 path."""
+    """Return the PICMUS contrast phantom path, downloading the public file if needed."""
     phantom_path = cast("str | None", request.config.getoption("--picmus-contrast-phantom"))
-    if phantom_path is None:
+    if phantom_path:
+        return Path(phantom_path)
+    if not request.config.getoption("--run-picmus-contrast"):
         return None
-    return Path(phantom_path)
+    from tests._picmus_download import cached_picmus_contrast_phantom, cached_picmus_contrast_scan
+
+    cached_picmus_contrast_scan()
+    return cached_picmus_contrast_phantom()
 
 
 @pytest.fixture
