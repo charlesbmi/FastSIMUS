@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 from types import EllipsisType
-from typing import Any, Literal, Protocol, Self, cast, runtime_checkable
+from typing import Any, Literal, Protocol, Self, TypeAlias, cast, runtime_checkable
 
 from array_api_compat import array_namespace as xpc_array_namespace
+from array_api_compat import is_cupy_array
 
 from fast_simus.backends.mlx import ensure_compat as _ensure_mlx_compat
 
@@ -231,6 +233,10 @@ class Array(Protocol):
 
 ArrayOrScalar = Array | int | float | complex | bool
 
+ArrayNamespace: TypeAlias = (
+    _ArrayNamespace | _ArrayNamespaceWithLinAlg | _ArrayNamespaceWithFFT | _ArrayNamespaceWithLinAlgAndFFT
+)
+
 
 def is_mlx_namespace(xp: object) -> bool:
     """Return True if xp is an MLX namespace (mlx.core or compatible wrapper).
@@ -252,9 +258,20 @@ def is_cupy_namespace(xp: object) -> bool:
     return "cupy" in getattr(xp, "__name__", "")
 
 
-def array_namespace(
-    *arrays: Any,
-) -> _ArrayNamespace | _ArrayNamespaceWithLinAlg | _ArrayNamespaceWithFFT | _ArrayNamespaceWithLinAlgAndFFT:
+def eval_lazy(*arrays: Any) -> None:
+    """Force-evaluate MLX arrays so a Python loop stays O(1) graph depth.
+
+    No-op for eager backends. Identifies MLX by the array module, not by
+    duck-typing ``xp.eval``, so an unrelated ``eval`` is never called.
+    """
+    if not arrays or not type(arrays[0]).__module__.startswith("mlx"):
+        return
+    import mlx.core as mx
+
+    mx.eval(*arrays)
+
+
+def array_namespace(*arrays: Any) -> ArrayNamespace:
     """Typed wrapper around array_api_compat.array_namespace.
 
     Returns the array namespace for the given arrays with proper type hints.
@@ -289,7 +306,67 @@ def array_namespace(
     xp = xpc_array_namespace(*arrays)
     if is_mlx_namespace(xp):
         _ensure_mlx_compat(xp)
-    return cast(
-        _ArrayNamespace | _ArrayNamespaceWithLinAlg | _ArrayNamespaceWithFFT | _ArrayNamespaceWithLinAlgAndFFT,
-        xp,
-    )
+    return cast(ArrayNamespace, xp)
+
+
+def default_namespace() -> ArrayNamespace:
+    """Best available Array API namespace: CuPy, else MLX, else NumPy.
+
+    Preference order matches FastSIMUS's GPU backends: NVIDIA CUDA via CuPy,
+    then MLX if it imports, then NumPy. JAX is not selected automatically;
+    pass ``jax.numpy`` explicitly if you want it. When MLX is chosen, Array
+    API aliases such as ``concat`` are applied.
+
+    Examples:
+        >>> xp = default_namespace()
+        >>> grid = xp.asarray(positions)
+    """
+    with contextlib.suppress(Exception):
+        import cupy as cp
+
+        if int(cp.cuda.runtime.getDeviceCount()) > 0:
+            return cast(ArrayNamespace, cp)
+
+    with contextlib.suppress(Exception):
+        import mlx.core as mx
+
+        _ensure_mlx_compat(mx)
+        return cast(ArrayNamespace, mx)
+
+    import numpy as np
+
+    return cast(ArrayNamespace, np)
+
+
+def as_numpy(x: Any) -> Any:
+    """Copy ``x`` to a host NumPy array.
+
+    NumPy, JAX, and MLX implement the array protocol, so ``np.asarray`` works.
+    CuPy does not: ``np.asarray(cupy_array)`` raises, and the host copy is
+    ``x.get()``.
+    """
+    import numpy as np
+
+    if is_cupy_array(x):
+        return x.get()
+    return np.asarray(x)
+
+
+def namespace_label(xp: object) -> str:
+    """Short label for UI copy, e.g. ``CuPy on NVIDIA GeForce GTX 1060``."""
+    if is_cupy_namespace(xp):
+        try:
+            import cupy as cp
+
+            name = cp.cuda.runtime.getDeviceProperties(0)["name"]
+            if isinstance(name, bytes):
+                name = name.decode()
+            return f"CuPy on {name}"
+        except Exception:
+            return "CuPy"
+    if is_mlx_namespace(xp):
+        return "MLX"
+    name = getattr(xp, "__name__", "")
+    if "jax" in name:
+        return "JAX"
+    return "NumPy"

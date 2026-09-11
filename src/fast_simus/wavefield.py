@@ -128,11 +128,10 @@ def spectrum_to_wavefield(
 
 def _fft_namespace(xp):
     """Return the namespace exposing ``fft.irfft`` for this backend."""
-    if hasattr(xp, "fft"):
-        return xp
-    import numpy as np  # noqa: PLC0415 -- FFT fallback for backends without xp.fft
-
-    return np
+    if not hasattr(xp, "fft"):
+        msg = "wavefield requires an array backend with FFT support (e.g. numpy, jax, cupy, mlx)"
+        raise RuntimeError(msg)
+    return xp
 
 
 def wavefield(

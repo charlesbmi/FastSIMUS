@@ -18,6 +18,7 @@ from fast_simus.tx_delay import (
     focused,
     plane_wave,
 )
+from fast_simus.utils._array_api import as_numpy, default_namespace
 from fast_simus.utils.geometry import element_positions
 from fast_simus.wavefield import WavefieldResult, spectrum_to_wavefield, wavefield
 
@@ -32,6 +33,8 @@ __all__ = [
     "SimusStrategy",
     "TransducerParams",
     "WavefieldResult",
+    "as_numpy",
+    "default_namespace",
     "diverging_wave",
     "element_positions",
     "focused",

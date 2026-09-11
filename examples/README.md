@@ -12,8 +12,11 @@ unit, and FastSIMUS has no medium density, so the values are not Pascals.
 Relative amplitudes across the field are still physically meaningful.
 
 ```bash
-# Preferred: project extras, no sandbox
+# Linux + NVIDIA
 uv run --group plot --group cuda12 marimo edit --no-token examples/wavefield_explorer.py
+
+# macOS (MLX is included in the plot extra on Darwin)
+uv run --group plot marimo edit --no-token examples/wavefield_explorer.py
 
 # Sandboxed alternative (resolves fast_simus from this repo)
 uv run marimo edit --sandbox examples/wavefield_explorer.py
@@ -21,6 +24,10 @@ uv run marimo edit --sandbox examples/wavefield_explorer.py
 # Headless smoke test
 uv run --group plot --script examples/wavefield_explorer.py
 ```
+
+The explorer calls `fast_simus.default_namespace()`, which picks CuPy when a
+CUDA device is present, MLX if it is installed, and NumPy otherwise. There is
+nothing to switch in the notebook.
 
 Interactive mode uses a **256 x 256** grid (script/smoke tests stay at 48 px).
 

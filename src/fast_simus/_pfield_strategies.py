@@ -15,7 +15,7 @@ import array_api_extra as xpx
 from beartype import beartype as typechecker
 from jaxtyping import Bool, Complex, Float, jaxtyped
 
-from fast_simus.utils._array_api import Array, _ArrayNamespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace, eval_lazy
 
 
 def _pressure_at_freq(
@@ -99,10 +99,12 @@ def _freq_outer_python(
             directivity_k = xpx.sinc(sinc_arg, xp=xp)
             phase, rp_k = _freq_step_body(phase, phase_decay_step, spectra[k], xp, directivity_k=directivity_k)
             rp = rp + xp.where(is_out, zero, rp_k)
+            eval_lazy(rp, phase)
     else:
         for k in range(n_freq):
             phase, rp_k = _freq_step_body(phase, phase_decay_step, spectra[k], xp)
             rp = rp + xp.where(is_out, zero, rp_k)
+            eval_lazy(rp, phase)
 
     return rp
 
@@ -139,7 +141,9 @@ def _freq_outer_python_complex(
             directivity_k = xpx.sinc(sinc_arg, xp=xp)
         pressure_k = _pressure_at_freq(phase, spectra[k], xp, directivity_k=directivity_k)
         phase = phase * phase_decay_step
-        pressure_per_freq.append(xp.where(is_out, zero, pressure_k))
+        sample = xp.where(is_out, zero, pressure_k)
+        pressure_per_freq.append(sample)
+        eval_lazy(sample, phase)
 
     return xp.stack(pressure_per_freq, axis=-1)
 

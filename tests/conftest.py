@@ -178,17 +178,10 @@ def _cupy_has_cuda_device(cupy_module: Any) -> bool:
 
 
 def to_numpy(arr: Any) -> Any:
-    """Copy an array to host NumPy.
+    """Copy an array to host NumPy. See :func:`fast_simus.as_numpy`."""
+    from fast_simus.utils._array_api import as_numpy
 
-    NumPy, JAX, and MLX implement the array protocol, so ``np.asarray`` works.
-    CuPy does not: ``np.asarray(cupy_array)`` raises, and the host copy is
-    ``arr.get()``.
-    """
-    import numpy as numpy
-
-    if type(arr).__module__.startswith("cupy"):
-        return arr.get()
-    return numpy.asarray(arr)
+    return as_numpy(arr)
 
 
 HAS_NUMPY = False

@@ -5,7 +5,8 @@
 #     "fastsimus",
 #     "marimo",
 #     "matplotlib>=3.8",
-#     "numpy>=1.26",
+#     "mlx>=0.31; sys_platform == 'darwin' and platform_machine == 'arm64'",
+#     "numpy>=2.0",
 # ]
 #
 # [tool.uv.sources]
@@ -13,7 +14,11 @@
 # ///
 """Time-slice and RMS pressure from FastSIMUS.
 
-uv run --group plot --group cuda12 marimo edit --no-token examples/wavefield_explorer.py
+Linux + NVIDIA:
+    uv run --group plot --group cuda12 marimo edit --no-token examples/wavefield_explorer.py
+
+macOS (MLX is pulled in by the plot extra):
+    uv run --group plot marimo edit --no-token examples/wavefield_explorer.py
 """
 
 import marimo
@@ -153,7 +158,7 @@ def _():
 
     import fast_simus as fs
     from fast_simus.transducer_presets import C5_2v, L11_5v, L12_3v, P4_2v
-    from fast_simus.utils.display import signed_db
+    from fast_simus.utils import as_numpy, namespace_label, signed_db
 
     _examples = Path(__file__).resolve().parent
     if str(_examples) not in sys.path:
@@ -163,30 +168,28 @@ def _():
     wavefield_plot.register_das_bipolar()
     wavefield_plot.enable_colorbar_ticks()
 
-    return C5_2v, Figure, L11_5v, L12_3v, P4_2v, apl, fs, functools, np, signed_db, wavefield_plot
+    return (
+        C5_2v,
+        Figure,
+        L11_5v,
+        L12_3v,
+        P4_2v,
+        apl,
+        as_numpy,
+        fs,
+        functools,
+        namespace_label,
+        np,
+        signed_db,
+        wavefield_plot,
+    )
 
 
 @app.cell(hide_code=True)
-def _(C5_2v, L11_5v, L12_3v, P4_2v, mo, np):
-    def detect_backend():
-        try:
-            import cupy
-        except ImportError:
-            return np, np.asarray, False, "NumPy (CuPy not installed)"
-        try:
-            n_devices = int(cupy.cuda.runtime.getDeviceCount())
-        except Exception:
-            return np, np.asarray, False, "NumPy (CUDA runtime unavailable)"
-        if n_devices < 1:
-            return np, np.asarray, False, "NumPy (no CUDA device)"
-        props = cupy.cuda.runtime.getDeviceProperties(0)
-        name = props["name"]
-        if isinstance(name, bytes):
-            name = name.decode()
-        return cupy, (lambda a: a.get()), True, f"CuPy on {name}"
-
+def _(C5_2v, L11_5v, L12_3v, P4_2v, fs, mo, namespace_label, np):
     is_script_mode = mo.app_meta().mode == "script"
-    xp, to_numpy, on_gpu, backend_note = detect_backend()
+    xp = fs.default_namespace()
+    backend_note = f"Using **{namespace_label(xp)}**."
     if is_script_mode:
         n_pixels = 48
         frequency_step = 1.0
@@ -207,7 +210,6 @@ def _(C5_2v, L11_5v, L12_3v, P4_2v, mo, np):
         backend_note,
         frequency_step,
         n_pixels,
-        to_numpy,
         xp,
     )
 
@@ -271,12 +273,12 @@ def _():
 def _(
     APODIZATIONS,
     PRESETS,
+    as_numpy,
     frequency_step,
     fs,
     functools,
     n_pixels,
     np,
-    to_numpy,
     xp,
 ):
     @functools.lru_cache(maxsize=32)
@@ -317,9 +319,9 @@ def _(
             tx_apodization=xp.asarray(weights),
             frequency_step=frequency_step,
         )
-        rms = to_numpy(fs.rms_from_spectrum(spectrum, info))
+        rms = as_numpy(fs.rms_from_spectrum(spectrum, info))
         movie = fs.spectrum_to_wavefield(spectrum, info)
-        frames, times = to_numpy(movie.frames), to_numpy(movie.times)
+        frames, times = as_numpy(movie.frames), as_numpy(movie.times)
 
         envelope = np.max(np.abs(frames), axis=(0, 1))
         live = np.flatnonzero(envelope > 0.01 * (envelope.max() + 1e-12))
@@ -334,7 +336,7 @@ def _(
             times=times,
             rms_db=20 * np.log10(rms / rms.max() + 1e-12),
             extent=(x_axis[0] * 1e3, x_axis[-1] * 1e3, z_axis[-1] * 1e3, z_axis[0] * 1e3),
-            elements=to_numpy(elements) * 1e3,
+            elements=as_numpy(elements) * 1e3,
             focus=None if focus is None else (focus[0] * 1e3, focus[1] * 1e3),
             probe_note=(
                 f"{params.n_elements} elements, "

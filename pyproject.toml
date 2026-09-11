@@ -115,6 +115,7 @@ plot = [
     "matplotlib>=3.10",
     "pandas>=2.2",
     "seaborn>=0.13",
+    "mlx>=0.31; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 cuda12 = [
     "cupy-cuda12x>=13.0; platform_system == 'Linux'",
@@ -314,6 +315,7 @@ ignore = [
 "src/fast_simus/_simus_strategies.py" = ["PLC0415"]
 "src/fast_simus/_pfield_strategies.py" = ["PLC0415"]
 "src/fast_simus/backends/mlx.py" = ["PLC0415"]
+"src/fast_simus/utils/_array_api.py" = ["PLC0415"]  # optional CuPy / MLX in default_namespace
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 # Marimo notebooks are a DAG of cells; imports live inside cells by design.
 "examples/wavefield_explorer.py" = ["PLC0415", "B018", "D103", "RUF046", "RUF059"]
