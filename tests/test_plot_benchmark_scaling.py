@@ -57,6 +57,8 @@ def test_parse_args_accepts_custom_plot_labels() -> None:
         [
             "cpu.json",
             "cuda.json",
+            "--layout",
+            "panels",
             "--reference-backend",
             "numpy",
             "--reference-label",
@@ -76,3 +78,39 @@ def test_parse_args_accepts_custom_plot_labels() -> None:
     assert args.series_column == "machine"
     assert args.title == "SIMUS scaling: SIMUS (NumPy) vs Proposed"
     assert args.output == Path("figure.png")
+    assert args.layout == "panels"
+
+
+def test_runtime_layout_is_default() -> None:
+    """The concise runtime chart is the default scaling view."""
+    args = plot_benchmark_scaling.parse_args(["benchmark.json"])
+
+    assert args.layout == "runtime"
+
+
+def test_display_backend_uses_accelerator_names() -> None:
+    """Implementation names are converted to user-facing accelerator names."""
+    assert plot_benchmark_scaling._display_backend("cupy") == "CUDA"
+    assert plot_benchmark_scaling._display_backend("mlx") == "Metal"
+    assert plot_benchmark_scaling._display_backend("pymust") == "PyMUST"
+    assert plot_benchmark_scaling._display_backend("numpy") == "numpy"
+
+
+def test_render_runtime_figure_writes_png(tmp_path: Path) -> None:
+    """The default layout renders benchmark rows to an image."""
+    df = pd.DataFrame(
+        [
+            {"backend": "pymust", "n_scat": 1_000, "mean_s": 0.5},
+            {"backend": "pymust", "n_scat": 10_000, "mean_s": 5.0},
+            {"backend": "mlx", "n_scat": 1_000, "mean_s": 0.002},
+            {"backend": "mlx", "n_scat": 10_000, "mean_s": 0.007},
+            {"backend": "cupy", "n_scat": 1_000, "mean_s": 0.003},
+            {"backend": "cupy", "n_scat": 10_000, "mean_s": 0.003},
+        ]
+    )
+    output = tmp_path / "scaling.png"
+
+    plot_benchmark_scaling.render_runtime_figure(df, output)
+
+    assert output.is_file()
+    assert output.stat().st_size > 0
