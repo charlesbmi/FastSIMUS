@@ -328,28 +328,25 @@ def _simulate_fastsimus_rf(
     scatterers = xp.asarray(np.stack([phantom.x, phantom.z], axis=-1))
     rc = xp.asarray(phantom.rc)
     delays_xp = [xp.asarray(firing_delays) for firing_delays in delays]
-    delay_spans = np.ptp(delays, axis=1)
-    precompute_idx = int(np.argmax(delay_spans))
-    assert np.all(delay_spans <= delay_spans[precompute_idx])
 
     if progress_label is not None:
         backend_label = "Metal" if HAS_MLX else "NumPy"
         print(
-            f"{progress_label}: FastSIMUS {backend_label} precompute firing {precompute_idx + 1}/{delays.shape[0]}",
+            f"{progress_label}: FastSIMUS {backend_label} precomputing {delays.shape[0]} firing plans",
             flush=True,
         )
-    plan = simus_precompute(
-        scatterers,
-        rc,
-        delays_xp[precompute_idx],
-        params.fastsimus_transducer,
-        params.fastsimus_medium,
-        fs=params.sampling_frequency_hz,
-        tx_n_wavelengths=params.tx_n_wavelengths,
-        db_thresh=params.simus_db_thresh,
-    )
     firings = []
     for firing_idx, firing_delays in enumerate(delays_xp):
+        plan = simus_precompute(
+            scatterers,
+            rc,
+            firing_delays,
+            params.fastsimus_transducer,
+            params.fastsimus_medium,
+            fs=params.sampling_frequency_hz,
+            tx_n_wavelengths=params.tx_n_wavelengths,
+            db_thresh=params.simus_db_thresh,
+        )
         if progress_label is not None:
             print(f"{progress_label}: FastSIMUS RF firing {firing_idx + 1}/{len(delays_xp)}", flush=True)
         firings.append(
