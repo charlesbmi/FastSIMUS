@@ -12,14 +12,7 @@
 # [tool.uv.sources]
 # fastsimus = { path = "../", editable = true }
 # ///
-"""Time-slice and RMS pressure from FastSIMUS.
-
-Linux + NVIDIA:
-    uv run --group plot --group cuda12 marimo edit --no-token examples/wavefield_explorer.py
-
-macOS (MLX is pulled in by the plot extra):
-    uv run --group plot marimo edit --no-token examples/wavefield_explorer.py
-"""
+"""Interactive time-slice and RMS pressure fields."""
 
 import marimo
 
@@ -32,11 +25,8 @@ def _(backend_note, mo):
     mo.md(f"""
     # Wavefield explorer
 
-    The first plot is one time slice of the pressure field (white at zero).
-    **Display in dB** is on by default: amplitude is mapped on a signed log
-    scale so weak wavefronts stay visible, and the colorbar is ± dynamic range.
-    Turn it off for linear pressure (arbitrary units). Drag **time** to scrub.
-    The second plot is RMS pressure from `pfield`.
+    Interactive time slices along the pressure field, alongside RMS pressure.
+    Drag **time** to scrub; use **display in dB** to reveal weak wavefronts.
 
     {backend_note}
     """)
@@ -171,7 +161,7 @@ def setup():
 
     import fast_simus as fs
     from fast_simus.transducer_presets import C5_2v, L11_5v, L12_3v, P4_2v
-    from fast_simus.utils import as_numpy, namespace_label
+    from fast_simus.utils import as_numpy
 
     def signed_db(pressure, peak, dynamic_range):
         """Map bipolar pressure to a signed decibel range."""
@@ -189,17 +179,16 @@ def setup():
         fs,
         functools,
         mo,
-        namespace_label,
         np,
         signed_db,
     )
 
 
 @app.cell(hide_code=True)
-def _(C5_2v, L11_5v, L12_3v, P4_2v, fs, mo, namespace_label, np):
+def _(C5_2v, L11_5v, L12_3v, P4_2v, fs, mo, np):
     is_script_mode = mo.app_meta().mode == "script"
     xp = fs.default_namespace()
-    backend_note = f"Using **{namespace_label(xp)}**."
+    backend_note = f"Using **{xp.__name__}**."
     if is_script_mode:
         n_pixels = 48
         frequency_step = 1.0

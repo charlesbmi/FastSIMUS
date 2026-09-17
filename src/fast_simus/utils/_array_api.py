@@ -6,7 +6,7 @@ from types import EllipsisType
 from typing import Any, Literal, Protocol, Self, TypeAlias, cast, runtime_checkable
 
 from array_api_compat import array_namespace as xpc_array_namespace
-from array_api_compat import is_cupy_array
+from array_api_compat import is_cupy_array, to_device
 
 from fast_simus.backends.mlx import ensure_compat as _ensure_mlx_compat
 
@@ -54,6 +54,8 @@ class _ArrayNamespace(Protocol):
         - We remove some Array API standard functions that are not used in the codebase,
             to be lenient about other array libraries like MLX
     """
+
+    __name__: str
 
     # Data types
     float32: Any
@@ -257,19 +259,6 @@ def is_cupy_namespace(xp: object) -> bool:
     return "cupy" in getattr(xp, "__name__", "")
 
 
-def eval_lazy(*arrays: Any) -> None:
-    """Force-evaluate MLX arrays so a Python loop stays O(1) graph depth.
-
-    No-op for eager backends. Identifies MLX by the array module, not by
-    duck-typing ``xp.eval``, so an unrelated ``eval`` is never called.
-    """
-    if not arrays or not type(arrays[0]).__module__.startswith("mlx"):
-        return
-    import mlx.core as mx
-
-    mx.eval(*arrays)
-
-
 def array_namespace(*arrays: Any) -> ArrayNamespace:
     """Typed wrapper around array_api_compat.array_namespace.
 
@@ -309,12 +298,9 @@ def array_namespace(*arrays: Any) -> ArrayNamespace:
 
 
 def default_namespace() -> ArrayNamespace:
-    """Best available Array API namespace: CuPy, else MLX, else NumPy.
+    """Return the best available Array API namespace.
 
-    Preference order matches FastSIMUS's GPU backends: NVIDIA CUDA via CuPy,
-    then MLX if it imports, then NumPy. JAX is not selected automatically;
-    pass ``jax.numpy`` explicitly if you want it. When MLX is chosen, Array
-    API aliases such as ``concat`` are applied.
+    GPU backends are preferred, followed by JAX and NumPy.
 
     Examples:
         >>> xp = default_namespace()
@@ -340,32 +326,22 @@ def default_namespace() -> ArrayNamespace:
         _ensure_mlx_compat(mx)
         return cast(ArrayNamespace, mx)
 
+    try:
+        import jax.numpy as jnp
+    except ImportError:
+        pass
+    else:
+        return cast(ArrayNamespace, jnp)
+
     import array_api_compat.numpy as np
 
     return cast(ArrayNamespace, np)
 
 
 def as_numpy(x: Any) -> Any:
-    """Copy ``x`` to a host NumPy array.
-
-    NumPy, JAX, and MLX implement the array protocol, so ``np.asarray`` works.
-    CuPy does not: ``np.asarray(cupy_array)`` raises, and the host copy is
-    ``x.get()``.
-    """
-    import array_api_compat.numpy as np
+    """Return ``x`` as a host NumPy array."""
+    import numpy as np
 
     if is_cupy_array(x):
-        return x.get()
+        return np.from_dlpack(to_device(x, "cpu"))
     return np.asarray(x)
-
-
-def namespace_label(xp: object) -> str:
-    """Return a short backend label for UI copy."""
-    if is_cupy_namespace(xp):
-        return "CuPy"
-    if is_mlx_namespace(xp):
-        return "MLX"
-    name = getattr(xp, "__name__", "")
-    if "jax" in name:
-        return "JAX"
-    return "NumPy"
