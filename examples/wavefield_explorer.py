@@ -92,7 +92,7 @@ def _(apod_ui, depth_ui, probe_ui, simulate, steer_ui, transmit_ui):
 
 
 @app.cell(hide_code=True)
-def _(apl_img, db_ui, np, range_ui, signed_db, sim):
+def _(apl_elements, apl_img, db_ui, np, range_ui, signed_db, sim):
     # Signed dB vs the movie peak (default), like delay-and-sum.com.
     # Linear mode keeps the same global peak; white is still zero.
     _dr = float(range_ui.value)
@@ -108,8 +108,10 @@ def _(apl_img, db_ui, np, range_ui, signed_db, sim):
         apl_img.set_colorbar_label("a.u.")
     _nz, _nx = pressure.shape[:2]
     _x0, _x1, _z1, _z0 = sim["extent"]
+    _z0 = min(_z0, float(sim["elements"][:, 1].min()) - 0.5)
     apl_img.set_extent(np.linspace(_x0, _x1, _nx), np.linspace(_z0, _z1, _nz), units="mm")
     apl_img.set_clim(*clim)
+    apl_elements.set(offsets=sim["elements"])
 
     return clim, pressure
 
@@ -147,26 +149,22 @@ def _(SCENARIOS, mo, scenario, sim):
 
 
 @app.cell(hide_code=True)
-def _():
+def setup():
     import functools
-    import sys
-    from pathlib import Path
 
     import anyplotlib as apl
+    import marimo as mo
     import numpy as np
     from matplotlib.figure import Figure
 
     import fast_simus as fs
     from fast_simus.transducer_presets import C5_2v, L11_5v, L12_3v, P4_2v
-    from fast_simus.utils import as_numpy, namespace_label, signed_db
+    from fast_simus.utils import as_numpy, namespace_label
 
-    _examples = Path(__file__).resolve().parent
-    if str(_examples) not in sys.path:
-        sys.path.insert(0, str(_examples))
-    import wavefield_plot
-
-    wavefield_plot.register_das_bipolar()
-    wavefield_plot.enable_colorbar_ticks()
+    def signed_db(pressure, peak, dynamic_range):
+        """Map bipolar pressure to a signed decibel range."""
+        magnitude = 20 * np.log10(np.abs(pressure) / peak + 1e-12)
+        return np.sign(pressure) * np.clip(magnitude + dynamic_range, 0, dynamic_range)
 
     return (
         C5_2v,
@@ -178,10 +176,10 @@ def _():
         as_numpy,
         fs,
         functools,
+        mo,
         namespace_label,
         np,
         signed_db,
-        wavefield_plot,
     )
 
 
@@ -381,15 +379,15 @@ def _(Figure, n_pixels):
         fig.suptitle(f"{n_pixels}x{n_pixels}", fontsize=8)
         return fig
 
-    return (rms_figure,)
+    return PROBE_COLOR, rms_figure
 
 
 @app.cell(hide_code=True)
-def viz_widgets(apl, mo, n_pixels, np, wavefield_plot):
+def viz_widgets(PROBE_COLOR, apl, mo, n_pixels, np):
     apl_fig, apl_ax = apl.subplots(1, 1, figsize=(480, 400))
     apl_img = apl_ax.imshow(
         np.zeros((n_pixels, n_pixels), np.float32),
-        cmap=wavefield_plot.DAS_BIPOLAR,
+        cmap="bwr",
         vmin=-40,
         vmax=40,
         origin="upper",
@@ -398,16 +396,20 @@ def viz_widgets(apl, mo, n_pixels, np, wavefield_plot):
     apl_img.set_ylabel("z (mm)")
     apl_img.set_colorbar_visible(True)
     apl_img.set_colorbar_label("dB")
+    apl_elements = apl_img.add_points(
+        np.empty((0, 2)),
+        name="elements",
+        sizes=4,
+        color=PROBE_COLOR,
+        facecolors=PROBE_COLOR,
+        linewidths=0.5,
+        alpha=1.0,
+        size_units="px",
+        clip_display=False,
+    )
     apl_widget = mo.ui.anywidget(apl_fig)
 
-    return apl_img, apl_widget
-
-
-@app.cell(hide_code=True)
-def _():
-    import marimo as mo
-
-    return (mo,)
+    return apl_elements, apl_img, apl_widget
 
 
 if __name__ == "__main__":

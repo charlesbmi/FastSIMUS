@@ -71,6 +71,9 @@ class PfieldPlan(NamedTuple):
         seg_length: Sub-element length in meters (element_width / n_sub).
         correction_factor: Scaling factor for the RMS integration
             (df * element_width, or element_width when tx_n_wavelengths=inf).
+        freq_step: Spacing of the full frequency grid in Hz.
+        n_freq_full: Number of samples in the full ``[0, 2 * fc]`` grid.
+        freq_idx_start: Index of ``selected_freqs[0]`` in the full grid.
     """
 
     selected_freqs: Float[Array, " n_frequencies"]
@@ -79,24 +82,23 @@ class PfieldPlan(NamedTuple):
     n_sub: int
     seg_length: float
     correction_factor: float
+    freq_step: float
+    n_freq_full: int
+    freq_idx_start: int
 
 
 class PfieldSpectrumInfo(NamedTuple):
-    """Frequency-grid metadata accompanying a ``pfield_spectrum`` result.
+    """Frequency-grid metadata for a pressure spectrum.
 
-    ``pfield_spectrum`` evaluates only the frequency band with significant
-    amplitude. These fields locate that band inside the uniform grid
-    ``linspace(0, 2 * freq_center, n_freq_full)``, which is what an inverse FFT
-    back to the time domain needs. This mirrors MUST's ``IDX`` output and the
-    ``freq_idx_start`` / ``n_freq_full`` fields already on ``SimusPlan``.
+    The selected frequencies form a contiguous slice of the uniform full grid
+    ``linspace(0, 2 * freq_center, n_freq_full)``.
 
     Attributes:
         selected_freqs: Evaluated frequencies in Hz. Shape ``(n_freq_selected,)``.
         freq_idx_start: Index of the first selected frequency in the full grid.
         n_freq_full: Length of the uniform ``[0, 2 * freq_center]`` grid.
         freq_step: Spacing of the full grid in Hz.
-        correction_factor: Scaling that turns the summed spectral energy into
-            RMS pressure: ``pfield == sqrt(sum_k |P_k|^2 * correction_factor)``.
+        correction_factor: Scale for converting summed spectral energy to RMS.
     """
 
     selected_freqs: Float[Array, " n_freq_selected"]
@@ -158,7 +160,6 @@ def _prepare_frequency_sweep(
     distances, sin_theta, theta_arr = _distances_and_angles(
         positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
     )
-
     obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
 
     freq_start = plan.selected_freqs[0]
@@ -206,6 +207,22 @@ def _prepare_frequency_sweep(
         seg_length=plan.seg_length,
         sin_theta=sin_theta,
         full_frequency_directivity=full_frequency_directivity,
+    )
+
+
+def _clean_transmit_inputs(
+    delays: Float[Array, " n_elements"],
+    tx_apodization: Float[Array, " n_elements"] | None,
+    n_elements: int,
+    xp: _ArrayNamespace,
+) -> tuple[Float[Array, " n_elements"], Float[Array, " n_elements"]]:
+    """Zero disabled elements and replace their NaN delays."""
+    if tx_apodization is None:
+        tx_apodization = xp.ones(n_elements)
+    nan_mask = xp.isnan(delays)
+    return (
+        xp.where(nan_mask, xp.asarray(0.0), delays),
+        xp.where(nan_mask, xp.asarray(0.0), tx_apodization),
     )
 
 
@@ -309,6 +326,8 @@ def pfield_precompute(
     # Frequency selection: uses boolean masking -> dynamic n_frequencies
     freq_plan = _select_frequencies(params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, df, xp)
     df = freq_plan.freq_step
+    n_freq_full = round(2.0 * params.freq_center / df) + 1
+    freq_idx_start = round(float(freq_plan.selected_freqs[0]) / df)
 
     correction_factor = 1.0 if tx_n_wavelengths == float("inf") else df
     correction_factor = correction_factor * params.element_width
@@ -320,6 +339,9 @@ def pfield_precompute(
         n_sub=n_sub,
         seg_length=seg_length,
         correction_factor=correction_factor,
+        freq_step=df,
+        n_freq_full=n_freq_full,
+        freq_idx_start=freq_idx_start,
     )
 
 
@@ -357,12 +379,7 @@ def pfield_compute(
     """
     xp = array_namespace(positions, delays, tx_apodization)
 
-    if tx_apodization is None:
-        tx_apodization = xp.ones(params.n_elements)
-
-    nan_mask = xp.isnan(delays)
-    tx_apodization = xp.where(nan_mask, xp.asarray(0.0), tx_apodization)
-    delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
+    delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
 
     grid_size = prod(positions.shape[:-1])
     selected = _select_strategy(xp, grid_size, params, full_frequency_directivity, strategy=strategy)
@@ -500,35 +517,6 @@ def pfield(
     )
 
 
-def _frequency_grid_info(plan: PfieldPlan, params: TransducerParams) -> tuple[float, int, int]:
-    """Locate a plan's selected band inside the uniform [0, 2 fc] frequency grid.
-
-    ``_select_frequencies`` samples ``linspace(0, 2 * fc, n_freq_full)`` and keeps a
-    contiguous slice, so the grid spacing is recoverable from the selected
-    frequencies themselves.
-
-    Returns:
-        Tuple of (freq_step, n_freq_full, freq_idx_start).
-    """
-    freqs = plan.selected_freqs
-    n_selected = freqs.shape[0]
-    if n_selected >= 2:
-        # Average over the whole band: differencing two neighbours loses
-        # precision under float32 backends such as JAX.
-        freq_step = float(freqs[-1] - freqs[0]) / (n_selected - 1)
-    else:
-        # Single-frequency plans cannot reveal the spacing; recover it from the
-        # RMS correction factor, which pfield_precompute sets to df * width.
-        freq_step = plan.correction_factor / params.element_width
-
-    if freq_step <= 0.0:
-        raise ValueError("Cannot determine the frequency grid spacing; use a lower db_thresh.")
-
-    n_freq_full = round(2.0 * params.freq_center / freq_step) + 1
-    freq_idx_start = round(float(freqs[0]) / freq_step)
-    return freq_step, n_freq_full, freq_idx_start
-
-
 def pfield_spectrum(
     positions: Float[Array, "*grid_shape 2"],
     delays: Float[Array, " n_elements"],
@@ -544,30 +532,14 @@ def pfield_spectrum(
 ) -> tuple[Complex[Array, "*grid_shape n_freq_selected"], PfieldSpectrumInfo]:
     """Compute the complex acoustic pressure spectrum of a transducer array.
 
-    Same physics as :func:`pfield`, but returns the complex field ``P(X, w)``
-    at each frequency instead of integrating it into an RMS magnitude. This is
-    the FastSIMUS equivalent of the ``SPECT`` and ``IDX`` outputs of MUST's
-    ``pfield``, and it is what :func:`fast_simus.wavefield.wavefield` inverse
-    transforms to obtain a propagating wave over time.
-
-    The returned array is **space by temporal frequency**. The leading axes are
-    the spatial grid that was passed in, unchanged; the trailing axis is
-    temporal frequency in Hz. Nothing is in spatial frequency: SIMUS propagates
-    by direct summation of ``exp(ikr)/sqrt(r)`` over sub-elements rather than by
-    an angular spectrum, so no lateral wavenumber axis is ever formed.
-
-    Only the frequency band above ``db_thresh`` is evaluated. Use the returned
-    :class:`PfieldSpectrumInfo` to locate that band inside the uniform
-    ``linspace(0, 2 * freq_center, n_freq_full)`` grid.
-
-    Relationship to :func:`pfield`, exact up to floating-point error::
+    This uses the same frequency sweep as :func:`pfield`, but preserves the
+    complex pressure at every selected temporal frequency. The spatial input
+    shape is preserved and frequency is appended as the final axis::
 
         spectrum, info = pfield_spectrum(positions, delays, params)
-        rms = rms_from_spectrum(spectrum, info)  # == pfield(...)
+        rms = rms_from_spectrum(spectrum, info)
 
-    ``pfield`` is not implemented in terms of this function because its
-    accumulating loop driver has peak memory independent of the frequency
-    count, whereas this function must materialize ``O(grid * n_freq)`` values.
+    Unlike :func:`pfield`, this materializes ``O(grid * n_freq)`` values.
 
     Args:
         positions: Grid positions in meters. Shape ``(*grid_shape, 2)`` where
@@ -605,12 +577,7 @@ def pfield_spectrum(
         frequency_step=frequency_step,
     )
 
-    if tx_apodization is None:
-        tx_apodization = xp.ones(params.n_elements)
-
-    nan_mask = xp.isnan(delays)
-    tx_apodization = xp.where(nan_mask, xp.asarray(0.0), tx_apodization)
-    delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
+    delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
 
     from fast_simus._pfield_strategies import _freq_outer_python_complex
 
@@ -626,12 +593,11 @@ def pfield_spectrum(
     )
     spectrum = _freq_outer_python_complex(**sweep._asdict(), xp=xp)
 
-    freq_step, n_freq_full, freq_idx_start = _frequency_grid_info(plan, params)
     info = PfieldSpectrumInfo(
         selected_freqs=plan.selected_freqs,
-        freq_idx_start=freq_idx_start,
-        n_freq_full=n_freq_full,
-        freq_step=freq_step,
+        freq_idx_start=plan.freq_idx_start,
+        n_freq_full=plan.n_freq_full,
+        freq_step=plan.freq_step,
         correction_factor=plan.correction_factor,
     )
     return spectrum, info

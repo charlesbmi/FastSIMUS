@@ -25,21 +25,7 @@ def _pressure_at_freq(
     *,
     directivity_k: Float[Array, " *grid n_sources"] | None = None,
 ) -> Complex[Array, " *grid"]:
-    """Complex acoustic pressure at one frequency: contract sources, apply spectrum weight.
-
-    Single source of truth for the per-frequency physics, shared by the RMS
-    drivers and the complex-spectrum driver. Source points are already
-    flattened (n_elements * n_sub) with 1/n_sub absorbed.
-
-    Args:
-        phase: Current phase state (geometric progression).
-        spectrum_k: Combined pulse*probe spectrum weight for this frequency.
-        xp: Array namespace.
-        directivity_k: Per-source directivity for this frequency (optional).
-
-    Returns:
-        Complex pressure P_k at this frequency.
-    """
+    """Contract source phases and apply the spectrum weight at one frequency."""
     phase_weighted = phase if directivity_k is None else phase * directivity_k
     return spectrum_k * xp.sum(phase_weighted, axis=-1)
 

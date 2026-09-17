@@ -1,14 +1,7 @@
-"""Propagating pressure field over time for transducer arrays.
+"""Time-domain pressure fields for transducer arrays.
 
-FastSIMUS equivalent of MUST's ``mkmovie``. Where :func:`fast_simus.pfield`
-integrates the frequency sweep into a time-independent RMS magnitude, this
-module inverse transforms the complex spectrum from
-:func:`fast_simus.pfield.pfield_spectrum` along its temporal-frequency axis to
-recover the wave as it propagates::
-
-    P(x, z, f)  --inverse FFT over f-->  p(x, z, t)
-
-Only the frequency axis is transformed; the spatial axes are untouched.
+The inverse transform is applied only along temporal frequency; spatial axes
+are preserved.
 
 References:
     Garcia D. SIMUS: an open-source simulator for medical ultrasound imaging.
@@ -40,12 +33,8 @@ class WavefieldResult(NamedTuple):
     """Time-resolved pressure field.
 
     Attributes:
-        frames: Real acoustic pressure with shape ``(*grid_shape, n_times)``.
-            MUST documents RF as arbitrary unit; FastSIMUS has no medium
-            density, so these values are not Pascals. Relative amplitudes
-            across space and time are physically meaningful.
-        times: Frame times in seconds, starting at 0 (the transmit reference).
-            Spacing is always ``1 / (4 * freq_center)``.
+        frames: Real pressure in arbitrary units, shape ``(*grid_shape, n_times)``.
+        times: Frame times in seconds, starting at the transmit reference.
     """
 
     frames: Float[Array, "*grid_shape n_times"]
@@ -58,17 +47,9 @@ def spectrum_to_wavefield(
 ) -> WavefieldResult:
     """Transform a complex pressure spectrum into a propagating wave over time.
 
-    Pure transform, ``P(x, f) -> p(x, t)``: the selected band is scattered into
-    the uniform ``[0, 2 * freq_center]`` grid at ``info.freq_idx_start``,
-    inverse FFT'd along the frequency axis, and cropped to the causal half of
-    the record. This is the step MUST's ``mkmovie`` performs after collecting
-    ``SPECT`` at ``IDX``.
-
-    Because the full frequency grid always spans ``[0, 2 * freq_center]``, the
-    frame spacing is ``1 / (4 * freq_center)`` no matter how finely the band was
-    sampled. A smaller ``frequency_step`` therefore buys a longer record, not a
-    finer one. The second half of the inverse transform is the acausal
-    wrap-around and is discarded.
+    The selected band is placed into its full frequency grid, inverse
+    transformed, and cropped to the causal half. A finer frequency grid makes
+    the record longer without changing the frame spacing.
 
     Args:
         spectrum: Complex pressure spectrum from
@@ -149,19 +130,9 @@ def wavefield(
 ) -> WavefieldResult:
     """Simulate a transmitted wave propagating through a grid over time.
 
-    FastSIMUS equivalent of MUST's ``mkmovie``. Computes the complex pressure
-    spectrum with :func:`fast_simus.pfield.pfield_spectrum` and inverse
-    transforms it to the time domain.
-
-    Where :func:`fast_simus.pfield.pfield` answers "how much total energy passes
-    through each point", this answers "where is the wave right now". The RMS
-    field is the time integral of what this function returns, so the two are
-    complementary views of the same simulation.
-
-    The default ``frequency_step`` of 0.5 halves the frequency spacing relative
-    to ``pfield``, doubling the length of the time record so that the causal
-    half covers the full propagation across the grid without wrap-around. This
-    mirrors the frequency step MUST's ``mkmovie`` selects.
+    This is the time-domain counterpart to :func:`fast_simus.pfield.pfield` and
+    is equivalent to MUST's ``mkmovie``. The default frequency step provides a
+    longer record than ``pfield`` to reduce time-domain wrap-around.
 
     Args:
         positions: Grid positions in meters. Shape ``(*grid_shape, 2)`` where

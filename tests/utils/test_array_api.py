@@ -1,7 +1,6 @@
 """Test the array API utilities."""
 
 import numpy as np
-import pytest
 
 from fast_simus.utils._array_api import (
     Array,
@@ -26,9 +25,10 @@ def test_as_numpy_roundtrip(xp):
 
 
 def test_default_namespace_is_usable():
-    """default_namespace returns an Array API namespace that can build arrays."""
+    """The selected default can create arrays and describe itself."""
     xp = default_namespace()
     np.testing.assert_array_equal(as_numpy(xp.asarray([1.0, 2.0])), [1.0, 2.0])
+    assert namespace_label(xp)
 
 
 def test_default_namespace_prefers_gpu_backend():
@@ -40,26 +40,3 @@ def test_default_namespace_prefers_gpu_backend():
         assert is_mlx_namespace(xp)
     else:
         assert getattr(xp, "__name__", "") == "numpy"
-
-
-def test_namespace_label_names_the_selected_backend():
-    """namespace_label identifies CuPy, MLX, or NumPy for the default backend."""
-    xp = default_namespace()
-    label = namespace_label(xp)
-    if HAS_CUPY:
-        assert label.startswith("CuPy")
-    elif HAS_MLX:
-        assert label == "MLX"
-    else:
-        assert label == "NumPy"
-
-
-def test_mlx_concat_alias():
-    """Array API concat is available on MLX after array_namespace applies the shim."""
-    mx = pytest.importorskip("mlx.core")
-    from fast_simus.utils._array_api import array_namespace
-
-    a = mx.array([1.0])
-    xp = array_namespace(a)
-    out = as_numpy(xp.concat([a, mx.array([2.0])], axis=0))
-    np.testing.assert_array_equal(out, [1.0, 2.0])

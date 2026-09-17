@@ -178,7 +178,7 @@ def _cupy_has_cuda_device(cupy_module: Any) -> bool:
 
 
 def to_numpy(arr: Any) -> Any:
-    """Copy an array to host NumPy. See :func:`fast_simus.as_numpy`."""
+    """Copy an array to host NumPy."""
     from fast_simus.utils._array_api import as_numpy
 
     return as_numpy(arr)

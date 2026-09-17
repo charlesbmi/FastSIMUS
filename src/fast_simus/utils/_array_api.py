@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from types import EllipsisType
 from typing import Any, Literal, Protocol, Self, TypeAlias, cast, runtime_checkable
 
@@ -321,19 +320,27 @@ def default_namespace() -> ArrayNamespace:
         >>> xp = default_namespace()
         >>> grid = xp.asarray(positions)
     """
-    with contextlib.suppress(Exception):
+    try:
         import cupy as cp
-
-        if int(cp.cuda.runtime.getDeviceCount()) > 0:
+    except ImportError:
+        pass
+    else:
+        try:
+            device_count = int(cp.cuda.runtime.getDeviceCount())
+        except cp.cuda.runtime.CUDARuntimeError:
+            device_count = 0
+        if device_count:
             return cast(ArrayNamespace, cp)
 
-    with contextlib.suppress(Exception):
+    try:
         import mlx.core as mx
-
+    except ImportError:
+        pass
+    else:
         _ensure_mlx_compat(mx)
         return cast(ArrayNamespace, mx)
 
-    import numpy as np
+    import array_api_compat.numpy as np
 
     return cast(ArrayNamespace, np)
 
@@ -345,7 +352,7 @@ def as_numpy(x: Any) -> Any:
     CuPy does not: ``np.asarray(cupy_array)`` raises, and the host copy is
     ``x.get()``.
     """
-    import numpy as np
+    import array_api_compat.numpy as np
 
     if is_cupy_array(x):
         return x.get()
@@ -353,17 +360,9 @@ def as_numpy(x: Any) -> Any:
 
 
 def namespace_label(xp: object) -> str:
-    """Short label for UI copy, e.g. ``CuPy on NVIDIA GeForce GTX 1060``."""
+    """Return a short backend label for UI copy."""
     if is_cupy_namespace(xp):
-        try:
-            import cupy as cp
-
-            name = cp.cuda.runtime.getDeviceProperties(0)["name"]
-            if isinstance(name, bytes):
-                name = name.decode()
-            return f"CuPy on {name}"
-        except Exception:
-            return "CuPy"
+        return "CuPy"
     if is_mlx_namespace(xp):
         return "MLX"
     name = getattr(xp, "__name__", "")
