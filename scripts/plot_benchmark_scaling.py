@@ -1,10 +1,8 @@
 """Plot pytest-benchmark scaling results across machines and backends.
 
 Loads one or more ``pytest-benchmark --benchmark-autosave`` JSON files and
-produces a log-log PNG with runtime (s) vs n_scat and throughput
-(scatterers/s) vs n_scat. When PyMUST reference rows are present, the plot
-also includes a third panel showing speedup vs PyMUST. One line per
-(machine, backend).
+produces a log-log runtime plot. The optional ``panels`` layout also includes
+throughput and, when PyMUST reference rows are present, speedup vs PyMUST.
 
 Typical usage:
 
@@ -30,6 +28,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import math
 import re
 import sys
 from dataclasses import dataclass
@@ -38,6 +37,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from matplotlib.ticker import LogLocator
 
 _DEFAULT_GROUP = "simus_scaling"
 _DEFAULT_OUTPUT = Path(".benchmarks") / "scaling_plot.png"
@@ -204,7 +204,66 @@ _REFERENCE_BACKEND = "pymust"
 _RUNTIME_METRIC = "Runtime (s)"
 _THROUGHPUT_METRIC = "Throughput (scatterers/s)"
 _SPEEDUP_METRIC = "Speedup vs PyMUST"
-_DEFAULT_TITLE = "SIMUS scaling: PyMUST vs FastSIMUS backends"
+_DEFAULT_TITLE = "Simulation scaling"
+_DEFAULT_FIG_WIDTH_IN = 3.7
+_RUNTIME_ASPECT = 1.42
+_BACKEND_DISPLAY_NAMES = {
+    "cupy": "CUDA",
+    "mlx": "Metal",
+    "pymust": "PyMUST",
+}
+_RUNTIME_SERIES_ORDER = ("CUDA", "Metal", "PyMUST")
+_RUNTIME_SERIES_STYLE = {
+    "CUDA": {"color": "#1f77b4", "linestyle": ":", "marker": "o"},
+    "Metal": {"color": "#ff7f0e", "linestyle": "--", "marker": "o"},
+    "PyMUST": {"color": "#2ca02c", "linestyle": "-", "marker": "o"},
+}
+_RUNTIME_RC = {
+    "font.size": 9,
+    "axes.titlesize": 11,
+    "axes.labelsize": 9,
+    "xtick.labelsize": 8,
+    "ytick.labelsize": 8,
+    "legend.fontsize": 8,
+    "legend.frameon": True,
+    "legend.edgecolor": "0.8",
+    "legend.fancybox": False,
+    "axes.grid": True,
+    "axes.axisbelow": True,
+}
+
+
+def _display_backend(backend: str) -> str:
+    """Map implementation names to concise accelerator labels."""
+    return _BACKEND_DISPLAY_NAMES.get(backend, backend)
+
+
+def _runtime_series_labels(df: pd.DataFrame, series_column: str) -> pd.Series:
+    """Return labels that never combine distinct benchmark implementations."""
+    backend_labels = df["backend"].map(_display_backend)
+    if series_column == "machine":
+        labels = df["machine"].astype(str)
+        variant_counts = df.groupby("machine")["backend"].transform("nunique")
+        suffixes = backend_labels
+    else:
+        labels = backend_labels
+        variant_counts = df.groupby("backend")["machine"].transform("nunique")
+        suffixes = df["machine"].astype(str)
+    return labels.where(variant_counts == 1, labels + " — " + suffixes)
+
+
+def _positive_float(value: str) -> float:
+    """Parse a finite, positive command-line float."""
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0:
+        msg = f"expected a finite positive number, got {value!r}"
+        raise argparse.ArgumentTypeError(msg)
+    return parsed
+
+
+def _runtime_titles(title: str, commit_summary: str) -> tuple[str, str]:
+    """Return separate main and provenance titles for compact figures."""
+    return title, commit_summary
 
 
 def _compute_speedups(df: pd.DataFrame, reference_backend: str = _REFERENCE_BACKEND) -> pd.DataFrame:
@@ -348,6 +407,70 @@ def render_plot(
     plt.close(g.figure)
 
 
+def render_runtime_figure(
+    df: pd.DataFrame,
+    output: Path,
+    *,
+    title: str = _DEFAULT_TITLE,
+    fig_width: float = _DEFAULT_FIG_WIDTH_IN,
+    series_column: str = "backend",
+    commit_summary: str = "",
+    dpi: int = 300,
+) -> None:
+    """Render a compact single-panel log-log runtime figure."""
+    plot_df = df.copy()
+    plot_df["series"] = _runtime_series_labels(plot_df, series_column)
+    series_order = list(dict.fromkeys(plot_df["series"]))
+
+    with plt.rc_context(_RUNTIME_RC):
+        fig, ax = plt.subplots(
+            figsize=(fig_width, fig_width / _RUNTIME_ASPECT),
+            layout="constrained",
+        )
+        for series in reversed(series_order):
+            rows = plot_df[plot_df["series"] == series].sort_values("n_scat")
+            backend = _display_backend(str(rows["backend"].iloc[0]))
+            style = _RUNTIME_SERIES_STYLE.get(backend, {})
+            ax.plot(
+                rows["n_scat"],
+                rows["mean_s"],
+                label=series,
+                color=style.get("color"),
+                linestyle=style.get("linestyle", "-"),
+                marker=style.get("marker", "o"),
+                markersize=4.5,
+                linewidth=1.35,
+            )
+
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel("Number of scatterers")
+        ax.set_ylabel("Runtime (s)")
+        main_title, provenance_title = _runtime_titles(title, commit_summary)
+        fig.suptitle(main_title)
+        if provenance_title:
+            ax.set_title(provenance_title, fontsize=6, pad=4)
+        ax.xaxis.set_major_locator(LogLocator(base=10))
+        ax.xaxis.set_minor_locator(LogLocator(base=10, subs="auto"))
+        ax.yaxis.set_major_locator(LogLocator(base=10))
+        ax.yaxis.set_minor_locator(LogLocator(base=10, subs="auto"))
+        ax.grid(True, which="major", color="0.75", linewidth=0.6)
+        ax.grid(True, which="minor", color="0.88", linewidth=0.4)
+
+        handles_by_label = {line.get_label(): line for line in ax.get_lines()}
+        ax.legend(
+            [handles_by_label[name] for name in series_order],
+            series_order,
+            loc="upper left",
+            borderpad=0.35,
+            handlelength=2.4,
+            labelspacing=0.25,
+        )
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output, dpi=dpi)
+        plt.close(fig)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """CLI parser."""
     parser = argparse.ArgumentParser(
@@ -392,6 +515,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--title",
         default=_DEFAULT_TITLE,
         help=f"Plot title before the commit summary (default: {_DEFAULT_TITLE!r}).",
+    )
+    parser.add_argument(
+        "--layout",
+        choices=["runtime", "panels"],
+        default="runtime",
+        help="Plot layout: a compact runtime chart (default) or all analysis panels.",
+    )
+    parser.add_argument(
+        "--fig-width",
+        type=_positive_float,
+        default=_DEFAULT_FIG_WIDTH_IN,
+        help=f"Runtime figure width in inches (default: {_DEFAULT_FIG_WIDTH_IN}).",
     )
     commit_group = parser.add_mutually_exclusive_group()
     commit_group.add_argument(
@@ -459,15 +594,25 @@ def main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
 
-    render_plot(
-        df,
-        args.output,
-        commit_summary=_commit_summary(df),
-        reference_backend=args.reference_backend,
-        reference_label=args.reference_label,
-        series_column=args.series_column,
-        title=args.title,
-    )
+    if args.layout == "runtime":
+        render_runtime_figure(
+            df,
+            args.output,
+            title=args.title,
+            fig_width=args.fig_width,
+            series_column=args.series_column,
+            commit_summary=_commit_summary(df),
+        )
+    else:
+        render_plot(
+            df,
+            args.output,
+            commit_summary=_commit_summary(df),
+            reference_backend=args.reference_backend,
+            reference_label=args.reference_label,
+            series_column=args.series_column,
+            title=args.title,
+        )
     print(
         f"Wrote {args.output} ({len(df)} rows across {df['backend'].nunique()} backend(s), "
         f"{df['machine'].nunique()} machine(s))"
