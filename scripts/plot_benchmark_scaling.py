@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import math
 import re
 import sys
 from dataclasses import dataclass
@@ -237,6 +238,34 @@ def _display_backend(backend: str) -> str:
     return _BACKEND_DISPLAY_NAMES.get(backend, backend)
 
 
+def _runtime_series_labels(df: pd.DataFrame, series_column: str) -> pd.Series:
+    """Return labels that never combine distinct benchmark implementations."""
+    backend_labels = df["backend"].map(_display_backend)
+    if series_column == "machine":
+        labels = df["machine"].astype(str)
+        variant_counts = df.groupby("machine")["backend"].transform("nunique")
+        suffixes = backend_labels
+    else:
+        labels = backend_labels
+        variant_counts = df.groupby("backend")["machine"].transform("nunique")
+        suffixes = df["machine"].astype(str)
+    return labels.where(variant_counts == 1, labels + " — " + suffixes)
+
+
+def _positive_float(value: str) -> float:
+    """Parse a finite, positive command-line float."""
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0:
+        msg = f"expected a finite positive number, got {value!r}"
+        raise argparse.ArgumentTypeError(msg)
+    return parsed
+
+
+def _runtime_titles(title: str, commit_summary: str) -> tuple[str, str]:
+    """Return separate main and provenance titles for compact figures."""
+    return title, commit_summary
+
+
 def _compute_speedups(df: pd.DataFrame, reference_backend: str = _REFERENCE_BACKEND) -> pd.DataFrame:
     """Compute per-row speedup relative to the reference backend at the same ``n_scat``.
 
@@ -384,14 +413,14 @@ def render_runtime_figure(
     *,
     title: str = _DEFAULT_TITLE,
     fig_width: float = _DEFAULT_FIG_WIDTH_IN,
+    series_column: str = "backend",
+    commit_summary: str = "",
     dpi: int = 300,
 ) -> None:
     """Render a compact single-panel log-log runtime figure."""
     plot_df = df.copy()
-    plot_df["series"] = plot_df["backend"].map(_display_backend)
-    available = set(plot_df["series"])
-    series_order = [name for name in _RUNTIME_SERIES_ORDER if name in available]
-    series_order.extend(sorted(available - set(_RUNTIME_SERIES_ORDER)))
+    plot_df["series"] = _runtime_series_labels(plot_df, series_column)
+    series_order = list(dict.fromkeys(plot_df["series"]))
 
     with plt.rc_context(_RUNTIME_RC):
         fig, ax = plt.subplots(
@@ -400,7 +429,8 @@ def render_runtime_figure(
         )
         for series in reversed(series_order):
             rows = plot_df[plot_df["series"] == series].sort_values("n_scat")
-            style = _RUNTIME_SERIES_STYLE.get(series, {})
+            backend = _display_backend(str(rows["backend"].iloc[0]))
+            style = _RUNTIME_SERIES_STYLE.get(backend, {})
             ax.plot(
                 rows["n_scat"],
                 rows["mean_s"],
@@ -416,7 +446,10 @@ def render_runtime_figure(
         ax.set_yscale("log")
         ax.set_xlabel("Number of scatterers")
         ax.set_ylabel("Runtime (s)")
-        ax.set_title(title)
+        main_title, provenance_title = _runtime_titles(title, commit_summary)
+        fig.suptitle(main_title)
+        if provenance_title:
+            ax.set_title(provenance_title, fontsize=6, pad=4)
         ax.xaxis.set_major_locator(LogLocator(base=10))
         ax.xaxis.set_minor_locator(LogLocator(base=10, subs="auto"))
         ax.yaxis.set_major_locator(LogLocator(base=10))
@@ -491,7 +524,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--fig-width",
-        type=float,
+        type=_positive_float,
         default=_DEFAULT_FIG_WIDTH_IN,
         help=f"Runtime figure width in inches (default: {_DEFAULT_FIG_WIDTH_IN}).",
     )
@@ -567,6 +600,8 @@ def main(argv: list[str] | None = None) -> int:
             args.output,
             title=args.title,
             fig_width=args.fig_width,
+            series_column=args.series_column,
+            commit_summary=_commit_summary(df),
         )
     else:
         render_plot(
