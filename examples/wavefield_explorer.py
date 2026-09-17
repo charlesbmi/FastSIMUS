@@ -92,7 +92,20 @@ def _(apod_ui, depth_ui, probe_ui, simulate, steer_ui, transmit_ui):
 
 
 @app.cell(hide_code=True)
-def _(apl_elements, apl_img, db_ui, np, range_ui, signed_db, sim):
+def _(np):
+    def to_image_indices(points, extent, image_shape):
+        """Convert physical (x, z) coordinates to anyplotlib image indices."""
+        x0, x1, z1, z0 = extent
+        nz, nx = image_shape
+        x = (points[:, 0] - x0) / (x1 - x0) * (nx - 1)
+        z = (points[:, 1] - z0) / (z1 - z0) * (nz - 1)
+        return np.column_stack([x, z])
+
+    return (to_image_indices,)
+
+
+@app.cell(hide_code=True)
+def _(apl_elements, apl_img, db_ui, np, range_ui, signed_db, sim, to_image_indices):
     # Signed dB vs the movie peak (default), like delay-and-sum.com.
     # Linear mode keeps the same global peak; white is still zero.
     _dr = float(range_ui.value)
@@ -108,10 +121,9 @@ def _(apl_elements, apl_img, db_ui, np, range_ui, signed_db, sim):
         apl_img.set_colorbar_label("a.u.")
     _nz, _nx = pressure.shape[:2]
     _x0, _x1, _z1, _z0 = sim["extent"]
-    _z0 = min(_z0, float(sim["elements"][:, 1].min()) - 0.5)
     apl_img.set_extent(np.linspace(_x0, _x1, _nx), np.linspace(_z0, _z1, _nz), units="mm")
     apl_img.set_clim(*clim)
-    apl_elements.set(offsets=sim["elements"])
+    apl_elements.set(offsets=to_image_indices(sim["elements"], sim["extent"], pressure.shape[:2]))
 
     return clim, pressure
 
