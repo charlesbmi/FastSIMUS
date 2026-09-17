@@ -105,8 +105,7 @@ def _(apl_elements, apl_img, db_ui, np, range_ui, signed_db, sim, to_image_indic
         clim = (-_dr, _dr)
         apl_img.set_colorbar_label("dB")
     else:
-        _floor = _peak * (10.0 ** (-_dr / 20.0))
-        pressure = np.where(np.abs(sim["frames"]) < _floor, 0.0, sim["frames"])
+        pressure = sim["frames"]
         clim = (-_peak, _peak)
         apl_img.set_colorbar_label("a.u.")
     _nz, _nx = pressure.shape[:2]
