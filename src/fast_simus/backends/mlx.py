@@ -17,6 +17,7 @@ _MLX_ARRAY_API_ALIASES: dict[str, str] = {
     "acos": "arccos",
     "atan2": "arctan2",
     "bool": "bool_",
+    "concat": "concatenate",
 }
 
 _MLX_ISDTYPE_KIND_MAP: dict[str, str] = {

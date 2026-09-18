@@ -17,6 +17,8 @@ on:
 
 jobs:
   test:
+    env:
+      MPLBACKEND: Agg
     strategy:
       matrix:
         include:

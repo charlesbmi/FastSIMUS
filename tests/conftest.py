@@ -5,11 +5,12 @@ import math
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 import pytest
 
 from fast_simus.pfield import PfieldStrategy
 from fast_simus.simus import SimusStrategy
-from fast_simus.utils._array_api import _ArrayNamespace
+from fast_simus.utils._array_api import _ArrayNamespace, as_numpy
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -177,12 +178,10 @@ def _cupy_has_cuda_device(cupy_module: Any) -> bool:
         return False
 
 
-HAS_NUMPY = False
-np = None
-with contextlib.suppress(ImportError):
-    import numpy as np
+def to_numpy(arr: Any) -> Any:
+    """Copy an array to host NumPy."""
+    return as_numpy(arr)
 
-    HAS_NUMPY = True
 
 HAS_JAX = False
 jnp = None
@@ -211,7 +210,7 @@ with contextlib.suppress(ImportError):
 
 @pytest.fixture(
     params=[
-        pytest.param(np, id="numpy", marks=pytest.mark.skipif(not HAS_NUMPY, reason="NumPy not available")),
+        pytest.param(np, id="numpy"),
         pytest.param(
             jnp,
             id="jax",

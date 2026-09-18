@@ -71,6 +71,9 @@ class PfieldPlan(NamedTuple):
         seg_length: Sub-element length in meters (element_width / n_sub).
         correction_factor: Scaling factor for the RMS integration
             (df * element_width, or element_width when tx_n_wavelengths=inf).
+        freq_step: Spacing of the full frequency grid in Hz.
+        n_freq_full: Number of samples in the full ``[0, 2 * fc]`` grid.
+        freq_idx_start: Index of ``selected_freqs[0]`` in the full grid.
     """
 
     selected_freqs: Float[Array, " n_frequencies"]
@@ -78,6 +81,30 @@ class PfieldPlan(NamedTuple):
     probe_spectrum: Float[Array, " n_frequencies"]
     n_sub: int
     seg_length: float
+    correction_factor: float
+    freq_step: float
+    n_freq_full: int
+    freq_idx_start: int
+
+
+class PfieldSpectrumInfo(NamedTuple):
+    """Frequency-grid metadata for a pressure spectrum.
+
+    The selected frequencies form a contiguous slice of the uniform full grid
+    ``linspace(0, 2 * freq_center, n_freq_full)``.
+
+    Attributes:
+        selected_freqs: Evaluated frequencies in Hz. Shape ``(n_freq_selected,)``.
+        freq_idx_start: Index of the first selected frequency in the full grid.
+        n_freq_full: Length of the uniform ``[0, 2 * freq_center]`` grid.
+        freq_step: Spacing of the full grid in Hz.
+        correction_factor: Scale for converting summed spectral energy to RMS.
+    """
+
+    selected_freqs: Float[Array, " n_freq_selected"]
+    freq_idx_start: int
+    n_freq_full: int
+    freq_step: float
     correction_factor: float
 
 
@@ -133,7 +160,6 @@ def _prepare_frequency_sweep(
     distances, sin_theta, theta_arr = _distances_and_angles(
         positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
     )
-
     obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
 
     freq_start = plan.selected_freqs[0]
@@ -181,6 +207,22 @@ def _prepare_frequency_sweep(
         seg_length=plan.seg_length,
         sin_theta=sin_theta,
         full_frequency_directivity=full_frequency_directivity,
+    )
+
+
+def _clean_transmit_inputs(
+    delays: Float[Array, " n_elements"],
+    tx_apodization: Float[Array, " n_elements"] | None,
+    n_elements: int,
+    xp: _ArrayNamespace,
+) -> tuple[Float[Array, " n_elements"], Float[Array, " n_elements"]]:
+    """Zero disabled elements and replace their NaN delays."""
+    if tx_apodization is None:
+        tx_apodization = xp.ones(n_elements)
+    nan_mask = xp.isnan(delays)
+    return (
+        xp.where(nan_mask, xp.asarray(0.0), delays),
+        xp.where(nan_mask, xp.asarray(0.0), tx_apodization),
     )
 
 
@@ -284,6 +326,8 @@ def pfield_precompute(
     # Frequency selection: uses boolean masking -> dynamic n_frequencies
     freq_plan = _select_frequencies(params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, df, xp)
     df = freq_plan.freq_step
+    n_freq_full = round(2.0 * params.freq_center / df) + 1
+    freq_idx_start = round(float(freq_plan.selected_freqs[0]) / df)
 
     correction_factor = 1.0 if tx_n_wavelengths == float("inf") else df
     correction_factor = correction_factor * params.element_width
@@ -295,6 +339,9 @@ def pfield_precompute(
         n_sub=n_sub,
         seg_length=seg_length,
         correction_factor=correction_factor,
+        freq_step=df,
+        n_freq_full=n_freq_full,
+        freq_idx_start=freq_idx_start,
     )
 
 
@@ -332,12 +379,7 @@ def pfield_compute(
     """
     xp = array_namespace(positions, delays, tx_apodization)
 
-    if tx_apodization is None:
-        tx_apodization = xp.ones(params.n_elements)
-
-    nan_mask = xp.isnan(delays)
-    tx_apodization = xp.where(nan_mask, xp.asarray(0.0), tx_apodization)
-    delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
+    delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
 
     grid_size = prod(positions.shape[:-1])
     selected = _select_strategy(xp, grid_size, params, full_frequency_directivity, strategy=strategy)
@@ -473,3 +515,112 @@ def pfield(
         full_frequency_directivity=full_frequency_directivity,
         strategy=strategy,
     )
+
+
+def pfield_spectrum(
+    positions: Float[Array, "*grid_shape 2"],
+    delays: Float[Array, " n_elements"],
+    params: TransducerParams,
+    medium: MediumParams = _DEFAULT_MEDIUM,
+    *,
+    tx_apodization: Float[Array, " n_elements"] | None = None,
+    tx_n_wavelengths: float | int = 1.0,
+    db_thresh: float | int = -60.0,
+    full_frequency_directivity: bool = False,
+    element_splitting: int | None = None,
+    frequency_step: float | int = 1.0,
+) -> tuple[Complex[Array, "*grid_shape n_freq_selected"], PfieldSpectrumInfo]:
+    """Compute the complex acoustic pressure spectrum of a transducer array.
+
+    This uses the same frequency sweep as :func:`pfield`, but preserves the
+    complex pressure at every selected temporal frequency. The spatial input
+    shape is preserved and frequency is appended as the final axis::
+
+        spectrum, info = pfield_spectrum(positions, delays, params)
+        rms = rms_from_spectrum(spectrum, info)
+
+    Unlike :func:`pfield`, this materializes ``O(grid * n_freq)`` values.
+
+    Args:
+        positions: Grid positions in meters. Shape ``(*grid_shape, 2)`` where
+            ``positions[..., 0]`` is lateral (x) and ``positions[..., 1]`` is
+            axial (z, into tissue).
+        delays: Transmit time delays in seconds. Shape ``(n_elements,)``.
+        params: Transducer parameters (geometry, frequency, bandwidth, baffle).
+        medium: Medium parameters (speed of sound, attenuation).
+        tx_apodization: Transmit apodization weights. Shape ``(n_elements,)``.
+            Elements with NaN delays are automatically zeroed.
+        tx_n_wavelengths: Number of wavelengths in the TX pulse.
+        db_thresh: Threshold in dB for frequency component selection.
+        full_frequency_directivity: If True, compute element directivity at
+            every frequency. If False, use center-frequency-only directivity.
+        element_splitting: Number of sub-elements per transducer element.
+            If None, computed automatically.
+        frequency_step: Scaling factor for the frequency step. Values below 1
+            give a finer grid, and therefore a longer time record after an
+            inverse FFT.
+
+    Returns:
+        Tuple of (spectrum, info) where spectrum has shape
+        ``(*grid_shape, n_freq_selected)`` and is complex-valued.
+    """
+    xp = array_namespace(positions, delays, tx_apodization)
+
+    plan = pfield_precompute(
+        positions,
+        delays,
+        params,
+        medium,
+        tx_n_wavelengths=tx_n_wavelengths,
+        db_thresh=db_thresh,
+        element_splitting=element_splitting,
+        frequency_step=frequency_step,
+    )
+
+    delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
+
+    from fast_simus._pfield_strategies import _freq_outer_python_complex
+
+    sweep = _prepare_frequency_sweep(
+        positions,
+        delays_clean,
+        tx_apodization,
+        plan,
+        params,
+        medium,
+        full_frequency_directivity=full_frequency_directivity,
+        xp=xp,
+    )
+    spectrum = _freq_outer_python_complex(**sweep._asdict(), xp=xp)
+
+    info = PfieldSpectrumInfo(
+        selected_freqs=plan.selected_freqs,
+        freq_idx_start=plan.freq_idx_start,
+        n_freq_full=plan.n_freq_full,
+        freq_step=plan.freq_step,
+        correction_factor=plan.correction_factor,
+    )
+    return spectrum, info
+
+
+def rms_from_spectrum(
+    spectrum: Complex[Array, "*grid_shape n_freq_selected"],
+    info: PfieldSpectrumInfo,
+) -> Float[Array, " *grid_shape"]:
+    """Rebuild the RMS pressure field from a ``pfield_spectrum`` result.
+
+    This is the discrete form of Garcia 2022 Eq. 41-42: square, sum over the
+    selected frequencies, scale by ``info.correction_factor``, then take the
+    square root. It matches :func:`pfield` to floating-point tolerance because
+    both use the same per-frequency pressure.
+
+    Args:
+        spectrum: Complex pressure from :func:`pfield_spectrum`.
+        info: Metadata from the same call.
+
+    Returns:
+        RMS pressure with the spatial shape of ``spectrum`` (no frequency axis).
+    """
+    xp = array_namespace(spectrum)
+    energy = xp.sum(xp.real(spectrum * xp.conj(spectrum)), axis=-1)
+    return xp.sqrt(energy * info.correction_factor)

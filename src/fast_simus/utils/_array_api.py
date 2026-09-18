@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from types import EllipsisType
-from typing import Any, Literal, Protocol, Self, cast, runtime_checkable
+from typing import Any, Literal, Protocol, Self, TypeAlias, cast, runtime_checkable
 
 from array_api_compat import array_namespace as xpc_array_namespace
+from array_api_compat import is_cupy_array, to_device
+from array_api_compat import is_cupy_namespace as is_cupy_namespace
 
 from fast_simus.backends.mlx import ensure_compat as _ensure_mlx_compat
 
@@ -53,6 +55,8 @@ class _ArrayNamespace(Protocol):
         - We remove some Array API standard functions that are not used in the codebase,
             to be lenient about other array libraries like MLX
     """
+
+    __name__: str
 
     # Data types
     float32: Any
@@ -129,6 +133,7 @@ class _ArrayNamespace(Protocol):
 
     # Manipulation functions
     def broadcast_to(self, x: Array, /, shape: tuple[int, ...]) -> Array: ...
+    def concat(self, arrays: Any, /, *, axis: int = 0) -> Array: ...
     def reshape(self, x: Array, /, shape: tuple[int, ...], *, copy: bool | None = None) -> Array: ...
     def stack(self, arrays: Any, *, axis: int = 0) -> Array: ...
 
@@ -230,6 +235,10 @@ class Array(Protocol):
 
 ArrayOrScalar = Array | int | float | complex | bool
 
+ArrayNamespace: TypeAlias = (
+    _ArrayNamespace | _ArrayNamespaceWithLinAlg | _ArrayNamespaceWithFFT | _ArrayNamespaceWithLinAlgAndFFT
+)
+
 
 def is_mlx_namespace(xp: object) -> bool:
     """Return True if xp is an MLX namespace (mlx.core or compatible wrapper).
@@ -240,20 +249,7 @@ def is_mlx_namespace(xp: object) -> bool:
     return getattr(xp, "__name__", "").startswith("mlx")
 
 
-def is_cupy_namespace(xp: object) -> bool:
-    """Return True if xp is a CuPy namespace (raw cupy or array_api_compat wrapper).
-
-    array_api_compat wraps cupy as ``array_api_compat.cupy`` whose ``__name__``
-    contains ``cupy``; raw ``cupy`` matches the same predicate. Mirrors
-    ``is_mlx_namespace`` (CuPy *does* have an array_api_compat wrapper, but a
-    string check covers both raw and wrapped variants without an import).
-    """
-    return "cupy" in getattr(xp, "__name__", "")
-
-
-def array_namespace(
-    *arrays: Any,
-) -> _ArrayNamespace | _ArrayNamespaceWithLinAlg | _ArrayNamespaceWithFFT | _ArrayNamespaceWithLinAlgAndFFT:
+def array_namespace(*arrays: Any) -> ArrayNamespace:
     """Typed wrapper around array_api_compat.array_namespace.
 
     Returns the array namespace for the given arrays with proper type hints.
@@ -288,7 +284,54 @@ def array_namespace(
     xp = xpc_array_namespace(*arrays)
     if is_mlx_namespace(xp):
         _ensure_mlx_compat(xp)
-    return cast(
-        _ArrayNamespace | _ArrayNamespaceWithLinAlg | _ArrayNamespaceWithFFT | _ArrayNamespaceWithLinAlgAndFFT,
-        xp,
-    )
+    return cast(ArrayNamespace, xp)
+
+
+def default_namespace() -> ArrayNamespace:
+    """Return the best available Array API namespace.
+
+    GPU backends are preferred, followed by JAX and NumPy.
+
+    Examples:
+        >>> xp = default_namespace()
+        >>> grid = xp.asarray(positions)
+    """
+    try:
+        import cupy as cp
+    except ImportError:
+        pass
+    else:
+        try:
+            device_count = int(cp.cuda.runtime.getDeviceCount())
+        except cp.cuda.runtime.CUDARuntimeError:
+            device_count = 0
+        if device_count:
+            return cast(ArrayNamespace, cp)
+
+    try:
+        import mlx.core as mx
+    except ImportError:
+        pass
+    else:
+        _ensure_mlx_compat(mx)
+        return cast(ArrayNamespace, mx)
+
+    try:
+        import jax.numpy as jnp
+    except ImportError:
+        pass
+    else:
+        return cast(ArrayNamespace, jnp)
+
+    import array_api_compat.numpy as np
+
+    return cast(ArrayNamespace, np)
+
+
+def as_numpy(x: Any) -> Any:
+    """Return ``x`` as a host NumPy array."""
+    import array_api_compat.numpy as np
+
+    if is_cupy_array(x):
+        x = to_device(x, "cpu")
+    return np.asarray(x)
