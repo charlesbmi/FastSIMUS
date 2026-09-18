@@ -7,6 +7,7 @@ from typing import Any, Literal, Protocol, Self, TypeAlias, cast, runtime_checka
 
 from array_api_compat import array_namespace as xpc_array_namespace
 from array_api_compat import is_cupy_array, to_device
+from array_api_compat import is_cupy_namespace as is_cupy_namespace
 
 from fast_simus.backends.mlx import ensure_compat as _ensure_mlx_compat
 
@@ -248,17 +249,6 @@ def is_mlx_namespace(xp: object) -> bool:
     return getattr(xp, "__name__", "").startswith("mlx")
 
 
-def is_cupy_namespace(xp: object) -> bool:
-    """Return True if xp is a CuPy namespace (raw cupy or array_api_compat wrapper).
-
-    array_api_compat wraps cupy as ``array_api_compat.cupy`` whose ``__name__``
-    contains ``cupy``; raw ``cupy`` matches the same predicate. Mirrors
-    ``is_mlx_namespace`` (CuPy *does* have an array_api_compat wrapper, but a
-    string check covers both raw and wrapped variants without an import).
-    """
-    return "cupy" in getattr(xp, "__name__", "")
-
-
 def array_namespace(*arrays: Any) -> ArrayNamespace:
     """Typed wrapper around array_api_compat.array_namespace.
 
@@ -340,8 +330,8 @@ def default_namespace() -> ArrayNamespace:
 
 def as_numpy(x: Any) -> Any:
     """Return ``x`` as a host NumPy array."""
-    import numpy as np
+    import array_api_compat.numpy as np
 
     if is_cupy_array(x):
-        return np.from_dlpack(to_device(x, "cpu"))
+        x = to_device(x, "cpu")
     return np.asarray(x)
