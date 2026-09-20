@@ -44,6 +44,8 @@ class WavefieldResult(NamedTuple):
 def spectrum_to_wavefield(
     spectrum: Complex[Array, "*grid_shape n_freq_selected"],
     info: PfieldPlan | PfieldSpectrumInfo,
+    *,
+    time_oversampling: int = 1,
 ) -> WavefieldResult:
     """Transform a complex pressure spectrum into a propagating wave over time.
 
@@ -57,23 +59,30 @@ def spectrum_to_wavefield(
             ``(*grid_shape, n_freq_selected)``.
         info: Frequency-grid metadata from the same call, or the
             ``PfieldPlan`` used to compute ``spectrum``.
+        time_oversampling: Positive integer inverse-FFT zero-padding factor.
+            Values above one produce denser, phase-faithful time samples
+            without changing the frequency-domain field or record duration.
 
     Returns:
         WavefieldResult with real frames and their times in seconds.
     """
+    if isinstance(time_oversampling, bool) or not isinstance(time_oversampling, int) or time_oversampling < 1:
+        raise ValueError("time_oversampling must be a positive integer")
     xp = array_namespace(spectrum)
 
     n_selected = spectrum.shape[-1]
     n_before = info.freq_idx_start
-    n_after = info.n_freq_full - n_before - n_selected
-    if n_after < 0:
+    original_n_after = info.n_freq_full - n_before - n_selected
+    if original_n_after < 0:
         raise ValueError(
             f"Selected band ({n_selected} bins at offset {n_before}) does not fit in a grid of {info.n_freq_full} bins."
         )
 
     grid_shape = spectrum.shape[:-1]
     n_points = prod(grid_shape)
-    n_time = 2 * (info.n_freq_full - 1)
+    n_time = time_oversampling * 2 * (info.n_freq_full - 1)
+    n_freq_padded = n_time // 2 + 1
+    n_after = n_freq_padded - n_before - n_selected
     n_keep = n_time // 2
     # Scale so the result approximates the inverse Fourier integral rather than
     # a bare DFT, making amplitudes independent of the frequency-grid spacing.
@@ -82,7 +91,7 @@ def spectrum_to_wavefield(
     xp_fft = _fft_namespace(xp)
     flat = xp.reshape(spectrum, (n_points, n_selected))
 
-    chunk = max(1, _MAX_FFT_BATCH_ELEMENTS // max(info.n_freq_full, 1))
+    chunk = max(1, _MAX_FFT_BATCH_ELEMENTS // max(n_freq_padded, 1))
     blocks = []
     for start in range(0, n_points, chunk):
         block = flat[start : start + chunk, :]

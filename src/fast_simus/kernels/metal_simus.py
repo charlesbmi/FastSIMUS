@@ -296,16 +296,18 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
     probe = d["probe_real"]
     scalars = d["scalars"]
 
-    # Build kernels for the standard chunk size (cached, compiled once per probe)
-    k_tx = _build_tx(n_elem, n_sub, n_freq, chunk_size)
-    k_rx = _build_rx(n_elem, n_sub, n_freq, chunk_size)
-
     total_re = mx.zeros(spect_size, dtype=mx.float32)
     total_im = mx.zeros(spect_size, dtype=mx.float32)
 
     for start in range(0, n_scat, chunk_size):
         end = min(start + chunk_size, n_scat)
         cn = end - start
+
+        # N_SCAT is a compile-time guard in both kernels. Specialize it to
+        # the active chunk so partially filled SIMD reduction groups do not
+        # read beyond the scatterer, coefficient, or TX buffers.
+        k_tx = _build_tx(n_elem, n_sub, n_freq, cn)
+        k_rx = _build_rx(n_elem, n_sub, n_freq, cn)
 
         cx = d["x_flat"][start:end]
         cz = d["z_flat"][start:end]
@@ -321,6 +323,10 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
             grid=(cn * tg, 1, 1),
             threadgroup=(tg, 1, 1),
         )
+        # Materialize the first custom-kernel result before dispatching a
+        # second custom kernel that consumes it. Without this barrier, MLX can
+        # expose uninitialized TX storage on the first cold Metal invocation.
+        mx.eval(tx_out[0], tx_out[1])
 
         # RX kernel: SCAT_REDUCE scatterers per threadgroup, SIMD reduction
         sr = _RX_SCAT_REDUCE
@@ -334,6 +340,7 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
             threadgroup=(rx_tg, 1, 1),
             init_value=0.0,
         )
+        mx.eval(rx_out[0], rx_out[1])
 
         total_re = total_re + rx_out[0]
         total_im = total_im + rx_out[1]
