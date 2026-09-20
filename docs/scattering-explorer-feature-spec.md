@@ -3,8 +3,9 @@
 ## General context
 
 The scattering explorer is an interactive marimo example for understanding how an ultrasound transmit field propagates,
-interacts with point scatterers, and returns to a physical receive array. It extends the transmit-only wavefield explorer
-without replacing it and provides a visual bridge between FastSIMUS field calculations and channel-domain SIMUS output.
+interacts with point scatterers, and returns to a physical receive array. It extends the transmit-only wavefield
+explorer without replacing it and provides a visual bridge between FastSIMUS field calculations and channel-domain SIMUS
+output.
 
 The example is intended for education, model inspection, and simulator development. It is not a calibrated acoustic
 measurement tool or a B-mode reconstruction pipeline. Pressure and RF amplitudes are displayed relative to separate
@@ -70,8 +71,8 @@ logic that is independently testable or useful to another example should live in
   additions only. Committing a drawing appends converted points and clears the staging canvas.
 - Notebook reflectivities must be nonnegative. Invalid table edits retain the last valid canonical table and display an
   inline validation message.
-- Draw classes default to `0.001`, `0.002`, `0.005`, and `0.02`. Precise addition, deletion, and coefficient editing take
-  place in the table.
+- Draw classes default to `0.001`, `0.002`, `0.005`, and `0.02`. Precise addition, deletion, and coefficient editing
+  take place in the table.
 
 ### Transmit and receive
 
@@ -99,8 +100,8 @@ logic that is independently testable or useful to another example should live in
 - Scatterers use a light-to-dark grayscale proportional to relative reflectivity, avoiding competition with pressure
   polarity colors.
 - Probe elements, focus geometry, scatterers, field data, and axes share physical coordinates.
-- The displayed RF record ends at the last selectable wavefield time. Its channel-versus-time aspect is based on physical
-  probe aperture and propagation distance `c * delta_t`, with practical height bounds for responsive layouts.
+- The displayed RF record ends at the last selectable wavefield time. Its channel-versus-time aspect is based on
+  physical probe aperture and propagation distance `c * delta_t`, with practical height bounds for responsive layouts.
 - Configuration groups are visible when the desktop sidebar first opens. The whole sidebar remains hideable through
   marimo's standard sidebar toggle.
 - Backend, grid, workload, and memory estimates are diagnostic information and appear below the main plots.
@@ -111,22 +112,32 @@ logic that is independently testable or useful to another example should live in
 
 1. **Keep physics reusable.** Public scattering functions and portable numerical primitives must not depend on marimo,
    browser state, or example-specific scene definitions.
-2. **Keep the notebook declarative.** Cells should assemble controls, derive immutable values, call simulation functions,
-   and display results. Stateful synchronization is reserved for the canonical custom-scene editor.
-3. **Use explicit boundaries.** Backend-to-NumPy conversion occurs only when preparing browser buffers. Physical-to-pixel
-   conversion occurs only in editing or rendering helpers.
-4. **Share behavior, not incidental layout.** Coordinate conversion, grid derivation, apodization, scene generation,
+1. **Keep the notebook declarative.** Cells should assemble controls, derive immutable values, call simulation
+   functions, and display results. Stateful synchronization is reserved for the canonical custom-scene editor.
+1. **Use explicit boundaries.** Backend-to-NumPy conversion occurs only when preparing browser buffers.
+   Physical-to-pixel conversion occurs only in editing or rendering helpers.
+1. **Share behavior, not incidental layout.** Coordinate conversion, grid derivation, apodization, scene generation,
    normalization, and workload estimation are reusable. Sidebar ordering and card styling may remain notebook-specific.
-5. **Separate physics from presentation.** Relative-dB clipping, component selection, RMS visibility, and cursor movement
-   must not invalidate cached spectra or RF.
-6. **Prefer bounded intermediates.** Frequency work and observation-scatterer contractions are chunked so temporary arrays
-   do not scale as the full Cartesian product.
-7. **Make limitations visible.** Large requested problems are estimated and warned about, but the notebook does not
+1. **Separate physics from presentation.** Relative-dB clipping, component selection, RMS visibility, and cursor
+   movement must not invalidate cached spectra or RF.
+1. **Prefer bounded intermediates.** Frequency work and observation-scatterer contractions are chunked so temporary
+   arrays do not scale as the full Cartesian product.
+1. **Make limitations visible.** Large requested problems are estimated and warned about, but the notebook does not
    silently cap, coarsen, or require confirmation.
-8. **Test contracts rather than cell structure.** Tests should target physical invariants, reusable helpers, widget data
+1. **Test contracts rather than cell structure.** Tests should target physical invariants, reusable helpers, widget data
    contracts, synchronization sequences, and backend preservation rather than exact cell ordering or private names.
 
 ## Feature set
+
+### Implementation boundaries
+
+- `fast_simus.scattering` owns reusable Array API spectrum and time-domain physics.
+- `_scattering_simulation.py` owns immutable simulation inputs, transmit construction, caching, and the explicit
+  backend-to-NumPy display boundary.
+- `_scattering_explorer.py` owns deterministic scenes, physical-coordinate editing, sampling, apodization, and workload
+  estimates.
+- `_scattering_viewer.py` and its JavaScript/CSS assets own browser buffers and display-only interaction.
+- `scattering_explorer.py` remains a reactive composition layer for controls and outputs.
 
 ### Public FastSIMUS capability
 
@@ -169,8 +180,8 @@ logic that is independently testable or useful to another example should live in
 
 Reviewers should preserve the contracts above while looking for smaller shared components. High-value review areas are:
 
-- whether field-spectrum and SIMUS paths share the smallest useful Array API contraction without weakening finite-aperture
-  SIMUS behavior;
+- whether field-spectrum and SIMUS paths share the smallest useful Array API contraction without weakening
+  finite-aperture SIMUS behavior;
 - whether notebook calculations that are pure and testable have leaked into reactive cells;
 - whether viewer traits are minimal and display-only updates avoid Python simulation work;
 - whether custom editing has one canonical source of truth and avoids stale callback snapshots;
@@ -178,5 +189,6 @@ Reviewers should preserve the contracts above while looking for smaller shared c
 - whether backend-specific synchronization is limited to demonstrated accelerated-kernel requirements;
 - whether documentation and tests describe public behavior rather than transient implementation details.
 
-Any refactor should retain PyMUST parity, portable-versus-accelerated SIMUS parity, Array API backend preservation, input
-immutability, deterministic scenes, marimo static checking, headless execution, and a rendered wide/narrow layout check.
+Any refactor should retain PyMUST parity, portable-versus-accelerated SIMUS parity, Array API backend preservation,
+input immutability, deterministic scenes, marimo static checking, headless execution, and a rendered wide/narrow layout
+check.

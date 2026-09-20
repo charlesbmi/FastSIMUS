@@ -114,7 +114,7 @@ def test_viewer_display_defaults_use_range_without_gain() -> None:
     """The viewer exposes one waveform range and a tighter RMS backdrop."""
     viewer = ScatteringViewer()
 
-    assert viewer.phase_dynamic_range == 60.0
+    assert viewer.waveform_dynamic_range == 60.0
     assert viewer.rms_dynamic_range == 20.0
     assert not viewer.has_trait("field_gain_db")
     assert not viewer.has_trait("receive_gain_db")

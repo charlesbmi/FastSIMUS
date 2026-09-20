@@ -22,34 +22,31 @@ __generated_with = "0.24.1"
 app = marimo.App(width="full", app_title="FastSIMUS scattering explorer")
 
 with app.setup(hide_code=True):
-    import functools
-    from math import inf
-
     import marimo as mo
     import numpy as np
     from _scattering_explorer import (
         apodization_svg,
         append_drawn_points,
-        estimate_field_movie_bytes,
-        estimate_spatial_pairs,
+        estimate_simulation_workload,
         grid_from_spacing,
         normalize_custom_rows,
         picmus_point_targets,
-        probe_with_center_frequency,
         spacing_in_mm,
         speckle_lesion,
         status_text,
         tukey_apodization,
         wavelength_mm,
     )
+    from _scattering_simulation import (
+        DEFAULT_TIME_OVERSAMPLING,
+        PROBE_PRESETS,
+        SimulationConfig,
+        cached_simulation,
+    )
     from _scattering_viewer import ScatteringViewer, crop_receive_to_field_window, prepare_viewer_data
     from drawdata import ScatterWidget
 
     import fast_simus as fs
-    from fast_simus.transducer_presets import C5_2v, L11_5v, L12_3v, P4_2v
-    from fast_simus.utils import as_numpy
-
-    TIME_OVERSAMPLING = 2
 
 
 @app.cell(hide_code=True)
@@ -57,12 +54,7 @@ def _():
     is_script_mode = mo.app_meta().mode == "script"
     xp = fs.default_namespace()
     backend_note = f"Numerical backend: **{xp.__name__}**"
-    PRESETS = {
-        "P4-2v phased": P4_2v,
-        "L12-3v linear": L12_3v,
-        "C5-2v convex": C5_2v,
-        "L11-5v linear": L11_5v,
-    }
+    PRESETS = PROBE_PRESETS
     SCENES = ["Single reflector", "PICMUS point targets", "Speckle lesion", "Custom"]
     return PRESETS, SCENES, backend_note, is_script_mode, xp
 
@@ -259,13 +251,13 @@ def _():
         ["Incident", "Scattered", "Total"], value="Total", label="field component", full_width=True
     )
     rms_visible_ui = mo.ui.checkbox(value=True, label="incident RMS background")
-    phase_range_ui = mo.ui.slider(
+    waveform_range_ui = mo.ui.slider(
         20, 100, 5, value=60, label="waveform dynamic range (dB)", include_input=True, full_width=True
     )
     rms_range_ui = mo.ui.slider(
         10, 40, 5, value=20, label="RMS dynamic range (dB)", include_input=True, full_width=True
     )
-    return component_ui, phase_range_ui, rms_range_ui, rms_visible_ui
+    return component_ui, rms_range_ui, rms_visible_ui, waveform_range_ui
 
 
 @app.cell(hide_code=True)
@@ -296,7 +288,6 @@ def _(
     focusing_c_ui,
     grid_spacing_ui,
     grid_unit_ui,
-    phase_range_ui,
     probe_ui,
     propagation_c_ui,
     pulse_ui,
@@ -310,6 +301,7 @@ def _(
     transmit_ui,
     tukey_roll_ui,
     width_ui,
+    waveform_range_ui,
     x_roi_ui,
     z_roi_ui,
 ):
@@ -340,7 +332,7 @@ def _(
     display_controls = mo.vstack(
         [
             component_ui,
-            phase_range_ui,
+            waveform_range_ui,
             rms_visible_ui,
             rms_range_ui,
         ],
@@ -523,155 +515,36 @@ def _(
     requested_grid = grid_from_spacing(x_limits_mm, z_limits_mm, requested_spacing_mm)
     nx = 40 if is_script_mode else requested_grid.nx
     nz = 48 if is_script_mode else requested_grid.nz
-    effective_dx_mm = (x_limits_mm[1] - x_limits_mm[0]) / (nx - 1)
-    effective_dz_mm = (z_limits_mm[1] - z_limits_mm[0]) / (nz - 1)
-    estimated_pairs = estimate_spatial_pairs((nz, nx), reflection_coefficients.size)
-    lateral_values = [
-        abs(x_limits_mm[0]),
-        abs(x_limits_mm[1]),
-    ]
-    axial_values = [
-        abs(z_limits_mm[0]),
-        abs(z_limits_mm[1]),
-    ]
-    if scatterers_mm.size:
-        lateral_values.extend(np.abs(scatterers_mm[:, 0]).tolist())
-        axial_values.extend(np.abs(scatterers_mm[:, 1]).tolist())
-    maximum_range_mm = float(np.hypot(max(lateral_values), max(axial_values)))
-    estimated_record_seconds = 2.0 * maximum_range_mm * 1e-3 / float(propagation_c_ui.value) + float(pulse_ui.value) / (
-        float(center_frequency_ui.value) * 1e6
-    )
-    estimated_times = max(1, int(np.ceil(4.0 * float(center_frequency_ui.value) * 1e6 * estimated_record_seconds)))
-    estimated_movie_bytes = estimate_field_movie_bytes(
-        (nz, nx), estimated_times, temporal_oversampling=TIME_OVERSAMPLING
+    time_oversampling = DEFAULT_TIME_OVERSAMPLING
+    estimate = estimate_simulation_workload(
+        grid_shape=(nx, nz),
+        x_limits_mm=x_limits_mm,
+        z_limits_mm=z_limits_mm,
+        scatterers_mm=scatterers_mm,
+        n_scatterers=reflection_coefficients.size,
+        propagation_speed=float(propagation_c_ui.value),
+        center_frequency_mhz=float(center_frequency_ui.value),
+        pulse_wavelengths=float(pulse_ui.value),
+        time_oversampling=time_oversampling,
     )
     grid_note = (
         f"Requested spacing **{requested_spacing_mm:.3f} mm**; effective "
-        f"**{effective_dx_mm:.3f} \N{MULTIPLICATION SIGN} {effective_dz_mm:.3f} mm**. "
-        f"Estimated {TIME_OVERSAMPLING}\N{MULTIPLICATION SIGN} time-sampled field movies: "
-        f"**{estimated_movie_bytes / 2**30:.2f} GiB**."
+        f"**{estimate.effective_dx_mm:.3f} \N{MULTIPLICATION SIGN} {estimate.effective_dz_mm:.3f} mm**. "
+        f"Estimated {time_oversampling}\N{MULTIPLICATION SIGN} time-sampled field movies: "
+        f"**{estimate.field_movie_bytes / 2**30:.2f} GiB**."
     )
     workload_note = (
         mo.callout(
-            f"{grid_note} This configuration evaluates about **{estimated_pairs / 1e6:.1f} million** "
+            f"{grid_note} This configuration evaluates about **{estimate.spatial_pairs / 1e6:.1f} million** "
             "observation-scatterer pairs per frequency. Computation will continue and may be slow or memory-heavy.",
             kind="warn",
         )
-        if estimated_pairs > 25_000_000 or estimated_movie_bytes > 2**30
-        else mo.md(f"Estimated spatial work: **{estimated_pairs / 1e6:.2f} million pairs per frequency**. {grid_note}")
+        if estimate.spatial_pairs > 25_000_000 or estimate.field_movie_bytes > 2**30
+        else mo.md(
+            f"Estimated spatial work: **{estimate.spatial_pairs / 1e6:.2f} million pairs per frequency**. {grid_note}"
+        )
     )
-    return effective_dx_mm, effective_dz_mm, nx, nz, workload_note
-
-
-@app.cell(hide_code=True)
-def _(PRESETS, xp):
-    @functools.lru_cache(maxsize=8)
-    def simulate(
-        probe_name,
-        transmit_name,
-        center_frequency_mhz,
-        apodization_key,
-        focus_depth_mm,
-        steer_deg,
-        width_deg,
-        pulse_wavelengths,
-        propagation_speed,
-        focusing_speed,
-        attenuation,
-        x_limits,
-        z_limits,
-        grid_shape,
-        scatterer_key,
-        coefficient_key,
-        script_mode,
-    ):
-        params = probe_with_center_frequency(PRESETS[probe_name](), center_frequency_mhz)
-        medium = fs.MediumParams(speed_of_sound=propagation_speed, attenuation=attenuation)
-        elements, _theta, apex = fs.element_positions(params.n_elements, params.pitch, params.radius, xp)
-        steer_rad = np.deg2rad(steer_deg)
-        if transmit_name == "Focused":
-            focus = xp.asarray([focus_depth_mm * 1e-3 * np.tan(steer_rad), focus_depth_mm * 1e-3])
-            delays = fs.focused(elements, focus, speed_of_sound=focusing_speed, radius=params.radius, apex_offset=apex)
-        elif transmit_name == "Plane wave":
-            focus = None
-            delays = fs.plane_wave(
-                elements, steer_rad, speed_of_sound=focusing_speed, radius=params.radius, apex_offset=apex
-            )
-        elif params.radius == inf:
-            focus = None
-            delays = fs.diverging_wave(
-                elements,
-                steer_rad,
-                np.deg2rad(width_deg),
-                aperture_length=(params.n_elements - 1) * params.pitch,
-                speed_of_sound=focusing_speed,
-            )
-        else:
-            virtual_depth = -focus_depth_mm * 1e-3
-            focus = xp.asarray([abs(virtual_depth) * np.tan(steer_rad), virtual_depth])
-            delays = fs.focused(elements, focus, speed_of_sound=focusing_speed, radius=params.radius, apex_offset=apex)
-
-        apodization = xp.asarray(apodization_key)
-        x_axis = xp.linspace(x_limits[0] * 1e-3, x_limits[1] * 1e-3, grid_shape[0])
-        z_axis = xp.linspace(z_limits[0] * 1e-3, z_limits[1] * 1e-3, grid_shape[1])
-        x_grid, z_grid = xp.meshgrid(x_axis, z_axis)
-        positions = xp.stack([x_grid, z_grid], axis=-1)
-        scatterers = xp.asarray(scatterer_key)
-        coefficients = xp.asarray(coefficient_key)
-        frequency_step = 2.0 if script_mode else 0.5
-        spectrum = fs.scattering_pfield_spectrum(
-            positions,
-            scatterers,
-            coefficients,
-            delays,
-            params,
-            medium,
-            tx_apodization=apodization,
-            tx_n_wavelengths=pulse_wavelengths,
-            frequency_step=frequency_step,
-        )
-        incident_movie = fs.spectrum_to_wavefield(spectrum.incident, spectrum.info, time_oversampling=TIME_OVERSAMPLING)
-        scattered_movie = fs.spectrum_to_wavefield(
-            spectrum.scattered, spectrum.info, time_oversampling=TIME_OVERSAMPLING
-        )
-        incident_rms = fs.rms_from_spectrum(spectrum.incident, spectrum.info)
-
-        sampling_frequency = 4.0 * params.freq_center
-        if coefficients.shape[0] == 0:
-            rf = xp.zeros((1, params.n_elements))
-            rf_times = xp.zeros(1)
-        else:
-            rf_result = fs.simus(
-                scatterers,
-                coefficients,
-                delays,
-                params,
-                medium,
-                fs=sampling_frequency,
-                tx_apodization=apodization,
-                tx_n_wavelengths=pulse_wavelengths,
-                frequency_step=frequency_step,
-            )
-            rf = rf_result.rf
-            rf_times = xp.arange(rf.shape[0], dtype=rf.dtype) / sampling_frequency
-
-        return {
-            "incident": as_numpy(incident_movie.frames),
-            "scattered": as_numpy(scattered_movie.frames),
-            "incident_rms": as_numpy(incident_rms),
-            "times": as_numpy(incident_movie.times),
-            "rf": as_numpy(rf),
-            "rf_times": as_numpy(rf_times),
-            "elements_mm": as_numpy(elements) * 1e3,
-            "scatterers_mm": np.asarray(scatterer_key) * 1e3,
-            "rc": np.asarray(coefficient_key),
-            "extent": (x_limits[0], x_limits[1], z_limits[0], z_limits[1]),
-            "focus_mm": None if focus is None else as_numpy(focus) * 1e3,
-            "probe": params,
-            "propagation_speed": propagation_speed,
-        }
-
-    return (simulate,)
+    return estimate, nx, nz, workload_note
 
 
 @app.cell(hide_code=True)
@@ -689,34 +562,34 @@ def _(
     preview_weights,
     reflection_coefficients,
     scatterers_mm,
-    simulate,
     steer_ui,
     transmit_ui,
     width_ui,
     x_roi_ui,
+    xp,
     z_roi_ui,
 ):
-    scatterer_key = tuple(tuple(float(value) * 1e-3 for value in row) for row in scatterers_mm)
-    coefficient_key = tuple(float(value) for value in reflection_coefficients)
-    sim = simulate(
-        probe_ui.value,
-        transmit_ui.value,
-        float(center_frequency_ui.value),
-        tuple(float(value) for value in preview_weights),
-        float(focus_depth_ui.value),
-        float(steer_ui.value),
-        float(width_ui.value),
-        float(pulse_ui.value),
-        float(propagation_c_ui.value),
-        float(focusing_c_ui.value),
-        float(attenuation_ui.value),
-        tuple(map(float, x_roi_ui.value)),
-        tuple(map(float, z_roi_ui.value)),
-        (nx, nz),
-        scatterer_key,
-        coefficient_key,
-        is_script_mode,
+    config = SimulationConfig(
+        probe_name=probe_ui.value,
+        transmit_name=transmit_ui.value,
+        center_frequency_mhz=float(center_frequency_ui.value),
+        apodization=tuple(float(value) for value in preview_weights),
+        focus_depth_mm=float(focus_depth_ui.value),
+        steering_deg=float(steer_ui.value),
+        diverging_width_deg=float(width_ui.value),
+        pulse_wavelengths=float(pulse_ui.value),
+        propagation_speed=float(propagation_c_ui.value),
+        focusing_speed=float(focusing_c_ui.value),
+        attenuation=float(attenuation_ui.value),
+        x_limits_mm=(float(x_roi_ui.value[0]), float(x_roi_ui.value[1])),
+        z_limits_mm=(float(z_roi_ui.value[0]), float(z_roi_ui.value[1])),
+        grid_shape=(nx, nz),
+        scatterers_mm=tuple((float(row[0]), float(row[1])) for row in scatterers_mm),
+        reflection_coefficients=tuple(float(value) for value in reflection_coefficients),
+        frequency_step=2.0 if is_script_mode else 0.5,
+        time_oversampling=DEFAULT_TIME_OVERSAMPLING,
     )
+    sim = cached_simulation(config, xp)
     return (sim,)
 
 
@@ -730,19 +603,19 @@ def _():
 
 @app.cell(hide_code=True)
 def _(sim):
-    receive, receive_times = crop_receive_to_field_window(sim["rf"], sim["rf_times"], sim["times"])
-    viewer_data = prepare_viewer_data(sim["incident"], sim["scattered"], sim["incident_rms"], receive)
-    initial_time = min(sim["times"].size - 1, int(0.45 * sim["times"].size))
+    receive, receive_times = crop_receive_to_field_window(sim.receive, sim.receive_times, sim.times)
+    viewer_data = prepare_viewer_data(sim.incident, sim.scattered, sim.incident_rms, receive)
+    initial_time = min(sim.times.size - 1, int(0.45 * sim.times.size))
     viewer = ScatteringViewer.from_data(
         viewer_data,
-        field_times=sim["times"],
+        field_times=sim.times,
         receive_times=receive_times,
-        extent=sim["extent"],
-        elements=sim["elements_mm"],
-        scatterers=sim["scatterers_mm"],
-        coefficients=sim["rc"],
-        propagation_speed=sim["propagation_speed"],
-        focus=sim["focus_mm"],
+        extent=sim.extent_mm,
+        elements=sim.elements_mm,
+        scatterers=sim.scatterers_mm,
+        coefficients=sim.reflection_coefficients,
+        propagation_speed=sim.propagation_speed,
+        focus=sim.focus_mm,
         time_index=initial_time,
     )
     viewer_ui = mo.ui.anywidget(viewer)
@@ -752,15 +625,15 @@ def _(sim):
 @app.cell(hide_code=True)
 def _(
     component_ui,
-    phase_range_ui,
     rms_range_ui,
     rms_visible_ui,
     viewer,
     viewer_ui,
+    waveform_range_ui,
 ):
     viewer.component = component_ui.value
     viewer.rms_visible = bool(rms_visible_ui.value)
-    viewer.phase_dynamic_range = float(phase_range_ui.value)
+    viewer.waveform_dynamic_range = float(waveform_range_ui.value)
     viewer.rms_dynamic_range = float(rms_range_ui.value)
     viewer_ui
     return
@@ -773,13 +646,11 @@ def _(custom_output):
 
 
 @app.cell(hide_code=True)
-def _(
-    backend_note, center_wavelength_mm, effective_dx_mm, effective_dz_mm, reflection_coefficients, sim, workload_note
-):
-    summary = status_text(reflection_coefficients.size, sim["probe"].n_elements, sim["incident"].shape[:2])
+def _(backend_note, center_wavelength_mm, estimate, reflection_coefficients, sim, workload_note):
+    summary = status_text(reflection_coefficients.size, sim.probe.n_elements, sim.incident.shape[:2])
     spacing_summary = (
         f"λ = **{center_wavelength_mm:.3f} mm** · effective grid spacing "
-        f"**{effective_dx_mm:.3f} \N{MULTIPLICATION SIGN} {effective_dz_mm:.3f} mm**"
+        f"**{estimate.effective_dx_mm:.3f} \N{MULTIPLICATION SIGN} {estimate.effective_dz_mm:.3f} mm**"
     )
     mo.vstack(
         [

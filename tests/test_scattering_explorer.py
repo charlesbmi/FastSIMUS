@@ -9,18 +9,19 @@ from examples._scattering_explorer import (
     canvas_to_physical,
     drawing_class_coefficients,
     estimate_field_movie_bytes,
+    estimate_simulation_workload,
     estimate_spatial_pairs,
     grid_from_spacing,
     normalize_custom_rows,
     physical_to_canvas,
     picmus_point_targets,
-    probe_with_center_frequency,
     spacing_in_mm,
     speckle_lesion,
     status_text,
     tukey_apodization,
     wavelength_mm,
 )
+from examples._scattering_simulation import probe_with_center_frequency
 from fast_simus.transducer_presets import P4_2v
 
 
@@ -182,3 +183,24 @@ def test_field_movie_memory_estimate_counts_both_components() -> None:
     assert estimate_field_movie_bytes((10, 20), 30, bytes_per_value=8) == 10 * 20 * 30 * 8 * 2
     assert estimate_field_movie_bytes((10, 20), 30, temporal_oversampling=2) == 10 * 20 * 60 * 8 * 2
     assert estimate_spatial_pairs((10, 20), 7) == 1400
+
+
+def test_simulation_workload_uses_roi_and_scatterer_extent() -> None:
+    """Diagnostics share one tested record-length and memory estimate."""
+    estimate = estimate_simulation_workload(
+        grid_shape=(5, 6),
+        x_limits_mm=(-2.0, 2.0),
+        z_limits_mm=(0.0, 4.0),
+        scatterers_mm=np.asarray([[6.0, 8.0]]),
+        n_scatterers=3,
+        propagation_speed=1_000.0,
+        center_frequency_mhz=2.0,
+        pulse_wavelengths=2.0,
+        time_oversampling=2,
+    )
+
+    assert estimate.effective_dx_mm == 1.0
+    assert estimate.effective_dz_mm == 0.8
+    assert estimate.spatial_pairs == 5 * 6 * 3
+    assert estimate.record_samples >= 168
+    assert estimate.field_movie_bytes == 5 * 6 * estimate.record_samples * 2 * 8 * 2

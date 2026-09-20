@@ -136,7 +136,7 @@ class ScatteringViewer(anywidget.AnyWidget):
     component = traitlets.Unicode("Total").tag(sync=True)
     rms_visible = traitlets.Bool(True).tag(sync=True)
     rms_dynamic_range = traitlets.Float(20.0).tag(sync=True)
-    phase_dynamic_range = traitlets.Float(60.0).tag(sync=True)
+    waveform_dynamic_range = traitlets.Float(60.0).tag(sync=True)
     propagation_speed = traitlets.Float(1540.0).tag(sync=True)
     time_index = traitlets.Int(0).tag(sync=True)
 

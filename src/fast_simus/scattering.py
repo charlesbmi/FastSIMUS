@@ -312,8 +312,13 @@ def scattering_wavefield(
     full_frequency_directivity: bool = False,
     element_splitting: int | None = None,
     frequency_step: float | int = 0.5,
+    time_oversampling: int = 1,
 ) -> ScatteringWavefieldResult:
-    """Compute incident and first-order scattered pressure over time."""
+    """Compute incident and first-order scattered pressure over time.
+
+    ``time_oversampling`` is forwarded to the inverse FFT for denser,
+    phase-faithful time samples without changing the simulated spectrum.
+    """
     spectrum = scattering_pfield_spectrum(
         positions,
         scatterers,
@@ -328,8 +333,8 @@ def scattering_wavefield(
         element_splitting=element_splitting,
         frequency_step=frequency_step,
     )
-    incident = spectrum_to_wavefield(spectrum.incident, spectrum.info)
-    scattered = spectrum_to_wavefield(spectrum.scattered, spectrum.info)
+    incident = spectrum_to_wavefield(spectrum.incident, spectrum.info, time_oversampling=time_oversampling)
+    scattered = spectrum_to_wavefield(spectrum.scattered, spectrum.info, time_oversampling=time_oversampling)
     return ScatteringWavefieldResult(
         incident=incident.frames,
         scattered=scattered.frames,

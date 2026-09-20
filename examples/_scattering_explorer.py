@@ -7,8 +7,6 @@ from math import ceil, pi, sqrt
 
 import numpy as np
 
-from fast_simus.transducer_params import TransducerParams
-
 _DRAWING_LABELS = ("a", "b", "c", "d")
 
 
@@ -24,6 +22,17 @@ class GridSpec:
     x_max_mm: float
     z_min_mm: float
     z_max_mm: float
+
+
+@dataclass(frozen=True)
+class WorkloadEstimate:
+    """Spatial work and field-movie storage estimate for one configuration."""
+
+    effective_dx_mm: float
+    effective_dz_mm: float
+    spatial_pairs: int
+    record_samples: int
+    field_movie_bytes: int
 
 
 def picmus_point_targets() -> tuple[np.ndarray, np.ndarray]:
@@ -141,13 +150,6 @@ def spacing_in_mm(value: float, wavelength: float, *, wavelength_units: bool) ->
     return value * wavelength if wavelength_units else value
 
 
-def probe_with_center_frequency(params: TransducerParams, center_frequency_mhz: float) -> TransducerParams:
-    """Override frequency while preserving a preset's geometry and bandwidth."""
-    if not 1.0 <= center_frequency_mhz <= 15.0:
-        raise ValueError("Center frequency must be between 1 and 15 MHz")
-    return params.model_copy(update={"freq_center": center_frequency_mhz * 1e6})
-
-
 def grid_from_spacing(
     x_limits_mm: tuple[float, float],
     z_limits_mm: tuple[float, float],
@@ -227,6 +229,49 @@ def estimate_spatial_pairs(grid_shape: tuple[int, int], n_scatterers: int) -> in
         raise ValueError("Scatterer count must be non-negative")
     nz, nx = grid_shape
     return nz * nx * n_scatterers
+
+
+def estimate_simulation_workload(
+    *,
+    grid_shape: tuple[int, int],
+    x_limits_mm: tuple[float, float],
+    z_limits_mm: tuple[float, float],
+    scatterers_mm: np.ndarray,
+    n_scatterers: int,
+    propagation_speed: float,
+    center_frequency_mhz: float,
+    pulse_wavelengths: float,
+    time_oversampling: int,
+) -> WorkloadEstimate:
+    """Estimate sample count and storage from physical extents and pulse duration."""
+    nx, nz = grid_shape
+    if nx < 2 or nz < 2:
+        raise ValueError("Grid dimensions must each contain at least two samples")
+    if propagation_speed <= 0.0 or center_frequency_mhz <= 0.0:
+        raise ValueError("Sound speed and center frequency must be positive")
+
+    scatterers = np.asarray(scatterers_mm, dtype=float).reshape((-1, 2))
+    lateral_values = [abs(x_limits_mm[0]), abs(x_limits_mm[1])]
+    axial_values = [abs(z_limits_mm[0]), abs(z_limits_mm[1])]
+    if scatterers.size:
+        lateral_values.extend(np.abs(scatterers[:, 0]).tolist())
+        axial_values.extend(np.abs(scatterers[:, 1]).tolist())
+    maximum_range_mm = float(np.hypot(max(lateral_values), max(axial_values)))
+    record_seconds = 2.0 * maximum_range_mm * 1e-3 / propagation_speed + pulse_wavelengths / (
+        center_frequency_mhz * 1e6
+    )
+    record_samples = max(1, int(np.ceil(4.0 * center_frequency_mhz * 1e6 * record_seconds)))
+    return WorkloadEstimate(
+        effective_dx_mm=(x_limits_mm[1] - x_limits_mm[0]) / (nx - 1),
+        effective_dz_mm=(z_limits_mm[1] - z_limits_mm[0]) / (nz - 1),
+        spatial_pairs=estimate_spatial_pairs((nz, nx), n_scatterers),
+        record_samples=record_samples,
+        field_movie_bytes=estimate_field_movie_bytes(
+            (nz, nx),
+            record_samples,
+            temporal_oversampling=time_oversampling,
+        ),
+    )
 
 
 def append_drawn_points(

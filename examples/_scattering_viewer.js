@@ -126,7 +126,7 @@ function render({ model, el }) {
     const scattered = floatArray(model.get("scattered"));
     const rms = floatArray(model.get("incident_rms"));
     const component = model.get("component");
-    const phaseRange = Math.max(1, model.get("phase_dynamic_range"));
+    const waveformRange = Math.max(1, model.get("waveform_dynamic_range"));
     const opacity = model.get("rms_visible") ? 0.5 : 0;
     const range = Math.max(1, model.get("rms_dynamic_range"));
     const times = model.get("field_times");
@@ -156,7 +156,7 @@ function render({ model, el }) {
         const rmsDb = 20 * Math.log10(Math.max(rms[spatial], 1e-12));
         const rmsAmount = Math.max(0, Math.min(1, (rmsDb + range) / range));
         let color = blend([255, 255, 255], [94, 218, 232], opacity * rmsAmount);
-        color = blend(color, phaseColor(value), dbVisibility(rawValue, phaseRange));
+        color = blend(color, phaseColor(value), dbVisibility(rawValue, waveformRange));
         const pixel = spatial * 4;
         image.data[pixel] = color[0];
         image.data[pixel + 1] = color[1];
@@ -203,7 +203,7 @@ function render({ model, el }) {
     });
     componentLabel.textContent = `${component} field`;
     timeLabel.textContent = ` · ${(times[timeIndex] * 1e6).toFixed(1)} µs`;
-    fieldCaption.textContent = `${phaseRange.toFixed(0)} dB range · relative to peak incident pressure`;
+    fieldCaption.textContent = `${waveformRange.toFixed(0)} dB range · relative to peak incident pressure`;
     reflectivityLabel.textContent = `relative reflectivity 0–${reflectivityReference.toPrecision(2)}`;
   }
 
@@ -229,14 +229,14 @@ function render({ model, el }) {
     const plotHeight = Math.max(72, Math.min(280, physicalHeight));
     const canvasHeight = margins[1] + plotHeight + margins[3];
     const { context, width } = setupCanvas(receiveCanvas, canvasHeight);
-    const phaseRange = Math.max(1, model.get("phase_dynamic_range"));
+    const waveformRange = Math.max(1, model.get("waveform_dynamic_range"));
     const image = new ImageData(nTimes, nChannels);
     for (let time = 0; time < nTimes; time += 1) {
       for (let channel = 0; channel < nChannels; channel += 1) {
         const source = time * nChannels + channel;
         const rawValue = receive[source];
         const value = Math.max(-1, Math.min(1, rawValue));
-        const color = blend([255, 255, 255], phaseColor(value), dbVisibility(rawValue, phaseRange));
+        const color = blend([255, 255, 255], phaseColor(value), dbVisibility(rawValue, waveformRange));
         const pixel = (channel * nTimes + time) * 4;
         image.data[pixel] = color[0];
         image.data[pixel + 1] = color[1];
@@ -276,7 +276,7 @@ function render({ model, el }) {
     context.moveTo(cursorX, margins[1]);
     context.lineTo(cursorX, margins[1] + plotHeight);
     context.stroke();
-    receiveCaption.textContent = `${phaseRange.toFixed(0)} dB range · relative to peak receive RF`;
+    receiveCaption.textContent = `${waveformRange.toFixed(0)} dB range · relative to peak receive RF`;
   }
 
   function drawAll() {
@@ -322,7 +322,7 @@ function render({ model, el }) {
   const traits = [
     "incident", "scattered", "incident_rms", "receive", "field_shape", "receive_shape",
     "field_times", "receive_times", "extent", "elements", "scatterers", "coefficients",
-    "focus", "component", "rms_visible", "rms_dynamic_range", "phase_dynamic_range", "propagation_speed", "time_index",
+    "focus", "component", "rms_visible", "rms_dynamic_range", "waveform_dynamic_range", "propagation_speed", "time_index",
   ];
   traits.forEach((name) => model.on(`change:${name}`, drawAll));
   const observer = new ResizeObserver(drawAll);
