@@ -10,16 +10,13 @@ Correctness tests live in: tests/backend/test_jax.py, tests/backend/test_mlx.py
 
 from __future__ import annotations
 
-import contextlib
-from types import ModuleType
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
-from array_api_compat import is_jax_namespace
 
+from fast_simus import jit
 from fast_simus.pfield import pfield_compute, pfield_precompute
 from fast_simus.transducer_presets import P4_2v
-from fast_simus.utils._array_api import is_mlx_namespace
 
 from ._bench_sync import sync_benchmark_array
 
@@ -27,14 +24,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from fast_simus.utils._array_api import Array, _ArrayNamespace
-
-_eqx = None
-with contextlib.suppress(ImportError):
-    import equinox as _eqx
-
-_mx = None
-with contextlib.suppress(ImportError):
-    import mlx.core as _mx
 
 
 def _make_positions(grid_length: int, xp: _ArrayNamespace) -> Array:
@@ -48,15 +37,7 @@ def _make_positions(grid_length: int, xp: _ArrayNamespace) -> Array:
 
 def _make_compute(plan, params, xp: _ArrayNamespace) -> Callable:
     """Return a (positions, delays) -> result callable with backend-specific JIT."""
-    if is_jax_namespace(cast(ModuleType, xp)):
-        assert _eqx is not None
-        compute_kernel = _eqx.filter_jit(pfield_compute)
-    elif _mx is not None and is_mlx_namespace(xp):
-        return _mx.compile(lambda pos, dl: pfield_compute(pos, dl, plan, params))
-    else:
-        compute_kernel = pfield_compute
-
-    return lambda pos, dl: compute_kernel(pos, dl, plan, params)
+    return jit(lambda pos, dl: pfield_compute(pos, dl, plan, params), xp=xp)
 
 
 @pytest.mark.benchmark(
