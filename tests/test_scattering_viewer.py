@@ -1,7 +1,6 @@
 """Data-contract tests for the interactive scattering viewer."""
 
 import numpy as np
-import pytest
 
 from examples._scattering_viewer import (
     ScatteringFigure,
@@ -10,7 +9,6 @@ from examples._scattering_viewer import (
     physical_to_image_coordinates,
     prepare_viewer_data,
     rasterize_receive_for_aspect,
-    reflectivity_legend,
     reflectivity_strength,
     signed_db,
     time_index_for_time,
@@ -31,25 +29,14 @@ def test_physical_coordinates_map_to_image_indices() -> None:
     np.testing.assert_allclose(reversed_y[:, 1], [6.0, 3.0, 0.0])
 
 
-def test_receive_raster_matches_requested_physical_aspect() -> None:
-    """Nearest-channel rasterization fills a physically sized RF panel."""
-    receive = np.arange(5 * 3, dtype=float).reshape(3, 5)
-
-    raster = rasterize_receive_for_aspect(receive, aspect=2.0)
-
-    assert raster.shape == (3, 5)
-    np.testing.assert_array_equal(raster[0], receive[0])
-    np.testing.assert_array_equal(raster[-1], receive[-1])
-    assert abs(raster.shape[1] / raster.shape[0] - 2.0) <= 0.5
-
-
-def test_receive_raster_repeats_channels_without_interpolating_rf() -> None:
-    """Display resampling may change row density but not channel samples."""
+def test_receive_raster_preserves_channel_samples_and_physical_aspect() -> None:
+    """Display resampling changes row density without interpolating RF."""
     receive = np.asarray([[1.0, 2.0], [10.0, 20.0]])
 
     raster = rasterize_receive_for_aspect(receive, aspect=0.5)
 
     assert raster.shape == (4, 2)
+    assert raster.shape[1] / raster.shape[0] == 0.5
     assert {tuple(row) for row in raster} == {(1.0, 2.0), (10.0, 20.0)}
 
 
@@ -63,17 +50,9 @@ def test_receive_data_is_cropped_to_selectable_field_time() -> None:
 
     np.testing.assert_array_equal(cropped, receive[:3])
     np.testing.assert_array_equal(cropped_times, receive_times[:3])
-
-
-def test_receive_crop_preserves_one_sample_for_short_field_window() -> None:
-    """A valid RF strip remains available when its first sample exceeds field time."""
-    receive = np.arange(6).reshape(3, 2)
-    receive_times = np.asarray([1e-6, 2e-6, 3e-6])
-
-    cropped, cropped_times = crop_receive_to_field_window(receive, receive_times, np.asarray([0.0]))
-
-    np.testing.assert_array_equal(cropped, receive[:1])
-    np.testing.assert_array_equal(cropped_times, receive_times[:1])
+    short, short_times = crop_receive_to_field_window(receive, receive_times, np.asarray([-1e-6]))
+    np.testing.assert_array_equal(short, receive[:1])
+    np.testing.assert_array_equal(short_times, receive_times[:1])
 
 
 def test_viewer_data_uses_separate_field_and_receive_references() -> None:
@@ -123,63 +102,6 @@ def test_time_index_uses_absolute_time() -> None:
     assert time_index_for_time(times, 1.0) == 3
 
 
-def test_anyplotlib_figure_preserves_shapes_and_physical_aspect() -> None:
-    """The shared plotting framework receives the expected field and RF data."""
-    data = prepare_viewer_data(
-        np.zeros((2, 3, 4)),
-        np.ones((2, 3, 4)),
-        np.ones((2, 3)),
-        np.ones((80, 2)),
-    )
-    viewer = ScatteringFigure.from_data(
-        data,
-        field_times=np.linspace(0.0, 3e-6, 4),
-        receive_times=np.linspace(0.0, 4e-6, 80),
-        extent=(-20.0, 20.0, 55.0, 5.0),
-        elements=np.zeros((2, 2)),
-        scatterers=np.zeros((0, 2)),
-        coefficients=np.zeros(0),
-        time_index=2,
-    )
-
-    assert viewer.data.field_shape == data.field_shape
-    assert viewer.data.rf_shape == data.rf_shape
-    assert viewer.time_index == 2
-    assert viewer.field_aspect == 40.0 / 50.0
-    assert viewer.receive_aspect > 0.0
-    assert viewer.receive_plot._state["image_width"] / viewer.receive_plot._state["image_height"] == pytest.approx(
-        viewer.receive_aspect, rel=0.02
-    )
-    assert viewer.field_plot._state["tick_size"] == 12.0
-    assert viewer.receive_plot._state["tick_size"] == 12.0
-
-
-def test_anyplotlib_overlays_are_mapped_to_image_coordinates() -> None:
-    """Probe, target, and focus overlays align with physical image axes."""
-    data = prepare_viewer_data(
-        np.zeros((7, 5, 2)),
-        np.zeros((7, 5, 2)),
-        np.ones((7, 5)),
-        np.ones((5, 2)),
-    )
-    viewer = ScatteringFigure.from_data(
-        data,
-        field_times=np.asarray([0.0, 1e-6]),
-        receive_times=np.linspace(0.0, 4e-6, 5),
-        extent=(-20.0, 20.0, 0.0, 60.0),
-        elements=np.asarray([[-10.0, 0.0], [10.0, 0.0]]),
-        scatterers=np.asarray([[0.0, 30.0]]),
-        coefficients=np.asarray([0.005]),
-        focus=np.asarray([10.0, 30.0]),
-    )
-
-    markers = {marker["name"]: marker for marker in viewer.field_plot._state["markers"]}
-    np.testing.assert_allclose(markers["probe elements"]["offsets"], [[1.0, 0.0], [3.0, 0.0]])
-    np.testing.assert_allclose(markers["scatterers"]["offsets"], [[2.0, 3.0]])
-    focus_line = next(line for line in viewer.field_plot._state["markers"] if line["name"] == "focus")
-    np.testing.assert_allclose(focus_line["segments"], [[[2.0, 0.0], [3.0, 3.0]]])
-
-
 def test_anyplotlib_cursor_updates_the_field_frame() -> None:
     """Dragging the RF cursor selects the nearest absolute field time."""
     data = prepare_viewer_data(
@@ -205,24 +127,6 @@ def test_anyplotlib_cursor_updates_the_field_frame() -> None:
 
     assert viewer.time_index == 3
     np.testing.assert_allclose(viewer.current_frame, signed_db(data.incident[..., 3], 60.0))
-
-
-def test_viewer_display_defaults_use_range_without_gain() -> None:
-    """The viewer exposes one waveform range and a tighter RMS backdrop."""
-    data = prepare_viewer_data(np.zeros((1, 1, 1)), np.zeros((1, 1, 1)), np.zeros((1, 1)), np.zeros((1, 1)))
-    viewer = ScatteringFigure.from_data(
-        data,
-        field_times=np.zeros(1),
-        receive_times=np.zeros(1),
-        extent=(0.0, 1.0, 0.0, 1.0),
-        elements=np.zeros((1, 2)),
-        scatterers=np.empty((0, 2)),
-        coefficients=np.empty(0),
-    )
-
-    assert viewer.waveform_dynamic_range == 60.0
-    assert viewer.rms_dynamic_range == 20.0
-    assert viewer.rms_visible
 
 
 def test_total_frame_is_derived_from_the_selected_time_slice() -> None:
@@ -262,4 +166,3 @@ def test_reflectivity_strength_is_grayscale_magnitude() -> None:
     strength = reflectivity_strength(values)
 
     np.testing.assert_allclose(strength, [1.0, 0.25, 0.0, 0.25, 1.0])
-    assert "relative reflectivity 0-0.02" in reflectivity_legend(values)

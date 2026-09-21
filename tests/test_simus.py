@@ -5,6 +5,7 @@ Tests are structured as invariants that must hold at every refactoring step.
 """
 
 from importlib import import_module
+from pathlib import Path
 from typing import NamedTuple, cast
 
 import array_api_strict
@@ -515,61 +516,9 @@ class TestSimusMetal:
         import subprocess
         import sys
 
-        source = """
-import numpy as np
-import mlx.core as mx
-from fast_simus import (
-    MediumParams,
-    SimusStrategy,
-    element_positions,
-    focused,
-    rms_from_spectrum,
-    scattering_pfield_spectrum,
-    simus,
-    spectrum_to_wavefield,
-)
-from fast_simus.transducer_presets import P4_2v
-
-params = P4_2v()
-medium = MediumParams(attenuation=0.5)
-elements, _, apex = element_positions(params.n_elements, params.pitch, params.radius, mx)
-delays = focused(elements, mx.array([0.0, 0.03]), speed_of_sound=1540.0, radius=params.radius, apex_offset=apex)
-x_axis = mx.linspace(-0.02, 0.02, 12)
-z_axis = mx.linspace(0.0, 0.055, 16)
-x_grid, z_grid = mx.meshgrid(x_axis, z_axis)
-positions = mx.stack([x_grid, z_grid], axis=-1)
-scatterers = mx.array([[0.0, 0.03]])
-coefficients = mx.array([0.005])
-apodization = mx.ones(params.n_elements)
-spectrum = scattering_pfield_spectrum(
-    positions,
-    scatterers,
-    coefficients,
-    delays,
-    params,
-    medium,
-    tx_apodization=apodization,
-    frequency_step=2.0,
-)
-np.asarray(spectrum_to_wavefield(spectrum.incident, spectrum.info).frames)
-np.asarray(rms_from_spectrum(spectrum.incident, spectrum.info))
-result = simus(
-    scatterers,
-    coefficients,
-    delays,
-    params,
-    medium,
-    fs=4.0 * params.freq_center,
-    tx_apodization=apodization,
-    frequency_step=0.5,
-    strategy=SimusStrategy.METAL,
-)
-rf = np.asarray(result.rf)
-assert np.all(np.isfinite(rf))
-assert np.max(np.abs(rf)) > 0.0
-"""
+        scenario = Path(__file__).with_name("_metal_cold_start.py")
         completed = subprocess.run(  # noqa: S603
-            [sys.executable, "-c", source], check=False, capture_output=True, text=True
+            [sys.executable, str(scenario)], check=False, capture_output=True, text=True
         )
 
         assert completed.returncode == 0, completed.stderr

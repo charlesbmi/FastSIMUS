@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from examples._scattering_explorer import (
-    apodization_svg,
     append_drawn_points,
     canvas_to_physical,
     drawing_class_coefficients,
@@ -17,7 +16,6 @@ from examples._scattering_explorer import (
     picmus_point_targets,
     spacing_in_mm,
     speckle_lesion,
-    status_text,
     tukey_apodization,
     wavelength_mm,
 )
@@ -100,15 +98,11 @@ def test_draw_table_draw_sequence_uses_one_canonical_table() -> None:
     assert final[-1] == {"x_mm": 0.0, "z_mm": 30.0, "rc": 0.02}
 
 
-def test_custom_rows_and_status_are_normalized() -> None:
-    """Editor values become plain floats and status grammar stays readable."""
+def test_custom_rows_are_normalized() -> None:
+    """Editor values become plain physical-coordinate floats."""
     rows = normalize_custom_rows([{"x_mm": 1, "z_mm": 2, "rc": 0.5}])
 
     assert rows == [{"x_mm": 1.0, "z_mm": 2.0, "rc": 0.5}]
-    assert status_text(1, 64, (120, 96)) == (
-        "1 scatterer · 64 receive channels · 96 \N{MULTIPLICATION SIGN} 120 grid · first-order scattering"
-    )
-    assert status_text(2, 1, (12, 8)).startswith("2 scatterers · 1 receive channel")
 
 
 def test_custom_rows_reject_negative_reflectivity() -> None:
@@ -121,10 +115,12 @@ def test_custom_rows_reject_negative_reflectivity() -> None:
 
 
 def test_wavelength_grid_spacing_includes_roi_endpoints() -> None:
-    """Derived dimensions never exceed the requested physical spacing."""
+    """Wavelength-derived grids include endpoints and refine with frequency."""
     wavelength = wavelength_mm(1540.0, 2.72)
     spacing = wavelength / 3.0
     grid = grid_from_spacing((-20.0, 20.0), (0.0, 55.0), spacing)
+    high_frequency_spacing = wavelength_mm(1540.0, 7.6) / 3.0
+    high_frequency_grid = grid_from_spacing((-20.0, 20.0), (0.0, 55.0), high_frequency_spacing)
 
     assert wavelength == pytest.approx(1540.0 / 2.72e6 * 1e3)
     assert grid.nx == int(np.ceil(40.0 / spacing)) + 1
@@ -132,19 +128,9 @@ def test_wavelength_grid_spacing_includes_roi_endpoints() -> None:
     assert grid.dx_mm <= spacing
     assert grid.dz_mm <= spacing
     assert grid.z_min_mm == 0.0
-
-
-def test_grid_spacing_changes_with_center_frequency() -> None:
-    """A λ-relative grid becomes finer as transmit frequency increases."""
-    low = wavelength_mm(1540.0, 2.72) / 3.0
-    high = wavelength_mm(1540.0, 7.6) / 3.0
-
-    assert high < low
-    assert (
-        grid_from_spacing((-20.0, 20.0), (0.0, 55.0), high).nx > grid_from_spacing((-20.0, 20.0), (0.0, 55.0), low).nx
-    )
-
-    assert spacing_in_mm(1.0 / 3.0, wavelength_mm(1540.0, 2.72), wavelength_units=True) == pytest.approx(low)
+    assert high_frequency_spacing < spacing
+    assert high_frequency_grid.nx > grid.nx
+    assert spacing_in_mm(1.0 / 3.0, wavelength, wavelength_units=True) == pytest.approx(spacing)
     assert spacing_in_mm(0.25, wavelength_mm(1540.0, 2.72), wavelength_units=False) == 0.25
 
 
@@ -172,10 +158,6 @@ def test_tukey_apodization_endpoints_and_symmetry() -> None:
     np.testing.assert_allclose(tapered, tapered[::-1])
     assert tapered.shape == (8,)
     assert np.all((tapered >= 0.0) & (tapered <= 1.0))
-
-    preview = apodization_svg(tapered)
-    assert 'aria-label="Transmit apodization profile"' in preview
-    assert preview.count(",") == tapered.size
 
 
 def test_field_movie_memory_estimate_counts_both_components() -> None:

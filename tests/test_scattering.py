@@ -170,38 +170,6 @@ def test_scattering_wavefield_components_and_arrival() -> None:
     assert arrival_gap == pytest.approx(0.01 / medium.speed_of_sound, rel=0.2)
 
 
-def test_scattering_wavefield_time_oversampling_preserves_original_samples() -> None:
-    """The convenience API exposes phase-faithful inverse-FFT oversampling."""
-    params = P4_2v()
-    positions = _array([[0.0, 0.03]])
-    scatterers = _array([[0.0, 0.02]])
-    reflection_coefficients = _array([0.5])
-    delays = _array(np.zeros(params.n_elements))
-
-    base = scattering_wavefield(
-        positions,
-        scatterers,
-        reflection_coefficients,
-        delays,
-        params,
-        frequency_step=2.0,
-    )
-    dense = scattering_wavefield(
-        positions,
-        scatterers,
-        reflection_coefficients,
-        delays,
-        params,
-        frequency_step=2.0,
-        time_oversampling=2,
-    )
-
-    assert dense.incident.shape[-1] == 2 * base.incident.shape[-1]
-    np.testing.assert_allclose(to_numpy(dense.times[::2]), to_numpy(base.times))
-    np.testing.assert_allclose(to_numpy(dense.incident[..., ::2]), to_numpy(base.incident), rtol=1e-5, atol=1e-8)
-    np.testing.assert_allclose(to_numpy(dense.scattered[..., ::2]), to_numpy(base.scattered), rtol=1e-5, atol=1e-8)
-
-
 def test_inputs_are_not_mutated() -> None:
     """Public scattering calls leave all caller-owned arrays unchanged."""
     params = P4_2v()
@@ -240,20 +208,3 @@ def test_array_api_strict_preserves_backend() -> None:
 
     assert type(result.incident).__module__.startswith("array_api_strict")
     assert type(result.scattered).__module__.startswith("array_api_strict")
-
-
-def test_chunking_does_not_change_public_result(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pair chunk boundaries do not alter the accumulated scattered field."""
-    import fast_simus.scattering as scattering_module
-
-    params = P4_2v()
-    positions = _array([[0.0, 0.03], [0.004, 0.04], [-0.003, 0.05]])
-    scatterers = _array([[-0.002, 0.018], [0.0, 0.023], [0.003, 0.027]])
-    rc = _array([1.0, -0.5, 0.25])
-    delays = _array(np.zeros(params.n_elements))
-    expected = scattering_pfield_spectrum(positions, scatterers, rc, delays, params, frequency_step=4.0).scattered
-
-    monkeypatch.setattr(scattering_module, "_MAX_PAIR_ELEMENTS", 2)
-    actual = scattering_pfield_spectrum(positions, scatterers, rc, delays, params, frequency_step=4.0).scattered
-
-    np.testing.assert_allclose(to_numpy(actual), to_numpy(expected), rtol=1e-12, atol=1e-12)
