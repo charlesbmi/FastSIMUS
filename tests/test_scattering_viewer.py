@@ -1,17 +1,56 @@
 """Data-contract tests for the interactive scattering viewer."""
 
 import numpy as np
+import pytest
 
 from examples._scattering_viewer import (
     ScatteringFigure,
     crop_receive_to_field_window,
     db_visibility,
+    physical_to_image_coordinates,
     prepare_viewer_data,
+    rasterize_receive_for_aspect,
     reflectivity_legend,
     reflectivity_strength,
     signed_db,
     time_index_for_time,
 )
+
+
+def test_physical_coordinates_map_to_image_indices() -> None:
+    """Anyplotlib image overlays use raster indices, not physical axis values."""
+    x_axis = np.linspace(-20.0, 20.0, 5)
+    z_axis = np.linspace(0.0, 60.0, 7)
+    points = np.asarray([[-20.0, 0.0], [0.0, 30.0], [20.0, 60.0]])
+
+    mapped = physical_to_image_coordinates(points, x_axis, z_axis)
+
+    np.testing.assert_allclose(mapped, [[0.0, 0.0], [2.0, 3.0], [4.0, 6.0]])
+
+    reversed_y = physical_to_image_coordinates(points, x_axis, z_axis[::-1])
+    np.testing.assert_allclose(reversed_y[:, 1], [6.0, 3.0, 0.0])
+
+
+def test_receive_raster_matches_requested_physical_aspect() -> None:
+    """Nearest-channel rasterization fills a physically sized RF panel."""
+    receive = np.arange(5 * 3, dtype=float).reshape(3, 5)
+
+    raster = rasterize_receive_for_aspect(receive, aspect=2.0)
+
+    assert raster.shape == (3, 5)
+    np.testing.assert_array_equal(raster[0], receive[0])
+    np.testing.assert_array_equal(raster[-1], receive[-1])
+    assert abs(raster.shape[1] / raster.shape[0] - 2.0) <= 0.5
+
+
+def test_receive_raster_repeats_channels_without_interpolating_rf() -> None:
+    """Display resampling may change row density but not channel samples."""
+    receive = np.asarray([[1.0, 2.0], [10.0, 20.0]])
+
+    raster = rasterize_receive_for_aspect(receive, aspect=0.5)
+
+    assert raster.shape == (4, 2)
+    assert {tuple(row) for row in raster} == {(1.0, 2.0), (10.0, 20.0)}
 
 
 def test_receive_data_is_cropped_to_selectable_field_time() -> None:
@@ -90,12 +129,12 @@ def test_anyplotlib_figure_preserves_shapes_and_physical_aspect() -> None:
         np.zeros((2, 3, 4)),
         np.ones((2, 3, 4)),
         np.ones((2, 3)),
-        np.ones((5, 2)),
+        np.ones((80, 2)),
     )
     viewer = ScatteringFigure.from_data(
         data,
         field_times=np.linspace(0.0, 3e-6, 4),
-        receive_times=np.linspace(0.0, 4e-6, 5),
+        receive_times=np.linspace(0.0, 4e-6, 80),
         extent=(-20.0, 20.0, 55.0, 5.0),
         elements=np.zeros((2, 2)),
         scatterers=np.zeros((0, 2)),
@@ -108,6 +147,37 @@ def test_anyplotlib_figure_preserves_shapes_and_physical_aspect() -> None:
     assert viewer.time_index == 2
     assert viewer.field_aspect == 40.0 / 50.0
     assert viewer.receive_aspect > 0.0
+    assert viewer.receive_plot._state["image_width"] / viewer.receive_plot._state["image_height"] == pytest.approx(
+        viewer.receive_aspect, rel=0.02
+    )
+    assert viewer.field_plot._state["tick_size"] == 12.0
+    assert viewer.receive_plot._state["tick_size"] == 12.0
+
+
+def test_anyplotlib_overlays_are_mapped_to_image_coordinates() -> None:
+    """Probe, target, and focus overlays align with physical image axes."""
+    data = prepare_viewer_data(
+        np.zeros((7, 5, 2)),
+        np.zeros((7, 5, 2)),
+        np.ones((7, 5)),
+        np.ones((5, 2)),
+    )
+    viewer = ScatteringFigure.from_data(
+        data,
+        field_times=np.asarray([0.0, 1e-6]),
+        receive_times=np.linspace(0.0, 4e-6, 5),
+        extent=(-20.0, 20.0, 0.0, 60.0),
+        elements=np.asarray([[-10.0, 0.0], [10.0, 0.0]]),
+        scatterers=np.asarray([[0.0, 30.0]]),
+        coefficients=np.asarray([0.005]),
+        focus=np.asarray([0.0, 30.0]),
+    )
+
+    markers = {marker["name"]: marker for marker in viewer.field_plot._state["markers"]}
+    np.testing.assert_allclose(markers["probe elements"]["offsets"], [[1.0, 0.0], [3.0, 0.0]])
+    np.testing.assert_allclose(markers["scatterers"]["offsets"], [[2.0, 3.0]])
+    focus_line = next(line for line in viewer.field_plot._state["markers"] if line["name"] == "focus")
+    np.testing.assert_allclose(focus_line["segments"], [[[2.0, 0.0], [2.0, 3.0]]])
 
 
 def test_anyplotlib_cursor_updates_the_field_frame() -> None:

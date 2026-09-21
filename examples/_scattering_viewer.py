@@ -96,6 +96,46 @@ def time_index_for_time(times: np.ndarray, time: float) -> int:
     return int(np.argmin(np.abs(times - time)))
 
 
+def physical_to_image_coordinates(
+    points: np.ndarray,
+    x_axis: np.ndarray,
+    y_axis: np.ndarray,
+) -> np.ndarray:
+    """Map physical overlay coordinates to Anyplotlib image indices."""
+    points = np.asarray(points, dtype=float)
+    x_axis = np.asarray(x_axis, dtype=float)
+    y_axis = np.asarray(y_axis, dtype=float)
+    if points.ndim != 2 or points.shape[1] != 2:
+        raise ValueError("Points must have shape (n, 2)")
+    if x_axis.ndim != 1 or y_axis.ndim != 1 or x_axis.size == 0 or y_axis.size == 0:
+        raise ValueError("Image axes must be nonempty one-dimensional arrays")
+
+    def axis_indices(values: np.ndarray, axis: np.ndarray) -> np.ndarray:
+        indices = np.arange(axis.size, dtype=float)
+        if axis.size > 1 and axis[-1] < axis[0]:
+            return np.interp(values, axis[::-1], indices[::-1])
+        return np.interp(values, axis, indices)
+
+    x_indices = axis_indices(points[:, 0], x_axis)
+    y_indices = axis_indices(points[:, 1], y_axis)
+    return np.column_stack((x_indices, y_indices))
+
+
+def rasterize_receive_for_aspect(receive: np.ndarray, *, aspect: float) -> np.ndarray:
+    """Repeat whole RF channel rows to match a physical display aspect."""
+    receive = np.asarray(receive)
+    if receive.ndim != 2:
+        raise ValueError("Receive display data must have shape (channels, times)")
+    if aspect <= 0.0:
+        raise ValueError("Receive display aspect must be positive")
+    n_channels, n_times = receive.shape
+    if n_channels == 0 or n_times == 0:
+        return receive.copy()
+    display_channels = max(1, int(np.ceil(n_times / aspect)))
+    indices = np.rint(np.linspace(0, n_channels - 1, display_channels)).astype(int)
+    return receive[indices].copy()
+
+
 def db_visibility(values: np.ndarray, *, dynamic_range_db: float) -> np.ndarray:
     """Map normalized amplitudes to visibility over a relative-dB range."""
     if dynamic_range_db <= 0.0:
@@ -124,7 +164,7 @@ def reflectivity_legend(coefficients: np.ndarray) -> str:
     reference = float(np.max(values)) if values.size else 0.0
     return (
         '<div style="display:flex;justify-content:flex-end;align-items:center;gap:.45rem;'
-        'color:#64748b;font:10px ui-sans-serif,system-ui">'
+        'color:#64748b;font:12px ui-sans-serif,system-ui">'
         '<span style="width:5rem;height:4px;border-radius:99px;'
         'background:linear-gradient(90deg,#f5f5f5,#191919)"></span>'
         f"<span>relative reflectivity 0-{reference:.2g}</span></div>"
@@ -223,6 +263,8 @@ class ScatteringFigure:
         )
         x_axis = np.linspace(x_min, x_max, data.field_shape[1])
         z_axis = np.linspace(z_min, z_max, data.field_shape[0])
+        element_pixels = physical_to_image_coordinates(elements, x_axis, z_axis)
+        scatterer_pixels = physical_to_image_coordinates(scatterers, x_axis, z_axis)
         initial_frame = signed_db(_component_frame(data, "Total", time_index), 60.0)
         field_plot = axes[0].imshow(
             initial_frame,
@@ -235,10 +277,11 @@ class ScatteringFigure:
             tile=False,
         )
         field_plot.set_aspect(field_aspect)
-        field_plot.set_xlabel("lateral position (mm)")
-        field_plot.set_ylabel("depth (mm)")
+        field_plot.set_tick_label_size(12.0)
+        field_plot.set_xlabel("lateral position (mm)", fontsize=12.0)
+        field_plot.set_ylabel("depth (mm)", fontsize=12.0)
         field_plot.set_colorbar_visible(True)
-        field_plot.set_colorbar_label("relative pressure (dB)")
+        field_plot.set_colorbar_label("relative pressure (dB)", fontsize=11.0)
         rms_layer = field_plot.add_layer(
             db_visibility(data.incident_rms, dynamic_range_db=20.0),
             tint="#5edae8",
@@ -246,7 +289,7 @@ class ScatteringFigure:
             clim=(0.0, 1.0),
         )
         field_plot.add_points(
-            elements,
+            element_pixels,
             name="probe elements",
             sizes=3.0,
             color="#1d4ed8",
@@ -258,7 +301,7 @@ class ScatteringFigure:
         )
         if scatterers.shape[0]:
             field_plot.add_points(
-                scatterers,
+                scatterer_pixels,
                 name="scatterers",
                 sizes=4.0,
                 color="#ffffff",
@@ -269,21 +312,26 @@ class ScatteringFigure:
             )
         if focus is not None:
             focus_point = np.asarray(focus, dtype=float)
+            focus_pixels = physical_to_image_coordinates(
+                np.asarray([[focus_point[0], min(0.0, z_min)], focus_point]),
+                x_axis,
+                z_axis,
+            )
             field_plot.add_lines(
-                np.asarray([[[focus_point[0], min(0.0, z_min)], focus_point]]),
+                focus_pixels[None, ...],
                 name="focus",
                 edgecolors="#db2777",
                 linewidths=1.5,
                 clip_display=False,
             )
 
-        receive_db = signed_db(data.receive.T, 60.0)
+        receive_db = rasterize_receive_for_aspect(signed_db(data.receive.T, 60.0), aspect=receive_aspect)
         receive_axis_us = receive_times * 1e6
-        channel_axis = np.arange(data.rf_shape[1], dtype=float)
+        channel_axis = np.linspace(0.0, max(data.rf_shape[1] - 1, 0), receive_db.shape[0])
         receive_plot = axes[1].imshow(
             receive_db,
             axes=[receive_axis_us, channel_axis],
-            units="",
+            units=" ",
             cmap="bwr",
             vmin=-60.0,
             vmax=60.0,
@@ -291,10 +339,11 @@ class ScatteringFigure:
             tile=False,
         )
         receive_plot.set_aspect(receive_aspect)
-        receive_plot.set_xlabel("time (µs)")
-        receive_plot.set_ylabel("receive element")
+        receive_plot.set_tick_label_size(12.0)
+        receive_plot.set_xlabel("time (µs)", fontsize=12.0)
+        receive_plot.set_ylabel("receive element", fontsize=12.0)
         receive_plot.set_colorbar_visible(True)
-        receive_plot.set_colorbar_label("relative receive RF (dB)")
+        receive_plot.set_colorbar_label("relative receive RF (dB)", fontsize=11.0)
         receive_index = int(np.argmin(np.abs(receive_times - field_times[time_index]))) if receive_times.size else 0
         cursor = receive_plot.add_vline_widget(x=float(receive_index), color="#db2777", linewidth=2.0)
         cursor.set(_notify=False, snap_values=list(range(receive_times.size)))
@@ -333,7 +382,7 @@ class ScatteringFigure:
                 tile=False,
             )
             time_us = self.field_times[self.time_index] * 1e6 if self.field_times.size else 0.0
-            self.field_plot.set_title(f"{self.component} field · {time_us:.1f} µs")
+            self.field_plot.set_title(f"{self.component} field · {time_us:.1f} µs", fontsize=13.0)
 
     def _cursor_moved(self, _event: apl.Event) -> None:
         if not self.receive_times.size:
@@ -370,7 +419,10 @@ class ScatteringFigure:
             self.rms_layer.set_data(db_visibility(self.data.incident_rms, dynamic_range_db=self.rms_dynamic_range))
             self.rms_layer.set(visible=self.rms_visible)
             self.receive_plot.set_data(
-                signed_db(self.data.receive.T, self.waveform_dynamic_range),
+                rasterize_receive_for_aspect(
+                    signed_db(self.data.receive.T, self.waveform_dynamic_range),
+                    aspect=self.receive_aspect,
+                ),
                 clim=(-self.waveform_dynamic_range, self.waveform_dynamic_range),
                 tile=False,
             )
