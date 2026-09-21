@@ -68,7 +68,7 @@ def _simus_freq_step_body(
 
     # RX: contract over scatterers -> spectrum per element
     # (rc * p_k)^T @ rp_mono = sum_i(rc_i * p_k_i * rp_mono[i, e])
-    spect_k = _scatter_and_sum(p_k, rc, rp_mono, xp)
+    spect_k = _scatter_and_sum(p_k, rc, rp_mono)
     spect_k = probe_k * spect_k
 
     phase = phase * phase_step
@@ -184,7 +184,7 @@ def _simus_freq_outer_scan(
             rp_mono = xp.mean(phase * directivity_k, axis=-1)
             p_k = spectrum_k * (rp_mono @ delay_apod[..., None])[..., 0]
             p_k = xp.where(is_out, xp.asarray(0.0 + 0j), p_k)
-            spect_k = probe_k * _scatter_and_sum(p_k, rc, rp_mono, xp)
+            spect_k = probe_k * _scatter_and_sum(p_k, rc, rp_mono)
             phase = phase * phase_step
             delay_apod = delay_apod * delay_apod_step
             return (phase, delay_apod), spect_k
@@ -199,7 +199,7 @@ def _simus_freq_outer_scan(
             rp_mono = xp.mean(phase, axis=-1)
             p_k = spectrum_k * (rp_mono @ delay_apod[..., None])[..., 0]
             p_k = xp.where(is_out, xp.asarray(0.0 + 0j), p_k)
-            spect_k = probe_k * _scatter_and_sum(p_k, rc, rp_mono, xp)
+            spect_k = probe_k * _scatter_and_sum(p_k, rc, rp_mono)
             phase = phase * phase_step
             delay_apod = delay_apod * delay_apod_step
             return (phase, delay_apod), spect_k

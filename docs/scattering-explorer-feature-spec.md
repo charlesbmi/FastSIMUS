@@ -17,8 +17,8 @@ The implementation deliberately separates reusable simulation and data-preparati
 - `src/fast_simus/scattering.py` owns the public point-scattering API and result objects.
 - `src/fast_simus/_scattering_math.py` owns portable Array API propagation and contraction primitives.
 - `examples/_scattering_explorer.py` owns scene, sampling, coordinate, editing, and estimation helpers.
-- `examples/_scattering_viewer.py` owns the Python-side anywidget data contract and normalization.
-- `examples/_scattering_viewer.js` and `examples/_scattering_viewer.css` own interactive rendering and layout.
+- `examples/_scattering_viewer.py` owns normalization and composes the shared anyplotlib image, layer, marker, and
+  cursor primitives.
 - `examples/scattering_explorer.py` composes those pieces as reactive marimo cells.
 
 This separation is the preferred direction for future work: notebook cells should coordinate controls and results, while
@@ -114,8 +114,8 @@ logic that is independently testable or useful to another example should live in
    browser state, or example-specific scene definitions.
 1. **Keep the notebook declarative.** Cells should assemble controls, derive immutable values, call simulation
    functions, and display results. Stateful synchronization is reserved for the canonical custom-scene editor.
-1. **Use explicit boundaries.** Backend-to-NumPy conversion occurs only when preparing browser buffers.
-   Physical-to-pixel conversion occurs only in editing or rendering helpers.
+1. **Use explicit boundaries.** Backend-to-NumPy conversion occurs only when preparing plotting data. Physical-to-pixel
+   conversion occurs only in editing or rendering helpers.
 1. **Share behavior, not incidental layout.** Coordinate conversion, grid derivation, apodization, scene generation,
    normalization, and workload estimation are reusable. Sidebar ordering and card styling may remain notebook-specific.
 1. **Separate physics from presentation.** Relative-dB clipping, component selection, RMS visibility, and cursor
@@ -136,7 +136,8 @@ logic that is independently testable or useful to another example should live in
   backend-to-NumPy display boundary.
 - `_scattering_explorer.py` owns deterministic scenes, physical-coordinate editing, sampling, apodization, and workload
   estimates.
-- `_scattering_viewer.py` and its JavaScript/CSS assets own browser buffers and display-only interaction.
+- `_scattering_viewer.py` owns anyplotlib composition and display-only interaction; no explorer-specific JavaScript is
+  required.
 - `scattering_explorer.py` remains a reactive composition layer for controls and outputs.
 
 ### Public FastSIMUS capability
@@ -185,7 +186,7 @@ Reviewers should preserve the contracts above while looking for smaller shared c
 - whether notebook calculations that are pure and testable have leaked into reactive cells;
 - whether viewer traits are minimal and display-only updates avoid Python simulation work;
 - whether custom editing has one canonical source of truth and avoids stale callback snapshots;
-- whether browser buffers and large intermediate arrays have clear memory bounds;
+- whether plotting buffers and large intermediate arrays have clear memory bounds;
 - whether backend-specific synchronization is limited to demonstrated accelerated-kernel requirements;
 - whether documentation and tests describe public behavior rather than transient implementation details.
 

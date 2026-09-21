@@ -11,6 +11,7 @@ from fast_simus._pfield_math import NEPER_TO_DB, _distances_and_angles, _subelem
 from fast_simus._scattering_math import _scatter_and_sum
 from fast_simus.medium_params import MediumParams
 from fast_simus.pfield import (
+    PfieldPlan,
     PfieldSpectrumInfo,
     _pfield_plan_for_travel_time,
     pfield_spectrum_compute,
@@ -105,7 +106,7 @@ def _scattering_plan(
     element_splitting: int | None,
     frequency_step: float | int,
     xp: _ArrayNamespace,
-):
+) -> PfieldPlan:
     n_sub = _element_splitting(params, medium, element_splitting)
     observation_flat = xp.reshape(positions, (-1, 2))
     scatterer_flat = xp.reshape(scatterers, (-1, 2))
@@ -205,7 +206,6 @@ def _point_observer_spectrum(
                     ],
                     reflection_coefficients[scatterer_start:scatterer_end],
                     transfer,
-                    xp,
                 )
                 contributions.append(contribution)
             block_spectrum = block_spectrum + xp.stack(contributions, axis=-1)

@@ -1,6 +1,7 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
+#     "anyplotlib>=0.8",
 #     "anywidget>=0.11",
 #     "drawdata>=0.5",
 #     "fastsimus",
@@ -43,7 +44,12 @@ with app.setup(hide_code=True):
         SimulationConfig,
         cached_simulation,
     )
-    from _scattering_viewer import ScatteringViewer, crop_receive_to_field_window, prepare_viewer_data
+    from _scattering_viewer import (
+        ScatteringFigure,
+        crop_receive_to_field_window,
+        prepare_viewer_data,
+        reflectivity_legend,
+    )
     from drawdata import ScatterWidget
 
     import fast_simus as fs
@@ -528,20 +534,20 @@ def _(
         time_oversampling=time_oversampling,
     )
     grid_note = (
-        f"Requested spacing **{requested_spacing_mm:.3f} mm**; effective "
-        f"**{estimate.effective_dx_mm:.3f} \N{MULTIPLICATION SIGN} {estimate.effective_dz_mm:.3f} mm**. "
+        f"Requested spacing {requested_spacing_mm:.3f} mm; effective "
+        f"{estimate.effective_dx_mm:.3f} \N{MULTIPLICATION SIGN} {estimate.effective_dz_mm:.3f} mm. "
         f"Estimated {time_oversampling}\N{MULTIPLICATION SIGN} time-sampled field movies: "
-        f"**{estimate.field_movie_bytes / 2**30:.2f} GiB**."
+        f"{estimate.field_movie_bytes / 2**30:.2f} GiB."
     )
     workload_note = (
         mo.callout(
-            f"{grid_note} This configuration evaluates about **{estimate.spatial_pairs / 1e6:.1f} million** "
+            f"{grid_note} This configuration evaluates about {estimate.spatial_pairs / 1e6:.1f} million "
             "observation-scatterer pairs per frequency. Computation will continue and may be slow or memory-heavy.",
             kind="warn",
         )
         if estimate.spatial_pairs > 25_000_000 or estimate.field_movie_bytes > 2**30
         else mo.md(
-            f"Estimated spatial work: **{estimate.spatial_pairs / 1e6:.2f} million pairs per frequency**. {grid_note}"
+            f"Estimated spatial work: {estimate.spatial_pairs / 1e6:.2f} million pairs per frequency. {grid_note}"
         )
     )
     return estimate, nx, nz, workload_note
@@ -606,7 +612,7 @@ def _(sim):
     receive, receive_times = crop_receive_to_field_window(sim.receive, sim.receive_times, sim.times)
     viewer_data = prepare_viewer_data(sim.incident, sim.scattered, sim.incident_rms, receive)
     initial_time = min(sim.times.size - 1, int(0.45 * sim.times.size))
-    viewer = ScatteringViewer.from_data(
+    viewer = ScatteringFigure.from_data(
         viewer_data,
         field_times=sim.times,
         receive_times=receive_times,
@@ -618,8 +624,9 @@ def _(sim):
         focus=sim.focus_mm,
         time_index=initial_time,
     )
-    viewer_ui = mo.ui.anywidget(viewer)
-    return viewer, viewer_ui
+    viewer_ui = mo.ui.anywidget(viewer.figure)
+    reflectivity_key = mo.Html(reflectivity_legend(sim.reflection_coefficients))
+    return reflectivity_key, viewer, viewer_ui
 
 
 @app.cell(hide_code=True)
@@ -630,12 +637,15 @@ def _(
     viewer,
     viewer_ui,
     waveform_range_ui,
+    reflectivity_key,
 ):
-    viewer.component = component_ui.value
-    viewer.rms_visible = bool(rms_visible_ui.value)
-    viewer.waveform_dynamic_range = float(waveform_range_ui.value)
-    viewer.rms_dynamic_range = float(rms_range_ui.value)
-    viewer_ui
+    viewer.update_display(
+        component=component_ui.value,
+        waveform_dynamic_range=float(waveform_range_ui.value),
+        rms_visible=bool(rms_visible_ui.value),
+        rms_dynamic_range=float(rms_range_ui.value),
+    )
+    mo.vstack([viewer_ui, reflectivity_key], gap=0.2)
     return
 
 
