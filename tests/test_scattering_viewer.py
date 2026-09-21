@@ -170,14 +170,14 @@ def test_anyplotlib_overlays_are_mapped_to_image_coordinates() -> None:
         elements=np.asarray([[-10.0, 0.0], [10.0, 0.0]]),
         scatterers=np.asarray([[0.0, 30.0]]),
         coefficients=np.asarray([0.005]),
-        focus=np.asarray([0.0, 30.0]),
+        focus=np.asarray([10.0, 30.0]),
     )
 
     markers = {marker["name"]: marker for marker in viewer.field_plot._state["markers"]}
     np.testing.assert_allclose(markers["probe elements"]["offsets"], [[1.0, 0.0], [3.0, 0.0]])
     np.testing.assert_allclose(markers["scatterers"]["offsets"], [[2.0, 3.0]])
     focus_line = next(line for line in viewer.field_plot._state["markers"] if line["name"] == "focus")
-    np.testing.assert_allclose(focus_line["segments"], [[[2.0, 0.0], [2.0, 3.0]]])
+    np.testing.assert_allclose(focus_line["segments"], [[[2.0, 0.0], [3.0, 3.0]]])
 
 
 def test_anyplotlib_cursor_updates_the_field_frame() -> None:

@@ -313,7 +313,7 @@ class ScatteringFigure:
         if focus is not None:
             focus_point = np.asarray(focus, dtype=float)
             focus_pixels = physical_to_image_coordinates(
-                np.asarray([[focus_point[0], min(0.0, z_min)], focus_point]),
+                np.asarray([[0.0, 0.0], focus_point]),
                 x_axis,
                 z_axis,
             )
