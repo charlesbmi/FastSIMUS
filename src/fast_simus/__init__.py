@@ -1,5 +1,6 @@
 """FastSIMUS - Fast Simulator for Medical Ultrasound based on SIMUS/MUST."""
 
+from fast_simus.jit import jit
 from fast_simus.medium_params import MediumParams
 from fast_simus.pfield import (
     PfieldPlan,
@@ -9,6 +10,7 @@ from fast_simus.pfield import (
     pfield_compute,
     pfield_precompute,
     pfield_spectrum,
+    pfield_spectrum_compute,
     rms_from_spectrum,
 )
 from fast_simus.simus import SimusPlan, SimusResult, SimusStrategy, simus, simus_compute, simus_precompute
@@ -37,10 +39,12 @@ __all__ = [
     "diverging_wave",
     "element_positions",
     "focused",
+    "jit",
     "pfield",
     "pfield_compute",
     "pfield_precompute",
     "pfield_spectrum",
+    "pfield_spectrum_compute",
     "plane_wave",
     "rms_from_spectrum",
     "simus",

@@ -564,8 +564,6 @@ def pfield_spectrum(
         Tuple of (spectrum, info) where spectrum has shape
         ``(*grid_shape, n_freq_selected)`` and is complex-valued.
     """
-    xp = array_namespace(positions, delays, tx_apodization)
-
     plan = pfield_precompute(
         positions,
         delays,
@@ -577,6 +575,41 @@ def pfield_spectrum(
         frequency_step=frequency_step,
     )
 
+    spectrum = pfield_spectrum_compute(
+        positions,
+        delays,
+        plan,
+        params,
+        medium,
+        tx_apodization=tx_apodization,
+        full_frequency_directivity=full_frequency_directivity,
+    )
+    info = PfieldSpectrumInfo(
+        selected_freqs=plan.selected_freqs,
+        freq_idx_start=plan.freq_idx_start,
+        n_freq_full=plan.n_freq_full,
+        freq_step=plan.freq_step,
+        correction_factor=plan.correction_factor,
+    )
+    return spectrum, info
+
+
+def pfield_spectrum_compute(
+    positions: Float[Array, "*grid_shape 2"],
+    delays: Float[Array, " n_elements"],
+    plan: PfieldPlan,
+    params: TransducerParams,
+    medium: MediumParams = _DEFAULT_MEDIUM,
+    *,
+    tx_apodization: Float[Array, " n_elements"] | None = None,
+    full_frequency_directivity: bool = False,
+) -> Complex[Array, "*grid_shape n_freq_selected"]:
+    """Compute a pressure spectrum from a precomputed static-shape plan.
+
+    Bind ``plan``, ``params``, ``medium``, and keyword options in a closure to
+    compile this function with :func:`fast_simus.jit`.
+    """
+    xp = array_namespace(positions, delays, tx_apodization)
     delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
 
     from fast_simus._pfield_strategies import _freq_outer_python_complex
@@ -591,21 +624,12 @@ def pfield_spectrum(
         full_frequency_directivity=full_frequency_directivity,
         xp=xp,
     )
-    spectrum = _freq_outer_python_complex(**sweep._asdict(), xp=xp)
-
-    info = PfieldSpectrumInfo(
-        selected_freqs=plan.selected_freqs,
-        freq_idx_start=plan.freq_idx_start,
-        n_freq_full=plan.n_freq_full,
-        freq_step=plan.freq_step,
-        correction_factor=plan.correction_factor,
-    )
-    return spectrum, info
+    return _freq_outer_python_complex(**sweep._asdict(), xp=xp)
 
 
 def rms_from_spectrum(
     spectrum: Complex[Array, "*grid_shape n_freq_selected"],
-    info: PfieldSpectrumInfo,
+    info: PfieldPlan | PfieldSpectrumInfo,
 ) -> Float[Array, " *grid_shape"]:
     """Rebuild the RMS pressure field from a ``pfield_spectrum`` result.
 
@@ -616,7 +640,8 @@ def rms_from_spectrum(
 
     Args:
         spectrum: Complex pressure from :func:`pfield_spectrum`.
-        info: Metadata from the same call.
+        info: Metadata from the same call, or the ``PfieldPlan`` used by
+            :func:`pfield_spectrum_compute`.
 
     Returns:
         RMS pressure with the spatial shape of ``spectrum`` (no frequency axis).

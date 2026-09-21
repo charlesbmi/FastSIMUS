@@ -9,7 +9,8 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
-from fast_simus.pfield import pfield_compute, pfield_precompute
+from fast_simus import jit
+from fast_simus.pfield import pfield_compute, pfield_precompute, pfield_spectrum_compute
 from fast_simus.simus import simus_compute, simus_precompute
 from fast_simus.transducer_presets import P4_2v
 
@@ -23,12 +24,7 @@ def _make_positions(x_range: tuple[float, float], z_range: tuple[float, float], 
 
 @pytest.mark.slow
 def test_mlx_compile_pfield_compute():
-    """pfield_compute compiles and produces valid output under mx.compile.
-
-    mx.compile fuses operations in the computation graph, similar to JAX's jit.
-    Non-array arguments (plan scalars, params, medium) are captured as constants
-    in the compiled graph via a closure.
-    """
+    """pfield_compute compiles and produces valid output through the public API."""
     params = P4_2v()
     positions_np = _make_positions((-2e-2, 2e-2), (params.pitch, 5e-2), n=50)
     delays_np = np.zeros(params.n_elements)
@@ -38,11 +34,26 @@ def test_mlx_compile_pfield_compute():
 
     plan = pfield_precompute(positions_mx, delays_mx, params)
 
-    compiled = mx.compile(lambda pos, dl: pfield_compute(pos, dl, plan, params))
+    compiled = jit(lambda pos, dl: pfield_compute(pos, dl, plan, params), xp=mx)
     result = compiled(positions_mx, delays_mx)
 
     assert result.shape == (50, 50)
     assert bool(mx.all(result >= 0))
+
+
+@pytest.mark.slow
+def test_mlx_compile_pfield_spectrum_compute():
+    """The split spectrum path is compilable through the public API."""
+    params = P4_2v()
+    positions = mx.array(_make_positions((-1e-2, 1e-2), (params.pitch, 3e-2), n=6).astype(np.float32))
+    delays = mx.zeros(params.n_elements)
+    plan = pfield_precompute(positions, delays, params)
+
+    compute = jit(lambda pos, dl: pfield_spectrum_compute(pos, dl, plan, params), xp=mx)
+    result = compute(positions, delays)
+
+    assert result.shape[:2] == (6, 6)
+    assert bool(mx.max(mx.abs(result)) > 0)
 
 
 @pytest.mark.slow

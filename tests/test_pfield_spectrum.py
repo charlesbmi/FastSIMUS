@@ -7,7 +7,13 @@ import pymust
 import pytest
 
 from fast_simus.medium_params import MediumParams
-from fast_simus.pfield import pfield, pfield_spectrum, rms_from_spectrum
+from fast_simus.pfield import (
+    pfield,
+    pfield_precompute,
+    pfield_spectrum,
+    pfield_spectrum_compute,
+    rms_from_spectrum,
+)
 from fast_simus.transducer_presets import C5_2v, P4_2v
 from fast_simus.tx_delay import focused
 from fast_simus.utils._array_api import Array, _ArrayNamespace
@@ -81,6 +87,23 @@ def test_spectrum_contract(xp: _ArrayNamespace) -> None:
         rtol=1e-5,
     )
     assert info.freq_step * (info.n_freq_full - 1) == pytest.approx(2.0 * params.freq_center, rel=1e-5)
+
+
+def test_spectrum_precompute_compute_matches_public_function(xp: _ArrayNamespace) -> None:
+    """The split spectrum API preserves the high-level result."""
+    params = P4_2v()
+    positions = xp.asarray(_positions((-0.01, 0.01), (1e-3, 0.03), n=8))
+    delays = _focused_delays(params, xp, (0.0, 0.02))
+
+    expected, _info = pfield_spectrum(positions, delays, params)
+    plan = pfield_precompute(positions, delays, params)
+    actual = pfield_spectrum_compute(positions, delays, plan, params)
+
+    np.testing.assert_array_equal(to_numpy(actual), to_numpy(expected))
+    np.testing.assert_array_equal(
+        to_numpy(rms_from_spectrum(actual, plan)),
+        to_numpy(rms_from_spectrum(expected, _info)),
+    )
 
 
 def test_matches_pymust_spectrum_and_frequency_grid() -> None:

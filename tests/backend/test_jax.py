@@ -9,9 +9,9 @@ import pytest
 
 jax = pytest.importorskip("jax")
 jnp = jax.numpy
-eqx = pytest.importorskip("equinox")
 
-from fast_simus.pfield import pfield_compute, pfield_precompute
+from fast_simus import jit
+from fast_simus.pfield import pfield_compute, pfield_precompute, pfield_spectrum_compute
 from fast_simus.simus import simus_compute, simus_precompute
 from fast_simus.transducer_presets import P4_2v
 
@@ -25,35 +25,38 @@ def _make_positions(x_range: tuple[float, float], z_range: tuple[float, float], 
 
 @pytest.mark.slow
 def test_jax_jit_pfield_compute():
-    """pfield_compute compiles and produces valid output under eqx.filter_jit.
-
-    eqx.filter_jit automatically splits arguments into:
-    - JAX arrays (traced): positions, delays, plan.selected_freqs, etc.
-    - Everything else (static): plan.n_sub, params fields, ...
-
-    freq_start/freq_step are derived from plan.selected_freqs at compute time,
-    so they become traced scalars (fewer recompilations than static floats).
-    """
+    """pfield_compute compiles and produces valid output through the public API."""
     params = P4_2v()
     positions_np = _make_positions((-2e-2, 2e-2), (params.pitch, 5e-2), n=50)
     delays_np = np.zeros(params.n_elements)
 
     plan = pfield_precompute(jnp.asarray(positions_np), jnp.asarray(delays_np), params)
 
-    jitted = eqx.filter_jit(pfield_compute)
-    result = jitted(jnp.asarray(positions_np), jnp.asarray(delays_np), plan, params)
+    compute = jit(lambda pos, dl: pfield_compute(pos, dl, plan, params), xp=jnp)
+    result = compute(jnp.asarray(positions_np), jnp.asarray(delays_np))
 
     assert result.shape == (50, 50)
     assert bool(jnp.all(result >= 0))
 
 
 @pytest.mark.slow
-def test_jax_jit_simus_compute():
-    """simus_compute compiles and produces valid output under eqx.filter_jit.
+def test_jax_jit_pfield_spectrum_compute():
+    """The split spectrum path is compilable through the public API."""
+    params = P4_2v()
+    positions = jnp.asarray(_make_positions((-1e-2, 1e-2), (params.pitch, 3e-2), n=6))
+    delays = jnp.zeros(params.n_elements)
+    plan = pfield_precompute(positions, delays, params)
 
-    Same JIT strategy as pfield: eqx.filter_jit traces JAX arrays and treats
-    everything else (plan scalars, params, medium) as static.
-    """
+    compute = jit(lambda pos, dl: pfield_spectrum_compute(pos, dl, plan, params), xp=jnp)
+    result = compute(positions, delays)
+
+    assert result.shape[:2] == (6, 6)
+    assert bool(jnp.max(jnp.abs(result)) > 0)
+
+
+@pytest.mark.slow
+def test_jax_jit_simus_compute():
+    """simus_compute compiles and produces valid output through the public API."""
     params = P4_2v()
     n_scat = 6
     scatterers_np = np.stack([np.zeros(n_scat), np.linspace(1e-2, 5e-2, n_scat)], axis=-1)
@@ -66,8 +69,8 @@ def test_jax_jit_simus_compute():
 
     plan = simus_precompute(scatterers, rc, delays, params)
 
-    jitted = eqx.filter_jit(simus_compute)
-    result = jitted(scatterers, rc, delays, plan, params)
+    compute = jit(lambda scat, coeff, dl: simus_compute(scat, coeff, dl, plan, params), xp=jnp)
+    result = compute(scatterers, rc, delays)
 
     rf = result.rf
     assert rf.ndim == 2

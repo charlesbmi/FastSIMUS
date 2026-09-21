@@ -1,13 +1,10 @@
-"""JAX ``filter_jit`` wrapper for simus benchmarks."""
+"""Backend-neutral JIT wrapper for simus benchmarks."""
 
 from __future__ import annotations
 
-import contextlib
-from types import ModuleType
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-from array_api_compat import is_jax_namespace
-
+from fast_simus import jit
 from fast_simus.simus import simus_compute
 
 if TYPE_CHECKING:
@@ -17,17 +14,7 @@ if TYPE_CHECKING:
     from fast_simus.transducer_params import TransducerParams
     from fast_simus.utils._array_api import _ArrayNamespace
 
-_eqx = None
-with contextlib.suppress(ImportError):
-    import equinox as _eqx
-
 
 def make_simus_compute(plan: SimusPlan, params: TransducerParams, xp: _ArrayNamespace) -> Callable:
-    """Return (scatterers, rc, delays) -> SimusResult with JAX JIT when applicable."""
-    if is_jax_namespace(cast(ModuleType, xp)):
-        assert _eqx is not None
-        compute_kernel = _eqx.filter_jit(simus_compute)
-    else:
-        compute_kernel = simus_compute
-
-    return lambda scat, rc, dl: compute_kernel(scat, rc, dl, plan, params)
+    """Return (scatterers, rc, delays) -> SimusResult with backend JIT when available."""
+    return jit(lambda scat, rc, dl: simus_compute(scat, rc, dl, plan, params), xp=xp)
