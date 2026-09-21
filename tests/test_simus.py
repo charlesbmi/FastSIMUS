@@ -574,6 +574,27 @@ assert np.max(np.abs(rf)) > 0.0
 
         assert completed.returncode == 0, completed.stderr
 
+    def test_metal_compute_can_be_jit_compiled(self):
+        """Metal synchronization must not break MLX function transforms."""
+        import mlx.core as _mx
+
+        from fast_simus import jit
+        from fast_simus.backends.mlx import ensure_compat
+
+        ensure_compat(_mx)
+        params = P4_2v()
+        scatterers = cast("Array", _mx.array([[0.0, 0.03]], dtype=_mx.float32))
+        coefficients = cast("Array", _mx.array([0.005], dtype=_mx.float32))
+        delays = cast("Array", _mx.zeros(params.n_elements, dtype=_mx.float32))
+        plan = simus_precompute(scatterers, coefficients, delays, params)
+        compute = jit(lambda scat, rc, dl: simus_compute(scat, rc, dl, plan, params), xp=cast(_ArrayNamespace, _mx))
+
+        result = compute(scatterers, coefficients, delays)
+        rf = np.asarray(result.rf)
+
+        assert np.all(np.isfinite(rf))
+        assert np.max(np.abs(rf)) > 0.0
+
     def test_metal_matches_pymust(self, simus_reference: SimusReferenceData):
         """Metal strategy must match PyMUST reference (peak-normalized)."""
         import mlx.core as _mx

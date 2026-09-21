@@ -56,6 +56,19 @@ _TX_OPTIMAL_CHUNK: dict[int, int] = {
     128: 5_000,  # L11-5v class (128 elem, 256B registers/thread)
 }
 _TX_DEFAULT_CHUNK = 10_000
+_TRANSFORM_EVAL_ERROR = "during function transformations"
+
+
+def _eval_eager(*arrays: mx.array) -> None:
+    """Materialize custom-kernel outputs unless MLX is tracing a transform."""
+    try:
+        mx.eval(*arrays)
+    except ValueError as error:
+        # Compiled graphs already retain the producer-consumer dependency, and
+        # MLX deliberately rejects explicit evaluation while tracing them.
+        if _TRANSFORM_EVAL_ERROR not in str(error):
+            raise
+
 
 # ---------------------------------------------------------------------------
 # Source caching
@@ -326,7 +339,7 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
         # Materialize the first custom-kernel result before dispatching a
         # second custom kernel that consumes it. Without this barrier, MLX can
         # expose uninitialized TX storage on the first cold Metal invocation.
-        mx.eval(tx_out[0], tx_out[1])
+        _eval_eager(tx_out[0], tx_out[1])
 
         # RX kernel: SCAT_REDUCE scatterers per threadgroup, SIMD reduction
         sr = _RX_SCAT_REDUCE
@@ -340,7 +353,7 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
             threadgroup=(rx_tg, 1, 1),
             init_value=0.0,
         )
-        mx.eval(rx_out[0], rx_out[1])
+        _eval_eager(rx_out[0], rx_out[1])
 
         total_re = total_re + rx_out[0]
         total_im = total_im + rx_out[1]
