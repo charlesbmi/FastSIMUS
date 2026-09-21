@@ -16,5 +16,5 @@ if TYPE_CHECKING:
 
 
 def make_simus_compute(plan: SimusPlan, params: TransducerParams, xp: _ArrayNamespace) -> Callable:
-    """Return (scatterers, rc, delays) -> SimusResult with JAX JIT when applicable."""
+    """Return (scatterers, rc, delays) -> SimusResult with backend JIT when available."""
     return jit(lambda scat, rc, dl: simus_compute(scat, rc, dl, plan, params), xp=xp)
