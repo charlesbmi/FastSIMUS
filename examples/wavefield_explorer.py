@@ -52,11 +52,25 @@ def _(APODIZATIONS, PRESETS, SCENARIOS, mo, scenario):
     probe_ui = mo.ui.dropdown(list(PRESETS), value=preset["probe"], label="probe")
     transmit_ui = mo.ui.dropdown(["Focused", "Plane wave"], value=preset["transmit"], label="transmit")
     apod_ui = mo.ui.dropdown(list(APODIZATIONS), value=preset["apod"], label="apodization")
-    depth_ui = mo.ui.slider(10, 60, 2, value=preset["depth_mm"], label="focus (mm)", show_value=True)
     steer_ui = mo.ui.slider(-30, 30, 1, value=preset["steer_deg"], label="steer (deg)", show_value=True)
     range_ui = mo.ui.slider(20, 60, 5, value=40, label="dynamic range (dB)", show_value=True)
     db_ui = mo.ui.checkbox(label="display in dB", value=True)
 
+    return apod_ui, db_ui, probe_ui, range_ui, steer_ui, transmit_ui
+
+
+@app.cell(hide_code=True)
+def _(PRESETS, SCENARIOS, field_extent, fs, mo, probe_ui, scenario):
+    params = PRESETS[probe_ui.value]()
+    plot_depth_mm = int(field_extent(params, fs.MediumParams()) * 1e3)
+    max_focus_mm = min(60, plot_depth_mm)
+    default_depth_mm = min(SCENARIOS[scenario.value]["depth_mm"], max_focus_mm)
+    depth_ui = mo.ui.slider(10, max_focus_mm, 2, value=default_depth_mm, label="focus (mm)", show_value=True)
+    return (depth_ui,)
+
+
+@app.cell(hide_code=True)
+def _(apod_ui, db_ui, depth_ui, mo, probe_ui, range_ui, steer_ui, transmit_ui):
     mo.vstack(
         [
             mo.hstack([probe_ui, transmit_ui, apod_ui], justify="start", gap=1.5),
@@ -64,8 +78,7 @@ def _(APODIZATIONS, PRESETS, SCENARIOS, mo, scenario):
         ],
         gap=0.4,
     )
-
-    return apod_ui, db_ui, depth_ui, probe_ui, range_ui, steer_ui, transmit_ui
+    return
 
 
 @app.cell(hide_code=True)
@@ -167,6 +180,12 @@ def setup():
         magnitude = 20 * np.log10(np.abs(pressure) / peak + 1e-12)
         return np.sign(pressure) * np.clip(magnitude + dynamic_range, 0, dynamic_range)
 
+    def field_extent(params, medium):
+        """Return the lateral and axial field extent in meters."""
+        aperture = params.pitch * (params.n_elements - 1)
+        wavelength = medium.speed_of_sound / params.freq_center
+        return min(2.0 * aperture, 250.0 * wavelength)
+
     return (
         C5_2v,
         Figure,
@@ -175,6 +194,7 @@ def setup():
         P4_2v,
         apl,
         as_numpy,
+        field_extent,
         fs,
         functools,
         mo,
@@ -273,6 +293,7 @@ def _(
     PRESETS,
     as_numpy,
     frequency_step,
+    field_extent,
     fs,
     functools,
     n_pixels,
@@ -287,9 +308,8 @@ def _(
         c = medium.speed_of_sound
         elements, _, apex = fs.element_positions(params.n_elements, params.pitch, params.radius, xp)
 
-        aperture = params.pitch * (params.n_elements - 1)
         wavelength = c / params.freq_center
-        extent = min(2.0 * aperture, 250.0 * wavelength)
+        extent = field_extent(params, medium)
         x_axis = np.linspace(-extent / 2, extent / 2, n_pixels, dtype=np.float32)
         z_axis = np.linspace(1e-4, extent, n_pixels, dtype=np.float32)
         grid = xp.asarray(np.stack(np.meshgrid(x_axis, z_axis), axis=-1))
