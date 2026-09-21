@@ -40,11 +40,13 @@
 
             float dx = gx - ex - sub_dx[idx];
             float dz = gz - ez - sub_dz[idx];
-            float r = metal::precise::sqrt(dx * dx + dz * dz);
+            float r = metal::precise::hypot(dx, dz);
             float rc = max(r, min_dist);
 
-            // Angle relative to element normal (unclipped distance for angle)
-            float th = metal::precise::asin((dx + 1e-16f) / (r + 1e-16f)) - te;
+            // hypot(x, 0) = |x|; clip leftover rounding. r = 0 is on-axis.
+            float sin_arg = (r > 0.0f) ? dx / r : 0.0f;
+            sin_arg = metal::clamp(sin_arg, -1.0f, 1.0f);
+            float th = metal::precise::asin(sin_arg) - te;
 
             // Soft baffle obliquity
             float obliq = (fabs(th) >= M_PI_2_F) ? 1e-16f : metal::precise::cos(th);

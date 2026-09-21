@@ -12,10 +12,12 @@ import pymust
 import pytest
 from array_api_compat import is_jax_namespace
 
-from fast_simus.pfield import PfieldStrategy, pfield, pfield_compute, pfield_precompute
+from fast_simus.pfield import PfieldStrategy, pfield, pfield_compute, pfield_precompute, pfield_spectrum
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
 from fast_simus.utils._array_api import Array, _ArrayNamespace, is_mlx_namespace
+from fast_simus.utils.geometry import element_positions
+from tests.conftest import to_numpy
 
 # Array API backend for FastSIMUS calls
 xp = cast(_ArrayNamespace, array_api_strict)
@@ -464,6 +466,40 @@ class TestPfieldStrategyCrossBackend:
             strategy=strategy,
         )
         _assert_valid_pfield_output(rp, positions.shape[:-1])
+
+
+class TestPfieldProbePlane:
+    """Grazing and coincident observation points on the probe face."""
+
+    def test_spectrum_on_probe_face_is_finite(self, xp: _ArrayNamespace) -> None:
+        """Z = 0 grid points must stay finite on every backend, including CuPy."""
+        params = P4_2v()
+        x = xp.linspace(-2e-2, 2e-2, 40)
+        positions = xp.stack([x, xp.zeros(x.shape)], axis=-1)
+        spectrum, _info = pfield_spectrum(
+            positions,
+            xp.zeros(params.n_elements),
+            params,
+            frequency_step=2.0,
+        )
+        rp = pfield(positions, xp.zeros(params.n_elements), params, frequency_step=2.0)
+        _assert_valid_pfield_output(rp, tuple(positions.shape[:-1]))
+        assert np.all(np.isfinite(to_numpy(spectrum)))
+
+    def test_on_element_observation_is_finite(self, xp: _ArrayNamespace) -> None:
+        """A point coincident with an element center remains finite."""
+        params = P4_2v()
+        elements, _theta, _apex = element_positions(params.n_elements, params.pitch, params.radius, xp)
+        positions = xp.reshape(elements[params.n_elements // 2], (1, 2))
+        spectrum, _info = pfield_spectrum(
+            positions,
+            xp.zeros(params.n_elements),
+            params,
+            frequency_step=2.0,
+        )
+        assert np.all(np.isfinite(to_numpy(spectrum)))
+        rp = pfield(positions, xp.zeros(params.n_elements), params, frequency_step=2.0)
+        _assert_valid_pfield_output(rp, (1,))
 
 
 class TestMetalKernel:
