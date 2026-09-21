@@ -8,7 +8,6 @@ repo_name: charlesbmi/FastSIMUS
 
 nav:
   - Home: index.md
-  - Scattering explorer: scattering-explorer-feature-spec.md
   - Modules: modules.md
 plugins:
   - search
