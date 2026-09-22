@@ -21,7 +21,6 @@ Requires: MLX (mlx package) on Apple Silicon.
 Limitations:
     - Soft baffle only (BaffleType.SOFT assumed)
     - Center-frequency directivity only (full_frequency_directivity=False)
-    - Linear arrays only (convex array support needs testing)
 """
 
 from __future__ import annotations
@@ -33,6 +32,7 @@ from typing import TYPE_CHECKING, Any, cast
 import mlx.core as mx
 
 from fast_simus._pfield_math import NEPER_TO_DB, _subelement_centroids
+from fast_simus.backends.mlx import eval_eager
 from fast_simus.medium_params import MediumParams
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.utils._array_api import Array, _ArrayNamespace
@@ -56,18 +56,13 @@ _TX_OPTIMAL_CHUNK: dict[int, int] = {
     128: 5_000,  # L11-5v class (128 elem, 256B registers/thread)
 }
 _TX_DEFAULT_CHUNK = 10_000
-_TRANSFORM_EVAL_ERROR = "during function transformations"
 
 
-def _eval_eager(*arrays: mx.array) -> None:
-    """Materialize custom-kernel outputs unless MLX is tracing a transform."""
-    try:
-        mx.eval(*arrays)
-    except ValueError as error:
-        # Compiled graphs already retain the producer-consumer dependency, and
-        # MLX deliberately rejects explicit evaluation while tracing them.
-        if _TRANSFORM_EVAL_ERROR not in str(error):
-            raise
+def metal_simus_unsupported_reason(n_elements: int) -> str | None:
+    """Explain why a SIMUS shape exceeds the receive-kernel limit."""
+    if n_elements * _RX_SCAT_REDUCE <= 1024:
+        return None
+    return f"n_elements={n_elements} exceeds the Metal receive-kernel limit"
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +334,7 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
         # Materialize the first custom-kernel result before dispatching a
         # second custom kernel that consumes it. Without this barrier, MLX can
         # expose uninitialized TX storage on the first cold Metal invocation.
-        _eval_eager(tx_out[0], tx_out[1])
+        eval_eager(tx_out[0], tx_out[1])
 
         # RX kernel: SCAT_REDUCE scatterers per threadgroup, SIMD reduction
         sr = _RX_SCAT_REDUCE
@@ -353,7 +348,7 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
             threadgroup=(rx_tg, 1, 1),
             init_value=0.0,
         )
-        _eval_eager(rx_out[0], rx_out[1])
+        eval_eager(rx_out[0], rx_out[1])
 
         total_re = total_re + rx_out[0]
         total_im = total_im + rx_out[1]

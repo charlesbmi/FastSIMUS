@@ -7,6 +7,28 @@
 
 Fast simulator for medical ultrasound, based on SIMUS/MUST
 
+## Backend selection
+
+Choose an available array namespace once, then pass its arrays to the public numerical functions. SIMUS infers the
+implementation from its inputs: MLX arrays use the custom Metal kernel, CuPy arrays use the custom CUDA kernel, and JAX
+or NumPy arrays use the portable implementation.
+
+```python
+import fast_simus as fs
+
+backend = fs.get_backend()
+xp = backend.xp
+
+result = fs.simus(xp.asarray(scatterers), xp.asarray(reflection_coefficients), xp.asarray(delays), params)
+```
+
+Install the optional runtime for the target platform with `fastsimus[metal]`, `fastsimus[cuda12]`, or
+`fastsimus[cuda13]`. Pass `backend="metal"` or `backend="cuda"` to require a custom kernel, or `backend="mlx"` or
+`backend="cupy"` to force the portable same-library implementation.
+
+Backend contexts choose where arrays are created; the `simus(..., backend=...)` name controls execution policy. For
+example, `get_backend("mlx")` selects MLX arrays, while `simus(..., backend="mlx")` forces portable MLX.
+
 ## Development
 
 This project uses [Flox](https://flox.dev/download) for reproducible system dependencies (Python, uv, CUDA runtime on

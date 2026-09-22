@@ -82,13 +82,13 @@ def canvas_to_physical(
     width: int,
     height: int,
 ) -> np.ndarray:
-    """Convert drawdata's bottom-up canvas coordinates to physical millimetres."""
+    """Convert canvas coordinates to millimetres with depth increasing downward."""
     points = np.asarray(points, dtype=np.float64)
     if points.size == 0:
         return np.empty((0, 2), dtype=np.float64)
     x_min, x_max, z_min, z_max = extent_mm
     x = x_min + points[:, 0] / width * (x_max - x_min)
-    z = z_min + points[:, 1] / height * (z_max - z_min)
+    z = z_max - points[:, 1] / height * (z_max - z_min)
     return np.column_stack([x, z])
 
 
@@ -99,21 +99,31 @@ def physical_to_canvas(
     width: int,
     height: int,
 ) -> np.ndarray:
-    """Convert physical millimetres to drawdata's bottom-up canvas coordinates."""
+    """Convert physical millimetres to drawdata's bottom-up coordinates."""
     points_mm = np.asarray(points_mm, dtype=np.float64)
     if points_mm.size == 0:
         return np.empty((0, 2), dtype=np.float64)
     x_min, x_max, z_min, z_max = extent_mm
     x = (points_mm[:, 0] - x_min) / (x_max - x_min) * width
-    y = (points_mm[:, 1] - z_min) / (z_max - z_min) * height
+    y = (z_max - points_mm[:, 1]) / (z_max - z_min) * height
     return np.column_stack([x, y])
 
 
 def drawing_class_coefficients(labels: list[str], class_values: tuple[float, float, float, float]) -> np.ndarray:
     """Map drawdata class labels to relative scatterer amplitudes."""
     mapping = dict(zip(_DRAWING_LABELS, class_values, strict=True))
-    default = class_values[2]
+    default = class_values[0]
     return np.asarray([mapping.get(label, default) for label in labels], dtype=np.float64)
+
+
+def drawing_axis_ticks(
+    extent_mm: tuple[float, float, float, float],
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Return lateral and top-down depth ticks for the drawing canvas."""
+    x_min, x_max, z_min, z_max = extent_mm
+    x_ticks = tuple(float(value) for value in np.linspace(x_min, x_max, 5))
+    z_ticks = tuple(float(value) for value in np.linspace(z_min, z_max, 5))
+    return x_ticks, z_ticks
 
 
 def normalize_custom_rows(rows) -> list[dict[str, float]]:
@@ -134,6 +144,16 @@ def normalize_custom_rows(rows) -> list[dict[str, float]]:
     if any(row["rc"] < 0.0 for row in normalized):
         raise ValueError("Custom reflectivity must be nonnegative")
     return normalized
+
+
+def snapshot_custom_rows(rows) -> list[dict[str, float]]:
+    """Copy a normalized Custom draft into an independent applied scene."""
+    return normalize_custom_rows(rows)
+
+
+def custom_rows_are_dirty(draft_rows, applied_rows) -> bool:
+    """Return whether a Custom draft differs from the last applied scene."""
+    return normalize_custom_rows(draft_rows) != normalize_custom_rows(applied_rows)
 
 
 def wavelength_mm(speed_of_sound: float, center_frequency_mhz: float) -> float:
@@ -289,7 +309,7 @@ def append_drawn_points(
         return existing
     canvas = np.asarray([[item["x"], item["y"]] for item in drawing_data], dtype=np.float64)
     physical = canvas_to_physical(canvas, extent_mm, width=width, height=height)
-    coefficients = drawing_class_coefficients([str(item.get("label", "c")) for item in drawing_data], class_values)
+    coefficients = drawing_class_coefficients([str(item.get("label", "a")) for item in drawing_data], class_values)
     additions = [
         {"x_mm": float(point[0]), "z_mm": float(point[1]), "rc": float(rc)}
         for point, rc in zip(physical, coefficients, strict=True)

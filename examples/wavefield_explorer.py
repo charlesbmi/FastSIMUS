@@ -5,6 +5,7 @@
 #     "fastsimus",
 #     "marimo",
 #     "matplotlib>=3.8",
+#     "cupy-cuda13x[ctk]>=13.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
 #     "mlx>=0.31; sys_platform == 'darwin' and platform_machine == 'arm64'",
 #     "numpy>=2.0",
 # ]
@@ -206,8 +207,9 @@ def setup():
 @app.cell(hide_code=True)
 def _(C5_2v, L11_5v, L12_3v, P4_2v, fs, mo, np):
     is_script_mode = mo.app_meta().mode == "script"
-    xp = fs.default_namespace()
-    backend_note = f"Using **{xp.__name__}**."
+    backend = fs.get_backend()
+    xp = backend.xp
+    backend_note = f"Using **{backend.label}**."
     if is_script_mode:
         n_pixels = 48
         frequency_step = 1.0

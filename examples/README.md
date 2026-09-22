@@ -20,6 +20,9 @@ Run from this directory:
 # Linux + NVIDIA
 uv run --group plot --group cuda12 marimo edit --no-token wavefield_explorer.py
 
+# Linux + CUDA 13 / Molab
+uv run --group plot --group cuda13 marimo edit --no-token scattering_explorer.py
+
 # macOS
 uv run --group plot marimo edit --no-token wavefield_explorer.py
 

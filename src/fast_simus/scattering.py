@@ -17,12 +17,21 @@ from fast_simus.pfield import (
     pfield_spectrum_compute,
 )
 from fast_simus.transducer_params import TransducerParams
-from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace
+from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace, is_mlx_namespace
 from fast_simus.utils.geometry import element_positions
 from fast_simus.wavefield import spectrum_to_wavefield
 
 _DEFAULT_MEDIUM = MediumParams()
 _MAX_PAIR_ELEMENTS = 262_144
+
+
+def _materialize_observer_block(block: Array, xp: _ArrayNamespace) -> Array:
+    """Bound MLX's lazy graph at an existing observer-chunk boundary."""
+    if is_mlx_namespace(xp):
+        from fast_simus.backends.mlx import eval_eager  # noqa: PLC0415
+
+        eval_eager(block)
+    return block
 
 
 class ScatteringSpectrumResult(NamedTuple):
@@ -209,7 +218,7 @@ def _point_observer_spectrum(
                 )
                 contributions.append(contribution)
             block_spectrum = block_spectrum + xp.stack(contributions, axis=-1)
-        output_chunks.append(block_spectrum)
+        output_chunks.append(_materialize_observer_block(block_spectrum, xp))
 
     return output_chunks[0] if len(output_chunks) == 1 else xp.concat(output_chunks, axis=0)
 
