@@ -13,6 +13,12 @@ from fast_simus.pfield import (
     pfield_spectrum_compute,
     rms_from_spectrum,
 )
+from fast_simus.scattering import (
+    ScatteringSpectrumResult,
+    ScatteringWavefieldResult,
+    scattering_pfield_spectrum,
+    scattering_wavefield,
+)
 from fast_simus.simus import SimusPlan, SimusResult, SimusStrategy, simus, simus_compute, simus_precompute
 from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.tx_delay import (
@@ -30,6 +36,8 @@ __all__ = [
     "PfieldPlan",
     "PfieldSpectrumInfo",
     "PfieldStrategy",
+    "ScatteringSpectrumResult",
+    "ScatteringWavefieldResult",
     "SimusPlan",
     "SimusResult",
     "SimusStrategy",
@@ -47,6 +55,8 @@ __all__ = [
     "pfield_spectrum_compute",
     "plane_wave",
     "rms_from_spectrum",
+    "scattering_pfield_spectrum",
+    "scattering_wavefield",
     "simus",
     "simus_compute",
     "simus_precompute",

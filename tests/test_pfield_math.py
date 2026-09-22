@@ -140,6 +140,38 @@ class TestDistancesAndAngles:
         _, _, theta_arr = _distances_and_angles(points, subelement_offsets, element_pos, theta_e, 1540.0, 5e6, xp)
         np.testing.assert_allclose(np.asarray(theta_arr[0, 0, 0]), 0.0, atol=1e-6)
 
+    def test_grazing_plane_angle_is_finite(self):
+        """A point on the element plane has |theta|=pi/2, not an asin-domain NaN."""
+        points = xp.asarray([[5e-3, 0.0]])
+        element_pos = xp.asarray([[0.0, 0.0]])
+        theta_e = xp.asarray([0.0])
+        subelement_offsets = _subelement_centroids(1e-4, 1, theta_e, xp)
+
+        distances, sin_theta, theta_arr = _distances_and_angles(
+            points, subelement_offsets, element_pos, theta_e, 1540.0, 5e6, xp
+        )
+        assert bool(xp.all(xp.isfinite(theta_arr)))
+        assert bool(xp.all(xp.isfinite(sin_theta)))
+        np.testing.assert_allclose(np.asarray(theta_arr[0, 0, 0]), pi / 2, atol=1e-6)
+        np.testing.assert_allclose(np.asarray(sin_theta[0, 0, 0]), 1.0, atol=1e-6)
+        np.testing.assert_allclose(np.asarray(distances[0, 0, 0]), 5e-3, rtol=1e-6)
+
+    def test_coincident_point_is_on_axis(self):
+        """R = 0 is treated as on-axis; spreading still uses the lambda/2 floor."""
+        c = 1540.0
+        fc = 5e6
+        points = xp.asarray([[0.0, 0.0]])
+        element_pos = xp.asarray([[0.0, 0.0]])
+        theta_e = xp.asarray([0.0])
+        subelement_offsets = _subelement_centroids(1e-4, 1, theta_e, xp)
+
+        distances, sin_theta, theta_arr = _distances_and_angles(
+            points, subelement_offsets, element_pos, theta_e, c, fc, xp
+        )
+        np.testing.assert_allclose(np.asarray(distances[0, 0, 0]), c / fc / 2.0, atol=1e-10)
+        np.testing.assert_allclose(np.asarray(theta_arr[0, 0, 0]), 0.0, atol=1e-6)
+        np.testing.assert_allclose(np.asarray(sin_theta[0, 0, 0]), 0.0, atol=1e-6)
+
 
 # ---------------------------------------------------------------------------
 # TestObliquityFactor

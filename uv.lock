@@ -710,6 +710,18 @@ wheels = [
 ]
 
 [[package]]
+name = "drawdata"
+version = "0.5.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anywidget" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/73/16/d82e593e387cb80a918957c3899687276706a217f69e68ed86a2568d454d/drawdata-0.5.2.tar.gz", hash = "sha256:11fb54a2a0b188e9c49bba344e019ea0d5f89752e2510031531035892e4fa455" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/df/f57bbf49607c0f66fd69331efae41cbc24d3d878f53d3fb0fa2d4455ec51/drawdata-0.5.2-py3-none-any.whl", hash = "sha256:e5045ed5d2128d7ef004aac9ff2195ba46d6e0711dd7adc663104f6b954eb1cf" },
+]
+
+[[package]]
 name = "equinox"
 version = "0.13.4"
 source = { registry = "https://pypi.org/simple" }
@@ -757,7 +769,9 @@ dependencies = [
 [package.dev-dependencies]
 bench = [
     { name = "anyplotlib" },
+    { name = "anywidget" },
     { name = "array-api-strict" },
+    { name = "drawdata" },
     { name = "equinox" },
     { name = "h5py" },
     { name = "jax" },
@@ -782,9 +796,11 @@ cuda13 = [
 ]
 dev = [
     { name = "anyplotlib" },
+    { name = "anywidget" },
     { name = "array-api-strict" },
     { name = "codespell" },
     { name = "deptry" },
+    { name = "drawdata" },
     { name = "equinox" },
     { name = "h5py" },
     { name = "jax" },
@@ -828,6 +844,8 @@ lint = [
 ]
 plot = [
     { name = "anyplotlib" },
+    { name = "anywidget" },
+    { name = "drawdata" },
     { name = "marimo" },
     { name = "matplotlib" },
     { name = "mlx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine != 'arm64' and extra == 'group-9-fastsimus-cuda12' and extra == 'group-9-fastsimus-cuda13') or (sys_platform != 'darwin' and extra == 'group-9-fastsimus-cuda12' and extra == 'group-9-fastsimus-cuda13')" },
@@ -863,7 +881,9 @@ test-parallel = [
 ]
 test-plot = [
     { name = "anyplotlib" },
+    { name = "anywidget" },
     { name = "array-api-strict" },
+    { name = "drawdata" },
     { name = "equinox" },
     { name = "h5py" },
     { name = "jax" },
@@ -892,7 +912,9 @@ requires-dist = [
 [package.metadata.requires-dev]
 bench = [
     { name = "anyplotlib", specifier = ">=0.7" },
+    { name = "anywidget", specifier = ">=0.11" },
     { name = "array-api-strict", specifier = ">=2.0" },
+    { name = "drawdata", specifier = ">=0.5" },
     { name = "equinox", specifier = ">=0.11" },
     { name = "h5py", specifier = ">=3.16.0" },
     { name = "jax", specifier = ">=0.9" },
@@ -914,9 +936,11 @@ cuda12 = [{ name = "cupy-cuda12x", marker = "sys_platform == 'linux'", specifier
 cuda13 = [{ name = "cupy-cuda13x", extras = ["ctk"], marker = "sys_platform == 'linux'", specifier = ">=13.0" }]
 dev = [
     { name = "anyplotlib", specifier = ">=0.7" },
+    { name = "anywidget", specifier = ">=0.11" },
     { name = "array-api-strict", specifier = ">=2.0" },
     { name = "codespell", specifier = ">=2.4.1" },
     { name = "deptry", specifier = ">=0.24.0" },
+    { name = "drawdata", specifier = ">=0.5" },
     { name = "equinox", specifier = ">=0.11" },
     { name = "h5py", specifier = ">=3.16.0" },
     { name = "jax", specifier = ">=0.9" },
@@ -961,6 +985,8 @@ lint = [
 ]
 plot = [
     { name = "anyplotlib", specifier = ">=0.7" },
+    { name = "anywidget", specifier = ">=0.11" },
+    { name = "drawdata", specifier = ">=0.5" },
     { name = "marimo", specifier = ">=0.24.0" },
     { name = "matplotlib", specifier = ">=3.10" },
     { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = ">=0.31" },
@@ -996,7 +1022,9 @@ test-parallel = [
 ]
 test-plot = [
     { name = "anyplotlib", specifier = ">=0.7" },
+    { name = "anywidget", specifier = ">=0.11" },
     { name = "array-api-strict", specifier = ">=2.0" },
+    { name = "drawdata", specifier = ">=0.5" },
     { name = "equinox", specifier = ">=0.11" },
     { name = "h5py", specifier = ">=3.16.0" },
     { name = "jax", specifier = ">=0.9" },

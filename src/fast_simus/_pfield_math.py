@@ -103,16 +103,21 @@ def _distances_and_angles(
     )
     delta_x = delta[..., 0]
     delta_z = delta[..., 1]
-    dist_squared = delta_x**2 + delta_z**2
-    distances = xp.sqrt(dist_squared)
+    distances = xp.sqrt(delta_x**2 + delta_z**2)
 
-    # Distances with clipping (use unclipped sqrt for angle computation)
+    # Spreading uses a physical floor (lambda/2). Angle uses the unclipped distance.
     min_distance = xp.asarray(speed_of_sound / freq_center / 2.0)
     distances_clipped = xp.where(distances < min_distance, min_distance, distances)
 
-    # Angle relative to element normal
-    _div_eps = xp.asarray(1e-16)  # Numerical stability for division
-    theta_arr = xp.asin((delta_x + _div_eps) / (distances + _div_eps)) - theta_e[:, None]
+    # hypot(x, 0) = |x|, so grazing points stay on the asin domain. Clip remaining
+    # rounding. Coincidence (r = 0) is 0/0; treat it as on-axis rather than adding
+    # eps to both dx and r, which biases the angle and still overflows asin on GPU.
+    zero = xp.asarray(0.0)
+    safe_r = xp.where(distances > zero, distances, xp.asarray(1.0))
+    sin_arg = delta_x / safe_r
+    sin_arg = xp.where(sin_arg < -1.0, xp.asarray(-1.0), sin_arg)
+    sin_arg = xp.where(sin_arg > 1.0, xp.asarray(1.0), sin_arg)
+    theta_arr = xp.asin(sin_arg) - theta_e[:, None]
     sin_theta = xp.sin(theta_arr)
 
     return distances_clipped, sin_theta, theta_arr

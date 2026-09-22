@@ -308,8 +308,6 @@ def pfield_precompute(
         lambda_min = speed_of_sound / (params.freq_center * (1.0 + params.bandwidth / 2.0))
         n_sub = ceil(params.element_width / lambda_min)
 
-    seg_length = params.element_width / n_sub
-
     # Geometry for max-distance calculation
     element_pos, theta_elements, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
     if theta_elements is None:
@@ -319,27 +317,54 @@ def pfield_precompute(
         positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
     )
 
-    # Frequency step: requires float() extraction from array
-    df = 1.0 / (float(xp.max(distances)) / speed_of_sound + float(xp.max(delays_clean)))
-    df = float(frequency_step) * df
+    max_travel_time = float(xp.max(distances)) / speed_of_sound + float(xp.max(delays_clean))
+    return _pfield_plan_for_travel_time(
+        max_travel_time,
+        params,
+        tx_n_wavelengths=tx_n_wavelengths,
+        db_thresh=db_thresh,
+        n_sub=n_sub,
+        frequency_step=frequency_step,
+        xp=xp,
+    )
 
-    # Frequency selection: uses boolean masking -> dynamic n_frequencies
-    freq_plan = _select_frequencies(params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, df, xp)
-    df = freq_plan.freq_step
-    n_freq_full = round(2.0 * params.freq_center / df) + 1
-    freq_idx_start = round(float(freq_plan.selected_freqs[0]) / df)
 
-    correction_factor = 1.0 if tx_n_wavelengths == float("inf") else df
-    correction_factor = correction_factor * params.element_width
+def _pfield_plan_for_travel_time(
+    max_travel_time: float,
+    params: TransducerParams,
+    *,
+    tx_n_wavelengths: float | int,
+    db_thresh: float | int,
+    n_sub: int,
+    frequency_step: float | int,
+    xp: _ArrayNamespace,
+) -> PfieldPlan:
+    """Build a pressure-field plan long enough for a propagation path."""
+    if max_travel_time <= 0.0:
+        raise ValueError("Maximum travel time must be positive")
+
+    max_freq_step = float(frequency_step) / max_travel_time
+    freq_plan = _select_frequencies(
+        params.freq_center,
+        params.bandwidth,
+        tx_n_wavelengths,
+        db_thresh,
+        max_freq_step,
+        xp,
+    )
+    actual_freq_step = freq_plan.freq_step
+    n_freq_full = round(2.0 * params.freq_center / actual_freq_step) + 1
+    freq_idx_start = round(float(freq_plan.selected_freqs[0]) / actual_freq_step)
+    correction_factor = 1.0 if tx_n_wavelengths == float("inf") else actual_freq_step
 
     return PfieldPlan(
         selected_freqs=freq_plan.selected_freqs,
         pulse_spectrum=freq_plan.pulse_spectrum,
         probe_spectrum=freq_plan.probe_spectrum,
         n_sub=n_sub,
-        seg_length=seg_length,
-        correction_factor=correction_factor,
-        freq_step=df,
+        seg_length=params.element_width / n_sub,
+        correction_factor=correction_factor * params.element_width,
+        freq_step=actual_freq_step,
         n_freq_full=n_freq_full,
         freq_idx_start=freq_idx_start,
     )

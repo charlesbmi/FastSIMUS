@@ -111,6 +111,8 @@ bench = [
 # Plotting deps are separate so `bench` users who only need raw JSON can skip them.
 plot = [
     "anyplotlib>=0.7",
+    "anywidget>=0.11",
+    "drawdata>=0.5",
     "marimo>=0.24.0",
     "matplotlib>=3.10",
     "pandas>=2.2",
