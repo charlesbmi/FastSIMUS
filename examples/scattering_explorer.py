@@ -29,10 +29,12 @@ with app.setup(hide_code=True):
     from _scattering_explorer import (
         apodization_svg,
         append_drawn_points,
+        custom_rows_are_dirty,
         estimate_simulation_workload,
         grid_from_spacing,
         normalize_custom_rows,
         picmus_point_targets,
+        snapshot_custom_rows,
         spacing_in_mm,
         speckle_lesion,
         status_text,
@@ -281,9 +283,17 @@ def _():
         {"x_mm": -5.0, "z_mm": 25.0, "rc": 0.005},
         {"x_mm": 5.0, "z_mm": 35.0, "rc": 0.005},
     ]
-    get_custom_rows, set_custom_rows = mo.state(initial_custom_rows)
+    get_custom_draft_rows, set_custom_draft_rows = mo.state(snapshot_custom_rows(initial_custom_rows))
+    get_custom_applied_rows, set_custom_applied_rows = mo.state(snapshot_custom_rows(initial_custom_rows))
     get_custom_error, set_custom_error = mo.state(None)
-    return get_custom_error, get_custom_rows, set_custom_error, set_custom_rows
+    return (
+        get_custom_applied_rows,
+        get_custom_draft_rows,
+        get_custom_error,
+        set_custom_applied_rows,
+        set_custom_draft_rows,
+        set_custom_error,
+    )
 
 
 @app.cell(hide_code=True)
@@ -372,7 +382,7 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(set_custom_error, set_custom_rows, x_roi_ui, z_roi_ui):
+def _(set_custom_draft_rows, set_custom_error, x_roi_ui, z_roi_ui):
     x_min, x_max = x_roi_ui.value
     z_min, z_max = z_roi_ui.value
     custom_extent = (float(x_min), float(x_max), float(z_min), float(z_max))
@@ -395,7 +405,7 @@ def _(set_custom_error, set_custom_rows, x_roi_ui, z_roi_ui):
         if any(value < 0.0 for value in class_values):
             set_custom_error("Custom reflectivity must be nonnegative")
             return
-        set_custom_rows(
+        set_custom_draft_rows(
             lambda rows: append_drawn_points(
                 rows,
                 drawing_data,
@@ -408,40 +418,57 @@ def _(set_custom_error, set_custom_rows, x_roi_ui, z_roi_ui):
         set_custom_error(None)
         draw_widget.data = []
 
-    add_drawing_ui = mo.ui.button(label="Add drawn points", kind="success", on_click=add_drawing)
+    add_drawing_ui = mo.ui.button(label="Add drawn points to draft", kind="success", on_click=add_drawing)
     return add_drawing_ui, class_a_ui, class_b_ui, class_c_ui, class_d_ui, draw_widget
 
 
 @app.cell(hide_code=True)
-def _(get_custom_error, get_custom_rows):
-    custom_rows_snapshot = normalize_custom_rows(get_custom_rows())
+def _(get_custom_applied_rows, get_custom_draft_rows, get_custom_error):
+    custom_draft_rows = snapshot_custom_rows(get_custom_draft_rows())
+    custom_applied_rows = snapshot_custom_rows(get_custom_applied_rows())
+    custom_is_dirty = custom_rows_are_dirty(custom_draft_rows, custom_applied_rows)
     custom_error = get_custom_error()
     table_data = {
-        "x_mm": [row["x_mm"] for row in custom_rows_snapshot],
-        "z_mm": [row["z_mm"] for row in custom_rows_snapshot],
-        "rc": [row["rc"] for row in custom_rows_snapshot],
+        "x_mm": [row["x_mm"] for row in custom_draft_rows],
+        "z_mm": [row["z_mm"] for row in custom_draft_rows],
+        "rc": [row["rc"] for row in custom_draft_rows],
     }
-    return custom_error, custom_rows_snapshot, table_data
+    return custom_applied_rows, custom_draft_rows, custom_error, custom_is_dirty, table_data
 
 
 @app.cell(hide_code=True)
-def _(set_custom_error, set_custom_rows, table_data):
+def _(set_custom_draft_rows, set_custom_error, table_data):
     def replace_table(value):
         try:
             normalized = normalize_custom_rows(value)
         except ValueError as error:
             set_custom_error(str(error))
             return
-        set_custom_rows(normalized)
+        set_custom_draft_rows(normalized)
         set_custom_error(None)
 
     table_editor = mo.ui.data_editor(
         table_data,
-        label="Final scatterers",
+        label="Draft scatterers",
         editable_columns=["x_mm", "z_mm", "rc"],
         on_change=replace_table,
     )
     return (table_editor,)
+
+
+@app.cell(hide_code=True)
+def _(custom_draft_rows, set_custom_applied_rows, set_custom_error):
+    def apply_custom_scene(_value):
+        try:
+            applied = snapshot_custom_rows(custom_draft_rows)
+        except ValueError as error:
+            set_custom_error(str(error))
+            return
+        set_custom_applied_rows(applied)
+        set_custom_error(None)
+
+    run_custom_ui = mo.ui.button(label="Run custom simulation", kind="success", on_click=apply_custom_scene)
+    return (run_custom_ui,)
 
 
 @app.cell(hide_code=True)
@@ -452,10 +479,13 @@ def _(
     class_c_ui,
     class_d_ui,
     custom_error,
-    custom_rows_snapshot,
+    custom_applied_rows,
+    custom_draft_rows,
+    custom_is_dirty,
     draw_widget,
     scene_ui,
     table_editor,
+    run_custom_ui,
 ):
     draw_panel = mo.vstack(
         [
@@ -466,7 +496,7 @@ def _(
             mo.hstack([class_a_ui, class_b_ui, class_c_ui, class_d_ui], widths="equal", gap=0.5),
             draw_widget,
             mo.hstack(
-                [add_drawing_ui, mo.md(f"**{len(custom_rows_snapshot)} points** currently in the final table")],
+                [add_drawing_ui, mo.md(f"**{len(custom_draft_rows)} staged points** in the draft table")],
                 justify="start",
                 gap=1.0,
             ),
@@ -476,22 +506,61 @@ def _(
     custom_editor = mo.ui.tabs(
         {
             "Draw additions": draw_panel,
-            "Edit final table": mo.vstack(
+            "Edit draft table": mo.vstack(
                 [
-                    mo.md("Edit, add, or delete final physical coordinates and nonnegative relative amplitudes."),
+                    mo.md("Edit, add, or delete draft physical coordinates and nonnegative relative amplitudes."),
                     mo.callout(custom_error, kind="danger") if custom_error else mo.md(""),
                     table_editor,
                 ]
             ),
         }
     )
-    custom_output = custom_editor if scene_ui.value == "Custom" else None
+    custom_status = (
+        mo.callout("Changes not yet simulated.", kind="warn")
+        if custom_is_dirty
+        else mo.callout("Draft matches the currently simulated Custom scene.", kind="success")
+    )
+    custom_output = (
+        mo.vstack(
+            [
+                custom_editor,
+                mo.hstack(
+                    [
+                        run_custom_ui,
+                        mo.md(
+                            f"**{len(custom_draft_rows)} staged** · **{len(custom_applied_rows)} currently simulated**"
+                        ),
+                    ],
+                    justify="start",
+                    gap=1.0,
+                ),
+                custom_status,
+            ],
+            gap=0.55,
+        )
+        if scene_ui.value == "Custom"
+        else None
+    )
     return (custom_output,)
 
 
 @app.cell(hide_code=True)
-def _(get_custom_rows, is_script_mode, scene_ui, single_x_ui, single_z_ui, speckle_count_ui):
-    custom_rows = normalize_custom_rows(get_custom_rows())
+def _():
+    mo.md(r"""
+    # FastSIMUS scattering explorer
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(custom_output):
+    custom_output
+    return
+
+
+@app.cell(hide_code=True)
+def _(get_custom_applied_rows, is_script_mode, scene_ui, single_x_ui, single_z_ui, speckle_count_ui):
+    custom_rows = snapshot_custom_rows(get_custom_applied_rows())
     if scene_ui.value == "Single reflector":
         scatterers_mm = np.asarray([[float(single_x_ui.value), float(single_z_ui.value)]])
         reflection_coefficients = np.asarray([0.005])
@@ -597,16 +666,9 @@ def _(
         frequency_step=2.0 if is_script_mode else 0.5,
         time_oversampling=DEFAULT_TIME_OVERSAMPLING,
     )
-    sim = cached_simulation(config, xp)
+    with mo.status.spinner(title="Running full-fidelity simulation..."):
+        sim = cached_simulation(config, xp)
     return (sim,)
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    # FastSIMUS scattering explorer
-    """)
-    return
 
 
 @app.cell(hide_code=True)
@@ -648,12 +710,6 @@ def _(
         rms_dynamic_range=float(rms_range_ui.value),
     )
     mo.vstack([viewer_ui, reflectivity_key], gap=0.2)
-    return
-
-
-@app.cell(hide_code=True)
-def _(custom_output):
-    custom_output
     return
 
 

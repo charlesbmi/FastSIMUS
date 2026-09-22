@@ -30,6 +30,21 @@ _MLX_ISDTYPE_KIND_MAP: dict[str, str] = {
     "numeric": "number",
 }
 
+_TRANSFORM_EVAL_ERROR = "during function transformations"
+
+
+def eval_eager(*arrays: Any) -> None:
+    """Materialize MLX arrays unless MLX is tracing a function transform."""
+    import mlx.core as mx
+
+    try:
+        mx.eval(*arrays)
+    except ValueError as error:
+        # Compiled graphs retain producer-consumer dependencies themselves,
+        # and MLX deliberately rejects explicit evaluation while tracing.
+        if _TRANSFORM_EVAL_ERROR not in str(error):
+            raise
+
 
 def _make_isdtype(xp: Any) -> Any:
     def isdtype(dtype: Any, kind: Any) -> bool:

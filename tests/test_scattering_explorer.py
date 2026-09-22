@@ -6,6 +6,7 @@ import pytest
 from examples._scattering_explorer import (
     append_drawn_points,
     canvas_to_physical,
+    custom_rows_are_dirty,
     drawing_class_coefficients,
     estimate_field_movie_bytes,
     estimate_simulation_workload,
@@ -14,6 +15,7 @@ from examples._scattering_explorer import (
     normalize_custom_rows,
     physical_to_canvas,
     picmus_point_targets,
+    snapshot_custom_rows,
     spacing_in_mm,
     speckle_lesion,
     tukey_apodization,
@@ -103,6 +105,31 @@ def test_custom_rows_are_normalized() -> None:
     rows = normalize_custom_rows([{"x_mm": 1, "z_mm": 2, "rc": 0.5}])
 
     assert rows == [{"x_mm": 1.0, "z_mm": 2.0, "rc": 0.5}]
+
+
+def test_custom_row_snapshot_is_an_independent_applied_copy() -> None:
+    """Applying a draft creates a normalized scene that later edits cannot mutate."""
+    draft = [{"x_mm": 1, "z_mm": 2, "rc": 0.5}]
+
+    applied = snapshot_custom_rows(draft)
+    draft[0]["x_mm"] = 9
+
+    assert applied == [{"x_mm": 1.0, "z_mm": 2.0, "rc": 0.5}]
+
+
+def test_custom_row_dirty_state_compares_normalized_scenes() -> None:
+    """Dirty state reports only an observable difference from the applied scene."""
+    applied = [{"x_mm": 1.0, "z_mm": 2.0, "rc": 0.5}]
+
+    assert not custom_rows_are_dirty([{"x_mm": 1, "z_mm": 2, "rc": 0.5}], applied)
+    assert custom_rows_are_dirty([{"x_mm": 2, "z_mm": 2, "rc": 0.5}], applied)
+    assert custom_rows_are_dirty([], applied)
+    assert not custom_rows_are_dirty([], [])
+
+
+def test_empty_custom_scene_can_be_applied() -> None:
+    """The Custom workflow supports deliberately simulating no scatterers."""
+    assert snapshot_custom_rows([]) == []
 
 
 def test_custom_rows_reject_negative_reflectivity() -> None:

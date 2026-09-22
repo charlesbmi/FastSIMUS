@@ -136,6 +136,16 @@ def normalize_custom_rows(rows) -> list[dict[str, float]]:
     return normalized
 
 
+def snapshot_custom_rows(rows) -> list[dict[str, float]]:
+    """Copy a normalized Custom draft into an independent applied scene."""
+    return normalize_custom_rows(rows)
+
+
+def custom_rows_are_dirty(draft_rows, applied_rows) -> bool:
+    """Return whether a Custom draft differs from the last applied scene."""
+    return normalize_custom_rows(draft_rows) != normalize_custom_rows(applied_rows)
+
+
 def wavelength_mm(speed_of_sound: float, center_frequency_mhz: float) -> float:
     """Return the center wavelength in millimetres."""
     if speed_of_sound <= 0.0 or center_frequency_mhz <= 0.0:

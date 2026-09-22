@@ -11,6 +11,7 @@ mx = pytest.importorskip("mlx.core")
 
 from fast_simus import jit
 from fast_simus.pfield import pfield_compute, pfield_precompute, pfield_spectrum_compute
+from fast_simus.scattering import scattering_pfield_spectrum
 from fast_simus.simus import simus_compute, simus_precompute
 from fast_simus.transducer_presets import P4_2v
 
@@ -88,3 +89,57 @@ def test_mlx_simus_compute():
     assert rf.ndim == 2
     assert rf.shape[1] == params.n_elements
     assert bool(mx.max(mx.abs(rf)) > 0)
+
+
+@pytest.mark.slow
+def test_mlx_scattering_materializes_each_observer_chunk(monkeypatch: pytest.MonkeyPatch):
+    """Chunk barriers bound the MLX graph while retaining numerical agreement."""
+    from typing import cast
+
+    import fast_simus.backends.mlx as mlx_backend
+    import fast_simus.scattering as scattering_module
+    from fast_simus.backends.mlx import ensure_compat
+    from fast_simus.utils._array_api import Array
+
+    ensure_compat(mx)
+    monkeypatch.setattr(scattering_module, "_MAX_PAIR_ELEMENTS", 4)
+    materializations = 0
+    original_eval_eager = mlx_backend.eval_eager
+
+    def recording_eval_eager(*arrays):
+        nonlocal materializations
+        materializations += 1
+        original_eval_eager(*arrays)
+
+    monkeypatch.setattr(mlx_backend, "eval_eager", recording_eval_eager)
+
+    params = P4_2v()
+    positions_np = np.column_stack([np.linspace(-2e-3, 2e-3, 9), np.linspace(20e-3, 28e-3, 9)]).astype(np.float32)
+    scatterers_np = np.asarray([[-1e-3, 12e-3], [0.0, 14e-3], [1e-3, 16e-3]], dtype=np.float32)
+    rc_np = np.asarray([0.002, 0.003, 0.004], dtype=np.float32)
+    delays_np = np.zeros(params.n_elements, dtype=np.float32)
+
+    mlx_result = scattering_pfield_spectrum(
+        cast(Array, mx.array(positions_np)),
+        cast(Array, mx.array(scatterers_np)),
+        cast(Array, mx.array(rc_np)),
+        cast(Array, mx.array(delays_np)),
+        params,
+        element_splitting=1,
+        frequency_step=10.0,
+    )
+    numpy_result = scattering_pfield_spectrum(
+        cast(Array, positions_np),
+        cast(Array, scatterers_np),
+        cast(Array, rc_np),
+        cast(Array, delays_np),
+        params,
+        element_splitting=1,
+        frequency_step=10.0,
+    )
+    mx.eval(mlx_result.scattered)
+
+    assert type(mlx_result.scattered).__module__.startswith("mlx")
+    assert materializations == 5
+    assert bool(mx.all(mx.isfinite(mlx_result.scattered)))
+    np.testing.assert_allclose(np.asarray(mlx_result.scattered), numpy_result.scattered, rtol=2e-4, atol=2e-7)
