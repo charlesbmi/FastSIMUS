@@ -14,6 +14,10 @@ consumes are *not* fed in here.
 
 Requires: CuPy on a CUDA host. Use ``cupy-cuda12x`` for CUDA 12/Pascal
 hosts and ``cupy-cuda13x`` for CUDA 13/Turing-or-newer hosts.
+
+Limitations:
+    - Soft baffle only (BaffleType.SOFT assumed)
+    - Center-frequency directivity only (full_frequency_directivity=False)
 """
 
 from __future__ import annotations

@@ -287,47 +287,6 @@ def array_namespace(*arrays: Any) -> ArrayNamespace:
     return cast(ArrayNamespace, xp)
 
 
-def default_namespace() -> ArrayNamespace:
-    """Return the best available Array API namespace.
-
-    GPU backends are preferred, followed by JAX and NumPy.
-
-    Examples:
-        >>> xp = default_namespace()
-        >>> grid = xp.asarray(positions)
-    """
-    try:
-        import cupy as cp
-    except ImportError:
-        pass
-    else:
-        try:
-            device_count = int(cp.cuda.runtime.getDeviceCount())
-        except cp.cuda.runtime.CUDARuntimeError:
-            device_count = 0
-        if device_count:
-            return cast(ArrayNamespace, cp)
-
-    try:
-        import mlx.core as mx
-    except ImportError:
-        pass
-    else:
-        _ensure_mlx_compat(mx)
-        return cast(ArrayNamespace, mx)
-
-    try:
-        import jax.numpy as jnp
-    except ImportError:
-        pass
-    else:
-        return cast(ArrayNamespace, jnp)
-
-    import array_api_compat.numpy as np
-
-    return cast(ArrayNamespace, np)
-
-
 def as_numpy(x: Any) -> Any:
     """Return ``x`` as a host NumPy array."""
     import array_api_compat.numpy as np

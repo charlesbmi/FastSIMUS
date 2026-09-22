@@ -14,13 +14,10 @@ References:
 
 from __future__ import annotations
 
-from enum import StrEnum
 from math import ceil, inf, log2, pi
-from types import ModuleType
 from typing import NamedTuple, cast
 
 import array_api_extra as xpx
-from array_api_compat import is_jax_namespace
 from jaxtyping import Complex, Float
 
 from fast_simus._pfield_math import (
@@ -30,6 +27,8 @@ from fast_simus._pfield_math import (
     _select_frequencies,
     _subelement_centroids,
 )
+from fast_simus._simus_dispatch import SimusImplementation, select_simus_implementation
+from fast_simus.backends._selection import Backend, BackendKind
 from fast_simus.medium_params import MediumParams
 from fast_simus.spectrum import probe_spectrum as _probe_spectrum_fn
 from fast_simus.spectrum import pulse_spectrum as _pulse_spectrum_fn
@@ -39,7 +38,6 @@ from fast_simus.utils._array_api import (
     _ArrayNamespace,
     _ArrayNamespaceWithFFT,
     array_namespace,
-    is_cupy_namespace,
 )
 from fast_simus.utils.geometry import element_positions
 
@@ -102,22 +100,6 @@ def _two_way_pulse_duration(
     trim_idx = min(idx1 + 1, 2 * n_fft - 1 - idx2 - 1)
     pulse_trimmed = pulse[-trim_idx : trim_idx - 2 : -1]
     return float(pulse_trimmed.shape[0] * dt)
-
-
-class SimusStrategy(StrEnum):
-    """Backend strategy for the simus frequency sweep.
-
-    Attributes:
-        PYTHON: Python for-loop (NumPy/CuPy, constant memory).
-        SCAN: JAX lax.scan for O(1) compilation cost.
-        METAL: Custom Metal kernel on Apple Silicon (MLX).
-        CUDA: Custom CUDA kernel on NVIDIA GPUs (CuPy + NVRTC).
-    """
-
-    PYTHON = "python"
-    SCAN = "scan"
-    METAL = "metal"
-    CUDA = "cuda"
 
 
 class SimusResult(NamedTuple):
@@ -367,28 +349,6 @@ def _irfft_and_threshold(
     return rf, full_spectrum
 
 
-def _select_simus_strategy(xp: _ArrayNamespace, strategy: SimusStrategy | None) -> SimusStrategy:
-    """Auto-select simus strategy based on array backend."""
-    if strategy is not None:
-        return strategy
-
-    if is_jax_namespace(cast(ModuleType, xp)):
-        return SimusStrategy.SCAN
-
-    try:
-        import mlx.core
-
-        if xp is mlx.core:
-            return SimusStrategy.METAL
-    except ImportError:
-        pass
-
-    if is_cupy_namespace(xp):
-        return SimusStrategy.CUDA
-
-    return SimusStrategy.PYTHON
-
-
 def simus_compute(
     scatterers: Float[Array, "*batch 2"],
     rc: Float[Array, " *batch"],
@@ -399,7 +359,7 @@ def simus_compute(
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
     full_frequency_directivity: bool = False,
-    strategy: SimusStrategy | None = None,
+    backend: Backend | BackendKind | str | None = None,
 ) -> SimusResult:
     """Compute RF signals given a precomputed plan.
 
@@ -413,8 +373,8 @@ def simus_compute(
         tx_apodization: Transmit apodization weights. Shape ``(n_elements,)``.
         full_frequency_directivity: If True, compute element directivity at
             every frequency.
-        strategy: Backend strategy for the frequency sweep. If None,
-            auto-selects based on the detected array backend.
+        backend: Optional backend context or explicit backend name. When
+            omitted, execution is inferred from the input array namespace.
 
     Returns:
         SimusResult with RF signals and complex spectrum.
@@ -433,9 +393,15 @@ def simus_compute(
     scatterers_flat = xp.reshape(scatterers, (n_scat, 2)) if scatterers.ndim > 2 else scatterers
     rc_flat = xp.reshape(rc, (n_scat,)) if rc.ndim > 1 else rc
 
-    selected = _select_simus_strategy(xp, strategy)
+    selected = select_simus_implementation(
+        xp,
+        backend,
+        params,
+        n_sub=plan.n_sub,
+        full_frequency_directivity=full_frequency_directivity,
+    )
 
-    if selected == SimusStrategy.METAL:
+    if selected == SimusImplementation.METAL:
         import mlx.core as mx
 
         from fast_simus.kernels.metal_simus import simus_metal
@@ -452,7 +418,7 @@ def simus_compute(
                 tx_apodization=cast(mx.array, tx_apodization),
             ),
         )
-    elif selected == SimusStrategy.CUDA:
+    elif selected == SimusImplementation.CUDA:
         from fast_simus.kernels.cuda_simus import simus_cuda
 
         spect_selected = cast(
@@ -478,7 +444,7 @@ def simus_compute(
             full_frequency_directivity=full_frequency_directivity,
             xp=xp,
         )
-        if selected == SimusStrategy.SCAN:
+        if selected == SimusImplementation.SCAN:
             from fast_simus._simus_strategies import _simus_freq_outer_scan
 
             spect_selected = _simus_freq_outer_scan(rc=rc_flat, xp=xp, **sweep)
@@ -509,7 +475,7 @@ def simus(
     full_frequency_directivity: bool = False,
     element_splitting: int | None = None,
     frequency_step: float | int = 1.0,
-    strategy: SimusStrategy | None = None,
+    backend: Backend | BackendKind | str | None = None,
 ) -> SimusResult:
     """Simulate ultrasound RF signals for a linear or convex array.
 
@@ -534,8 +500,8 @@ def simus(
             every frequency. If False, use center-frequency-only directivity.
         element_splitting: Number of sub-elements per element (None = auto).
         frequency_step: Scaling factor for the frequency step.
-        strategy: Backend strategy for the frequency sweep. If None,
-            auto-selects based on the detected array backend.
+        backend: Optional backend context or explicit backend name. When
+            omitted, execution is inferred from the input array namespace.
 
     Returns:
         SimusResult with:
@@ -563,5 +529,5 @@ def simus(
         medium,
         tx_apodization=tx_apodization,
         full_frequency_directivity=full_frequency_directivity,
-        strategy=strategy,
+        backend=backend,
     )

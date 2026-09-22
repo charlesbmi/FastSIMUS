@@ -21,7 +21,6 @@ Requires: MLX (mlx package) on Apple Silicon.
 Limitations:
     - Soft baffle only (BaffleType.SOFT assumed)
     - Center-frequency directivity only (full_frequency_directivity=False)
-    - Linear arrays only (convex array support needs testing)
 """
 
 from __future__ import annotations

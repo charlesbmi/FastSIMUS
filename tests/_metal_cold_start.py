@@ -6,8 +6,8 @@ import mlx.core as mx
 import numpy as np
 
 from fast_simus import (
+    BackendKind,
     MediumParams,
-    SimusStrategy,
     element_positions,
     focused,
     rms_from_spectrum,
@@ -56,7 +56,7 @@ def main() -> None:
         fs=4.0 * params.freq_center,
         tx_apodization=apodization,
         frequency_step=0.5,
-        strategy=SimusStrategy.METAL,
+        backend=BackendKind.METAL,
     )
     rf = np.asarray(result.rf)
     if not np.all(np.isfinite(rf)) or np.max(np.abs(rf)) <= 0.0:

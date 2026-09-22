@@ -6,6 +6,7 @@
 #     "drawdata>=0.5",
 #     "fastsimus",
 #     "marimo>=0.24.0",
+#     "cupy-cuda13x[ctk]>=13.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
 #     "mlx>=0.31; sys_platform == 'darwin' and platform_machine == 'arm64'",
 #     "numpy>=2.0",
 # ]
@@ -58,8 +59,9 @@ with app.setup(hide_code=True):
 @app.cell(hide_code=True)
 def _():
     is_script_mode = mo.app_meta().mode == "script"
-    xp = fs.default_namespace()
-    backend_note = f"Numerical backend: **{xp.__name__}**"
+    backend = fs.get_backend()
+    xp = backend.xp
+    backend_note = f"Numerical backend: **{backend.label}**"
     PRESETS = PROBE_PRESETS
     SCENES = ["Single reflector", "PICMUS point targets", "Speckle lesion", "Custom"]
     return PRESETS, SCENES, backend_note, is_script_mode, xp

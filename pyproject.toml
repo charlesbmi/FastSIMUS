@@ -44,6 +44,17 @@ dependencies = [
     "pydantic>=2.0,<3.0",
 ]
 
+[project.optional-dependencies]
+metal = [
+    "mlx>=0.31; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+cuda12 = [
+    "cupy-cuda12x>=13.0; sys_platform == 'linux'",
+]
+cuda13 = [
+    "cupy-cuda13x[ctk]>=13.0; sys_platform == 'linux'",
+]
+
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
 build-backend = "uv_build"
@@ -315,9 +326,11 @@ ignore = [
 "src/fast_simus/simus.py" = ["PLC0415"]
 "src/fast_simus/pfield.py" = ["PLC0415"]
 "src/fast_simus/_simus_strategies.py" = ["PLC0415"]
+"src/fast_simus/_simus_dispatch.py" = ["PLC0415"]
 "src/fast_simus/_pfield_strategies.py" = ["PLC0415"]
+"src/fast_simus/backends/_selection.py" = ["PLC0415"]
 "src/fast_simus/backends/mlx.py" = ["PLC0415"]
-"src/fast_simus/utils/_array_api.py" = ["PLC0415"]  # optional CuPy / MLX in default_namespace
+"src/fast_simus/utils/_array_api.py" = ["PLC0415"]  # optional backend conversions
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 # Marimo notebooks are a DAG of cells; imports live inside cells by design.
 "examples/wavefield_explorer.py" = ["PLC0415", "B018", "D103", "RUF046", "RUF059"]
