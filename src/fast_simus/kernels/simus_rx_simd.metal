@@ -50,7 +50,7 @@
             int sub_idx = elem_idx * N_SUB + s;
             float dx = sx - ex - sub_dx[sub_idx];
             float dz = sz - ez - sub_dz[sub_idx];
-            float r = metal::precise::hypot(dx, dz);
+            float r = metal::precise::sqrt(dx * dx + dz * dz);
             float rc_ = max(r, min_dist);
 
             float sin_arg = (r > 0.0f) ? dx / r : 0.0f;

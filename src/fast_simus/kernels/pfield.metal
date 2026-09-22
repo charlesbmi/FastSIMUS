@@ -40,10 +40,10 @@
 
             float dx = gx - ex - sub_dx[idx];
             float dz = gz - ez - sub_dz[idx];
-            float r = metal::precise::hypot(dx, dz);
+            float r = metal::precise::sqrt(dx * dx + dz * dz);
             float rc = max(r, min_dist);
 
-            // hypot(x, 0) = |x|; clip leftover rounding. r = 0 is on-axis.
+            // sqrt(x²) = |x|; clip leftover rounding. r = 0 is on-axis.
             float sin_arg = (r > 0.0f) ? dx / r : 0.0f;
             sin_arg = metal::clamp(sin_arg, -1.0f, 1.0f);
             float th = metal::precise::asin(sin_arg) - te;

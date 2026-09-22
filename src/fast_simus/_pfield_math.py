@@ -103,9 +103,9 @@ def _distances_and_angles(
     )
     delta_x = delta[..., 0]
     delta_z = delta[..., 1]
-    distances = xp.hypot(delta_x, delta_z)
+    distances = xp.sqrt(delta_x**2 + delta_z**2)
 
-    # Spreading uses a physical floor (lambda/2). Angle uses the unclipped hypot.
+    # Spreading uses a physical floor (lambda/2). Angle uses the unclipped distance.
     min_distance = xp.asarray(speed_of_sound / freq_center / 2.0)
     distances_clipped = xp.where(distances < min_distance, min_distance, distances)
 
@@ -114,7 +114,9 @@ def _distances_and_angles(
     # eps to both dx and r, which biases the angle and still overflows asin on GPU.
     zero = xp.asarray(0.0)
     safe_r = xp.where(distances > zero, distances, xp.asarray(1.0))
-    sin_arg = xp.clip(delta_x / safe_r, min=-1.0, max=1.0)
+    sin_arg = delta_x / safe_r
+    sin_arg = xp.where(sin_arg < -1.0, xp.asarray(-1.0), sin_arg)
+    sin_arg = xp.where(sin_arg > 1.0, xp.asarray(1.0), sin_arg)
     theta_arr = xp.asin(sin_arg) - theta_e[:, None]
     sin_theta = xp.sin(theta_arr)
 

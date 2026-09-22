@@ -68,7 +68,7 @@
 
         float dx = sx - ex - sub_dx[sub_global];
         float dz = sz - ez - sub_dz[sub_global];
-        float r = metal::precise::hypot(dx, dz);
+        float r = metal::precise::sqrt(dx * dx + dz * dz);
         float rc_ = max(r, min_dist);
 
         float sin_arg = (r > 0.0f) ? dx / r : 0.0f;
