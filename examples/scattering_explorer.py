@@ -30,6 +30,7 @@ with app.setup(hide_code=True):
         apodization_svg,
         append_drawn_points,
         custom_rows_are_dirty,
+        drawing_axis_ticks,
         estimate_simulation_workload,
         grid_from_spacing,
         normalize_custom_rows,
@@ -386,11 +387,57 @@ def _(set_custom_draft_rows, set_custom_error, x_roi_ui, z_roi_ui):
     x_min, x_max = x_roi_ui.value
     z_min, z_max = z_roi_ui.value
     custom_extent = (float(x_min), float(x_max), float(z_min), float(z_max))
-    class_a_ui = mo.ui.number(0.0, None, 0.001, value=0.001, label="class a")
-    class_b_ui = mo.ui.number(0.0, None, 0.001, value=0.002, label="class b")
-    class_c_ui = mo.ui.number(0.0, None, 0.001, value=0.005, label="class c (default)")
-    class_d_ui = mo.ui.number(0.0, None, 0.001, value=0.02, label="class d")
+    class_a_ui = mo.ui.number(0.0, None, 0.001, value=0.001, label="class A reflectivity (default)")
+    class_b_ui = mo.ui.number(0.0, None, 0.001, value=0.002, label="class B reflectivity")
+    class_c_ui = mo.ui.number(0.0, None, 0.001, value=0.005, label="class C reflectivity")
+    class_d_ui = mo.ui.number(0.0, None, 0.001, value=0.02, label="class D reflectivity")
     draw_widget = mo.ui.anywidget(ScatterWidget(data=[], width=640, height=480, brushsize=14, n_classes=4))
+
+    x_ticks, z_ticks = drawing_axis_ticks(custom_extent)
+    y_tick_markup = "".join(
+        f'<text x="62" y="{min(max(4 + index * 120, 10), 474)}" text-anchor="end">{value:g}</text>'
+        f'<line x1="65" y1="{index * 120}" x2="72" y2="{index * 120}" />'
+        for index, value in enumerate(z_ticks)
+    )
+    y_axis = mo.Html(
+        f"""
+        <svg width="72" height="526" viewBox="0 0 72 526" role="img"
+             aria-label="Depth z in millimetres, from {z_ticks[-1]:g} to {z_ticks[0]:g}">
+          <g transform="translate(0 42)" fill="currentColor" stroke="currentColor" font-size="12">
+            <line x1="71" y1="0" x2="71" y2="480" />
+            {y_tick_markup}
+            <text transform="rotate(-90)" x="-240" y="13" text-anchor="middle" stroke="none">
+              depth z (mm)
+            </text>
+          </g>
+        </svg>
+        """
+    )
+    x_tick_markup = "".join(
+        f'<line x1="{index * 160}" y1="0" x2="{index * 160}" y2="7" />'
+        f'<text x="{max(4, min(index * 160, 636))}" y="20" '
+        f'text-anchor="{"start" if index == 0 else "end" if index == 4 else "middle"}" '
+        f'stroke="none">{value:g}</text>'
+        for index, value in enumerate(x_ticks)
+    )
+    x_axis = mo.Html(
+        f"""
+        <svg width="640" height="44" viewBox="0 0 640 44" role="img"
+             aria-label="Lateral x in millimetres, from {x_ticks[0]:g} to {x_ticks[-1]:g}">
+          <g fill="currentColor" stroke="currentColor" font-size="12">
+            <line x1="0" y1="1" x2="640" y2="1" />
+            {x_tick_markup}
+            <text x="320" y="40" text-anchor="middle" stroke="none">lateral x (mm)</text>
+          </g>
+        </svg>
+        """
+    )
+    drawing_pad = mo.hstack(
+        [y_axis, mo.vstack([draw_widget, x_axis], align="start", gap=0.0)],
+        justify="start",
+        align="start",
+        gap=0.0,
+    )
 
     def add_drawing(_value):
         class_values = (
@@ -419,7 +466,7 @@ def _(set_custom_draft_rows, set_custom_error, x_roi_ui, z_roi_ui):
         draw_widget.data = []
 
     add_drawing_ui = mo.ui.button(label="Add drawn points to draft", kind="success", on_click=add_drawing)
-    return add_drawing_ui, class_a_ui, class_b_ui, class_c_ui, class_d_ui, draw_widget
+    return add_drawing_ui, class_a_ui, class_b_ui, class_c_ui, class_d_ui, draw_widget, drawing_pad
 
 
 @app.cell(hide_code=True)
@@ -482,7 +529,7 @@ def _(
     custom_applied_rows,
     custom_draft_rows,
     custom_is_dirty,
-    draw_widget,
+    drawing_pad,
     scene_ui,
     table_editor,
     run_custom_ui,
@@ -490,11 +537,12 @@ def _(
     draw_panel = mo.vstack(
         [
             mo.md(
-                "Draw staged additions, selecting class **a-d** in the canvas. "
+                "Draw staged additions, selecting reflectivity class **A-D** in the canvas. "
+                "Class **A** is selected by default. "
                 "Undo and Reset affect only the staged drawing."
             ),
             mo.hstack([class_a_ui, class_b_ui, class_c_ui, class_d_ui], widths="equal", gap=0.5),
-            draw_widget,
+            drawing_pad,
             mo.hstack(
                 [add_drawing_ui, mo.md(f"**{len(custom_draft_rows)} staged points** in the draft table")],
                 justify="start",

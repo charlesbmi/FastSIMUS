@@ -7,6 +7,7 @@ from examples._scattering_explorer import (
     append_drawn_points,
     canvas_to_physical,
     custom_rows_are_dirty,
+    drawing_axis_ticks,
     drawing_class_coefficients,
     estimate_field_movie_bytes,
     estimate_simulation_workload,
@@ -64,12 +65,34 @@ def test_speckle_lesion_is_deterministic_and_hypoechoic() -> None:
 
 
 def test_drawing_classes_map_to_nonnegative_reflectivity() -> None:
-    """Drawdata class labels retain configurable target strengths."""
+    """Drawdata class labels retain target strengths and default to class A."""
     values = (0.001, 0.002, 0.005, 0.02)
 
     coefficients = drawing_class_coefficients(["a", "b", "c", "d", "unknown"], values)
 
-    np.testing.assert_array_equal(coefficients, [0.001, 0.002, 0.005, 0.02, 0.005])
+    np.testing.assert_array_equal(coefficients, [0.001, 0.002, 0.005, 0.02, 0.001])
+
+
+def test_drawing_axes_show_physical_coordinates() -> None:
+    """Drawing ticks span the ROI with increasing depth from bottom to top."""
+    x_ticks, z_ticks = drawing_axis_ticks((-20.0, 20.0, 5.0, 55.0))
+
+    assert x_ticks == (-20.0, -10.0, 0.0, 10.0, 20.0)
+    assert z_ticks == (55.0, 42.5, 30.0, 17.5, 5.0)
+
+
+def test_drawing_without_a_class_uses_class_a_reflectivity() -> None:
+    """Points lacking drawdata metadata follow the visibly selected A default."""
+    rows = append_drawn_points(
+        [],
+        [{"x": 320.0, "y": 240.0}],
+        (-20.0, 20.0, 5.0, 55.0),
+        (0.001, 0.002, 0.005, 0.02),
+        width=640,
+        height=480,
+    )
+
+    assert rows == [{"x_mm": 0.0, "z_mm": 30.0, "rc": 0.001}]
 
 
 def test_draw_table_draw_sequence_uses_one_canonical_table() -> None:

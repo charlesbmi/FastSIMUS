@@ -112,8 +112,18 @@ def physical_to_canvas(
 def drawing_class_coefficients(labels: list[str], class_values: tuple[float, float, float, float]) -> np.ndarray:
     """Map drawdata class labels to relative scatterer amplitudes."""
     mapping = dict(zip(_DRAWING_LABELS, class_values, strict=True))
-    default = class_values[2]
+    default = class_values[0]
     return np.asarray([mapping.get(label, default) for label in labels], dtype=np.float64)
+
+
+def drawing_axis_ticks(
+    extent_mm: tuple[float, float, float, float],
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Return lateral and top-down depth ticks for the drawing canvas."""
+    x_min, x_max, z_min, z_max = extent_mm
+    x_ticks = tuple(float(value) for value in np.linspace(x_min, x_max, 5))
+    z_ticks = tuple(float(value) for value in np.linspace(z_max, z_min, 5))
+    return x_ticks, z_ticks
 
 
 def normalize_custom_rows(rows) -> list[dict[str, float]]:
@@ -299,7 +309,7 @@ def append_drawn_points(
         return existing
     canvas = np.asarray([[item["x"], item["y"]] for item in drawing_data], dtype=np.float64)
     physical = canvas_to_physical(canvas, extent_mm, width=width, height=height)
-    coefficients = drawing_class_coefficients([str(item.get("label", "c")) for item in drawing_data], class_values)
+    coefficients = drawing_class_coefficients([str(item.get("label", "a")) for item in drawing_data], class_values)
     additions = [
         {"x_mm": float(point[0]), "z_mm": float(point[1]), "rc": float(rc)}
         for point, rc in zip(physical, coefficients, strict=True)
