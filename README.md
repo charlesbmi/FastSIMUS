@@ -26,6 +26,9 @@ Install the optional runtime for the target platform with `fastsimus[metal]`, `f
 `fastsimus[cuda13]`. Pass `backend="metal"` or `backend="cuda"` to require a custom kernel, or `backend="mlx"` or
 `backend="cupy"` to force the portable same-library implementation.
 
+Backend contexts choose where arrays are created; the `simus(..., backend=...)` name controls execution policy. For
+example, `get_backend("mlx")` selects MLX arrays, while `simus(..., backend="mlx")` forces portable MLX.
+
 ## Development
 
 This project uses [Flox](https://flox.dev/download) for reproducible system dependencies (Python, uv, CUDA runtime on

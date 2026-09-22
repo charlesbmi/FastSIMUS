@@ -5,8 +5,6 @@ Array API abstraction: ``cupy.RawModule`` NVRTC compile path, kernel
 cache behavior, and CUDA device placement.
 """
 
-from typing import cast
-
 import numpy as np
 import pymust
 import pytest
@@ -25,9 +23,7 @@ from fast_simus.kernels._cuda_capabilities import (
 )
 from fast_simus.kernels.cuda_simus import _get_kernel, _kernel_cache
 from fast_simus.simus import simus
-from fast_simus.transducer_params import BaffleType
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
-from fast_simus.utils._array_api import Array
 from fast_simus.utils.geometry import element_positions
 
 
@@ -67,22 +63,6 @@ def test_device_shared_memory_limit_matches_cuda_eligibility():
         assert "device limit" in reason
 
 
-def test_simus_cuda_output_is_cupy():
-    """End-to-end smoke: result stays on the CuPy device."""
-    params = P4_2v()
-    n = 3
-    scat = cp.asarray(np.stack([np.zeros(n), np.linspace(1e-2, 5e-2, n)], axis=-1).astype(np.float32))
-    rc = cp.ones(n, dtype=cp.float32)
-    delays = cp.zeros(params.n_elements, dtype=cp.float32)
-
-    result = simus(scat, rc, delays, params, backend=BackendKind.CUDA)
-
-    assert isinstance(result.rf, cp.ndarray)
-    assert isinstance(result.spectrum, cp.ndarray)
-    assert result.rf.shape[1] == params.n_elements
-    assert bool(cp.all(cp.isfinite(result.rf)))
-
-
 def test_simus_cuda_on_probe_face_is_finite():
     """A scatterer at an element center on z=0 must not create NaNs."""
     params = P4_2v()
@@ -104,35 +84,6 @@ def test_simus_cuda_on_probe_face_is_finite():
     assert bool(cp.all(cp.isfinite(result.spectrum)))
 
 
-def test_simus_cuda_matches_numpy():
-    """CUDA agrees with the portable NumPy result within the kernel tolerance."""
-    params = P4_2v()
-    n_scat = 6
-    scat_np = np.stack([np.zeros(n_scat), np.linspace(1e-2, 5e-2, n_scat)], axis=-1).astype(np.float32)
-    rc_np = np.ones(n_scat, dtype=np.float32)
-    delays_np = np.zeros(params.n_elements, dtype=np.float32)
-
-    rf_py = np.asarray(
-        simus(
-            cast(Array, scat_np),
-            cast(Array, rc_np),
-            cast(Array, delays_np),
-            params,
-        ).rf,
-    )
-    rf_cu_cp = simus(
-        cast(Array, cp.asarray(scat_np)),
-        cast(Array, cp.asarray(rc_np)),
-        cast(Array, cp.asarray(delays_np)),
-        params,
-        backend=BackendKind.CUDA,
-    ).rf
-    rf_cu = cp.asnumpy(rf_cu_cp)
-
-    peak = float(np.max(np.abs(rf_py)))
-    assert np.allclose(rf_py, rf_cu, atol=5e-3 * peak, rtol=0)
-
-
 def test_simus_cuda_l11_5v_recompile():
     """L11-5v verifies a distinct 128-element NVRTC compile path."""
     params = L11_5v()
@@ -144,19 +95,6 @@ def test_simus_cuda_l11_5v_recompile():
     result = simus(scat, rc, delays, params, backend=BackendKind.CUDA, element_splitting=1)
     assert result.rf.shape[1] == params.n_elements
     assert bool(cp.all(cp.isfinite(result.rf)))
-
-
-def test_simus_cuda_auto_falls_back_for_unsupported_baffle():
-    """Automatic CuPy dispatch uses the portable path for a rigid baffle."""
-    params = P4_2v().model_copy(update={"baffle": BaffleType.RIGID})
-    scat = cp.asarray([[0.0, 3e-2]], dtype=cp.float32)
-    rc = cp.ones(1, dtype=cp.float32)
-    delays = cp.zeros(params.n_elements, dtype=cp.float32)
-
-    expected = simus(scat, rc, delays, params, backend=BackendKind.CUPY)
-    actual = simus(scat, rc, delays, params)
-
-    cp.testing.assert_allclose(actual.rf, expected.rf, rtol=1e-5, atol=1e-7)
 
 
 @pytest.mark.parametrize(

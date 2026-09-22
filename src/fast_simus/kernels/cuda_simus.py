@@ -62,6 +62,11 @@ _source_cache: dict[str, str] = {}
 _kernel_cache: dict[tuple[int, int, int], Any] = {}
 
 
+def cuda_simus_unsupported_reason(n_elements: int, n_sub: int) -> str | None:
+    """Explain why a SIMUS shape exceeds the active CUDA resource limit."""
+    return cuda_shared_memory_unsupported_reason(n_elements, n_sub)
+
+
 def _load_source(filename: str) -> str:
     if filename not in _source_cache:
         _source_cache[filename] = (_KERNELS_DIR / filename).read_text()
@@ -251,7 +256,7 @@ def simus_cuda(
     n_elem, n_sub, n_freq = d["n_elem"], d["n_sub"], d["n_freq"]
 
     shmem = required_cuda_shared_memory(n_elem, n_sub)
-    unsupported_reason = cuda_shared_memory_unsupported_reason(n_elem, n_sub)
+    unsupported_reason = cuda_simus_unsupported_reason(n_elem, n_sub)
     if unsupported_reason is not None:
         raise RuntimeError(unsupported_reason)
 

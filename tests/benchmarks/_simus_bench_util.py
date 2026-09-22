@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fast_simus import Backend, BackendKind, jit
+from fast_simus import BackendKind, jit
 from fast_simus.simus import simus_compute
 from fast_simus.utils._array_api import is_mlx_namespace
 
@@ -21,14 +21,13 @@ def make_simus_compute(
     params: TransducerParams,
     xp: _ArrayNamespace,
     *,
-    backend: Backend | BackendKind | str | None = None,
+    backend: BackendKind | str | None = None,
 ) -> Callable:
     """Return (scatterers, rc, delays) -> SimusResult with backend JIT when available."""
 
     def compute(scat, rc, dl):
         return simus_compute(scat, rc, dl, plan, params, backend=backend)
 
-    backend_kind = backend.kind if isinstance(backend, Backend) else backend
-    if is_mlx_namespace(xp) and backend_kind in (None, BackendKind.AUTO, BackendKind.METAL, "auto", "metal"):
+    if is_mlx_namespace(xp) and backend in (None, BackendKind.AUTO, BackendKind.METAL, "auto", "metal"):
         return compute
     return jit(compute, xp=xp)

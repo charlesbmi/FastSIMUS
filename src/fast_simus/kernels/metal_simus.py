@@ -58,6 +58,13 @@ _TX_DEFAULT_CHUNK = 10_000
 _TRANSFORM_EVAL_ERROR = "during function transformations"
 
 
+def metal_simus_unsupported_reason(n_elements: int) -> str | None:
+    """Explain why a SIMUS shape exceeds the receive-kernel limit."""
+    if n_elements * _RX_SCAT_REDUCE <= 1024:
+        return None
+    return f"n_elements={n_elements} exceeds the Metal receive-kernel limit"
+
+
 def _eval_eager(*arrays: mx.array) -> None:
     """Materialize custom-kernel outputs unless MLX is tracing a transform."""
     try:

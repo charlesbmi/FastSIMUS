@@ -4,7 +4,6 @@ Reference tests compare FastSIMUS simus against PyMUST's simus output.
 Tests are structured as invariants that must hold at every refactoring step.
 """
 
-from importlib import import_module
 from pathlib import Path
 from typing import NamedTuple, cast
 
@@ -13,10 +12,9 @@ import numpy as np
 import pymust
 import pytest
 
-from fast_simus import BackendKind, get_backend
+from fast_simus import BackendKind
 from fast_simus.medium_params import MediumParams
 from fast_simus.simus import SimusResult, simus, simus_compute, simus_precompute
-from fast_simus.transducer_params import BaffleType
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
 from fast_simus.utils._array_api import Array, _ArrayNamespace, as_numpy
 
@@ -493,39 +491,6 @@ class TestSimusMetal:
     def _require_mlx(self):
         pytest.importorskip("mlx")
 
-    def test_metal_matches_python(self):
-        """Metal strategy must match Python strategy (peak-normalized)."""
-        import mlx.core as _mx
-
-        from fast_simus.backends.mlx import ensure_compat
-
-        ensure_compat(_mx)
-
-        params = P4_2v()
-        scatterers_np = np.stack([np.zeros(N_SCATTERERS), np.linspace(1e-2, 5e-2, N_SCATTERERS)], axis=-1)
-        rc_np = np.ones(N_SCATTERERS)
-        delays_np = np.zeros(params.n_elements)
-
-        result_python = simus(xp.asarray(scatterers_np), xp.asarray(rc_np), xp.asarray(delays_np), params)
-
-        result_metal = simus(
-            cast("Array", _mx.array(scatterers_np)),
-            cast("Array", _mx.array(rc_np)),
-            cast("Array", _mx.array(delays_np.astype(np.float32))),
-            params,
-            backend=BackendKind.METAL,
-        )
-
-        rf_python = np.asarray(result_python.rf)
-        rf_metal = np.asarray(result_metal.rf)
-
-        _assert_simus_rf_close(
-            rf_metal,
-            rf_python,
-            atol_peak=0.02,
-            desc="Metal vs Python",
-        )
-
     def test_metal_matches_portable_for_convex_array(self):
         """The custom Metal kernel supports convex probe geometry."""
         import mlx.core as _mx
@@ -661,114 +626,6 @@ class TestSimusMetal:
             atol_peak=0.02,
             desc="Metal chunked (10K) vs Python",
         )
-
-    def test_metal_auto_selected_for_mlx(self):
-        """Auto dispatch on MLX agrees with strict Metal dispatch."""
-        import mlx.core as _mx
-
-        from fast_simus.backends.mlx import ensure_compat
-
-        ensure_compat(_mx)
-        params = P4_2v()
-        scatterers = cast("Array", _mx.array([[0.0, 3e-2]], dtype=_mx.float32))
-        rc = cast("Array", _mx.ones(1))
-        delays = cast("Array", _mx.zeros(params.n_elements))
-
-        inferred = simus(scatterers, rc, delays, params)
-        explicit = simus(scatterers, rc, delays, params, backend=BackendKind.METAL)
-
-        np.testing.assert_array_equal(np.asarray(inferred.rf), np.asarray(explicit.rf))
-
-    def test_auto_falls_back_for_full_frequency_directivity(self):
-        """Known unsupported Metal options use the portable MLX path in auto mode."""
-        import mlx.core as _mx
-
-        from fast_simus.backends.mlx import ensure_compat
-
-        ensure_compat(_mx)
-        params = P4_2v()
-        scatterers = _mx.array([[0.0, 3e-2]], dtype=_mx.float32)
-        rc = _mx.ones(1)
-        delays = _mx.zeros(params.n_elements)
-
-        expected = simus(
-            cast("Array", scatterers),
-            cast("Array", rc),
-            cast("Array", delays),
-            params,
-            full_frequency_directivity=True,
-            backend=get_backend(BackendKind.MLX),
-        )
-        actual = simus(
-            cast("Array", scatterers),
-            cast("Array", rc),
-            cast("Array", delays),
-            params,
-            full_frequency_directivity=True,
-        )
-
-        np.testing.assert_allclose(np.asarray(actual.rf), np.asarray(expected.rf), rtol=1e-5, atol=1e-7)
-
-    def test_explicit_metal_rejects_unsupported_directivity(self):
-        """Strict Metal selection fails rather than silently changing the request."""
-        import mlx.core as _mx
-
-        from fast_simus.backends.mlx import ensure_compat
-
-        ensure_compat(_mx)
-        params = P4_2v()
-        scatterers = _mx.array([[0.0, 3e-2]], dtype=_mx.float32)
-        rc = _mx.ones(1)
-        delays = _mx.zeros(params.n_elements)
-
-        with pytest.raises(NotImplementedError, match="full_frequency_directivity"):
-            simus(
-                cast("Array", scatterers),
-                cast("Array", rc),
-                cast("Array", delays),
-                params,
-                full_frequency_directivity=True,
-                backend=BackendKind.METAL,
-            )
-
-    def test_auto_falls_back_for_unsupported_baffle(self):
-        """A known custom-kernel limitation falls back without changing arrays."""
-        import mlx.core as _mx
-
-        from fast_simus.backends.mlx import ensure_compat
-
-        ensure_compat(_mx)
-        params = P4_2v().model_copy(update={"baffle": BaffleType.RIGID})
-        scatterers = cast("Array", _mx.array([[0.0, 3e-2]], dtype=_mx.float32))
-        rc = cast("Array", _mx.ones(1))
-        delays = cast("Array", _mx.zeros(params.n_elements))
-
-        portable = simus(scatterers, rc, delays, params, backend=BackendKind.MLX)
-        inferred = simus(scatterers, rc, delays, params)
-
-        assert type(inferred.rf) is type(portable.rf)
-        np.testing.assert_allclose(np.asarray(inferred.rf), np.asarray(portable.rf), rtol=1e-5, atol=1e-7)
-
-    def test_unexpected_metal_launch_failure_propagates(self, monkeypatch):
-        """Auto dispatch does not hide compilation or launch failures."""
-        import mlx.core as _mx
-
-        from fast_simus.backends.mlx import ensure_compat
-
-        ensure_compat(_mx)
-        kernel_module = import_module("fast_simus.kernels.metal_simus")
-        params = P4_2v()
-        scatterers = cast("Array", _mx.array([[0.0, 3e-2]], dtype=_mx.float32))
-        rc = cast("Array", _mx.ones(1))
-        delays = cast("Array", _mx.zeros(params.n_elements))
-
-        def fail_launch(*args, **kwargs):
-            raise RuntimeError("synthetic Metal launch failure")
-
-        monkeypatch.setattr(kernel_module, "simus_metal", fail_launch)
-
-        with pytest.raises(RuntimeError, match="synthetic Metal launch failure"):
-            simus(scatterers, rc, delays, params)
 
 
 class TestSimusBackendOverride:

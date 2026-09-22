@@ -48,7 +48,7 @@ def test_bench_simus_acceleration(benchmark: Any, acceleration_backend, n_scat: 
     rc = xp.asarray(rng.uniform(0.5, 1.5, n_scat).astype(np.float32))
     delays = xp.zeros(params.n_elements)
     plan = simus_precompute(scatterers, rc, delays, params, element_splitting=1)
-    compute = make_simus_compute(plan, params, xp, backend=backend)
+    compute = make_simus_compute(plan, params, xp, backend=backend.kind)
 
     warmed = compute(scatterers, rc, delays)
     sync_benchmark_array(warmed.rf, xp)

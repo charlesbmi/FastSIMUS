@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import platform
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from types import ModuleType
 from typing import cast
@@ -36,12 +36,11 @@ class Backend:
     kind: BackendKind
     xp: ArrayNamespace
     label: str
-    _strict_acceleration: bool = field(default=False, repr=False, compare=False)
 
 
 _LABELS = {
-    BackendKind.METAL: "Metal (MLX, custom SIMUS kernel)",
-    BackendKind.CUDA: "CUDA (CuPy, custom SIMUS kernel)",
+    BackendKind.METAL: "Metal (MLX; custom SIMUS when supported)",
+    BackendKind.CUDA: "CUDA (CuPy; custom SIMUS when supported)",
     BackendKind.MLX: "MLX (portable Array API SIMUS)",
     BackendKind.CUPY: "CuPy (portable Array API SIMUS)",
     BackendKind.JAX: "JAX",
@@ -49,7 +48,7 @@ _LABELS = {
 }
 
 
-def _parse_kind(kind: BackendKind | str) -> BackendKind:
+def _coerce_backend_kind(kind: BackendKind | str) -> BackendKind:
     try:
         return BackendKind(kind)
     except ValueError as error:
@@ -98,7 +97,7 @@ def _numpy_namespace() -> ArrayNamespace:
     return cast(ArrayNamespace, np)
 
 
-def _resolved_backend(kind: BackendKind, *, strict_acceleration: bool) -> Backend:
+def _resolved_backend(kind: BackendKind) -> Backend:
     if kind in (BackendKind.CUDA, BackendKind.CUPY):
         xp = _cupy_namespace()
         requirement = "CuPy and a visible CUDA device"
@@ -116,7 +115,7 @@ def _resolved_backend(kind: BackendKind, *, strict_acceleration: bool) -> Backen
 
     if xp is None:
         raise RuntimeError(f"Backend {kind.value!r} requires {requirement}, but it is not available")
-    return Backend(kind=kind, xp=xp, label=_LABELS[kind], _strict_acceleration=strict_acceleration)
+    return Backend(kind=kind, xp=xp, label=_LABELS[kind])
 
 
 def get_backend(kind: BackendKind | str = BackendKind.AUTO) -> Backend:
@@ -125,9 +124,9 @@ def get_backend(kind: BackendKind | str = BackendKind.AUTO) -> Backend:
     Automatic selection prefers CUDA, Metal, JAX, then NumPy. Explicit
     requests are authoritative and raise when their runtime is unavailable.
     """
-    requested = _parse_kind(kind)
+    requested = _coerce_backend_kind(kind)
     if requested is not BackendKind.AUTO:
-        return _resolved_backend(requested, strict_acceleration=True)
+        return _resolved_backend(requested)
 
     for candidate, loader in (
         (BackendKind.CUDA, _cupy_namespace),
@@ -148,12 +147,12 @@ def get_backend(kind: BackendKind | str = BackendKind.AUTO) -> Backend:
     )
 
 
-def backend_kind_from_namespace(xp: ArrayNamespace) -> BackendKind | None:
-    """Return the accelerated backend implied by an Array API namespace."""
+def _namespace_kind(xp: ArrayNamespace) -> BackendKind | None:
+    """Return the portable kind represented by an Array API namespace."""
     if is_cupy_namespace(xp):
-        return BackendKind.CUDA
+        return BackendKind.CUPY
     if is_mlx_namespace(xp):
-        return BackendKind.METAL
+        return BackendKind.MLX
     if is_jax_namespace(cast(ModuleType, xp)):
         return BackendKind.JAX
     if is_numpy_namespace(xp):
