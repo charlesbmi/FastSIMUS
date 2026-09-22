@@ -21,6 +21,7 @@ from fast_simus.kernels.cuda_simus import _B_SCAT, _DEFAULT_SHMEM_CAP_BYTES, _ge
 from fast_simus.simus import SimusStrategy, simus
 from fast_simus.transducer_presets import L11_5v, P4_2v
 from fast_simus.utils._array_api import Array
+from fast_simus.utils.geometry import element_positions
 
 simus_mod = import_module("fast_simus.simus")
 
@@ -61,6 +62,27 @@ def test_simus_cuda_output_is_cupy():
     assert isinstance(result.spectrum, cp.ndarray)
     assert result.rf.shape[1] == params.n_elements
     assert bool(cp.all(cp.isfinite(result.rf)))
+
+
+def test_simus_cuda_on_probe_face_is_finite():
+    """A scatterer at an element center on z=0 must not create NaNs."""
+    params = P4_2v()
+    elements, _, _ = element_positions(params.n_elements, params.pitch, params.radius, cp)
+    scatterers = cp.reshape(elements[params.n_elements // 2], (1, 2))
+    coefficients = cp.ones(1, dtype=cp.float32)
+    delays = cp.zeros(params.n_elements, dtype=cp.float32)
+
+    result = simus(
+        scatterers,
+        coefficients,
+        delays,
+        params,
+        strategy=SimusStrategy.CUDA,
+        element_splitting=1,
+    )
+
+    assert bool(cp.all(cp.isfinite(result.rf)))
+    assert bool(cp.all(cp.isfinite(result.spectrum)))
 
 
 def test_simus_cuda_does_not_prepare_python_sweep(monkeypatch):
