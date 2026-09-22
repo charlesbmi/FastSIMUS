@@ -175,14 +175,31 @@ def test_simus_cuda_matches_portable_and_pymust(probe_name, preset):
     delays = cp.asarray(delays_np)
     fs = 4.0 * params.freq_center
 
-    cuda = simus(scatterers, rc, delays, params, fs=fs, backend=BackendKind.CUDA)
-    portable = simus(scatterers, rc, delays, params, fs=fs, backend=BackendKind.CUPY)
+    cuda = simus(
+        scatterers,
+        rc,
+        delays,
+        params,
+        fs=fs,
+        element_splitting=1,
+        backend=BackendKind.CUDA,
+    )
+    portable = simus(
+        scatterers,
+        rc,
+        delays,
+        params,
+        fs=fs,
+        element_splitting=1,
+        backend=BackendKind.CUPY,
+    )
 
     pymust_params = pymust.getparam(probe_name)
     pymust_params.fs = fs
     options = pymust.utils.Options()
     options.dBThresh = -60.0
-    reference, _ = pymust.simus(x, z, np.ones(n_scat), delays_np, pymust_params, options)
+    options.ElementSplitting = 1
+    reference, _ = pymust.simus(x, z, np.ones(n_scat), delays_np[None, :], pymust_params, options)
 
     cuda_rf = cp.asnumpy(cuda.rf)
     portable_rf = cp.asnumpy(portable.rf)
