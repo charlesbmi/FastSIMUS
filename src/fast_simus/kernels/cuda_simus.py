@@ -29,6 +29,12 @@ from typing import TYPE_CHECKING, Any, cast
 import cupy as cp
 
 from fast_simus._pfield_math import NEPER_TO_DB, _subelement_centroids
+from fast_simus.kernels._cuda_capabilities import (
+    CUDA_SCATTERER_TILE,
+    DEFAULT_DYNAMIC_SHARED_MEMORY_BYTES,
+    cuda_shared_memory_unsupported_reason,
+    required_cuda_shared_memory,
+)
 from fast_simus.medium_params import MediumParams
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.utils._array_api import _ArrayNamespace
@@ -42,7 +48,7 @@ _SOURCE_NAME = "simus_fused.cu"
 
 # Pinned tuning -- see docs/progress/experiments/exp22-svshmem-et2.md.
 # These constants are RTX 4090 / sm_89 / P4-2v optimal; not autotuned.
-_B_SCAT = 10
+_B_SCAT = CUDA_SCATTERER_TILE
 _ELEM_TILE = 2
 _TG_SIZE = 128
 _TILE_SE = 16
@@ -52,13 +58,6 @@ _GRID_BLOCKS = 256  # 2 * 128 SMs on RTX 4090
 # so we don't pin it here. Tuning constants (B_SCAT, ELEM_TILE, TG_SIZE)
 # are still hardwired for sm_89 and may need adjustment for sm_80 / sm_90.
 
-# Default static dynamic-shmem cap (48 KB) is below what some probes
-# need (e.g. L11-5v with n_sub=2 hits ~64 KB). We raise the per-kernel
-# cap via cuFuncSetAttribute when required. Modern GPUs (sm_75+) support
-# up to ~96-100 KB dynamic shared memory per block.
-_DEFAULT_SHMEM_CAP_BYTES = 48 * 1024
-_MAX_DYNAMIC_SHMEM_BYTES = 96 * 1024
-
 _source_cache: dict[str, str] = {}
 _kernel_cache: dict[tuple[int, int, int], Any] = {}
 
@@ -67,17 +66,6 @@ def _load_source(filename: str) -> str:
     if filename not in _source_cache:
         _source_cache[filename] = (_KERNELS_DIR / filename).read_text()
     return _source_cache[filename]
-
-
-def _shmem_bytes(n_elem: int, n_sub: int) -> int:
-    """Bytes of dynamic shared memory required by the v25c kernel.
-
-    Layout (see ``simus_fused.cu``):
-        7 * B_SCAT * N_ES floats of TX/RX geometry + 3 * N_ELEM floats of
-        per-element broadcast (da_init_re, da_init_im, dps).
-    """
-    n_es = n_elem * n_sub
-    return (7 * _B_SCAT * n_es + 3 * n_elem) * 4
 
 
 def _get_kernel(n_elem: int, n_sub: int, n_freq: int) -> Any:
@@ -262,19 +250,15 @@ def simus_cuda(
     d = _prepare_inputs(scatterers, rc, delays_clean, tx_apodization, plan, params, medium)
     n_elem, n_sub, n_freq = d["n_elem"], d["n_sub"], d["n_freq"]
 
-    shmem = _shmem_bytes(n_elem, n_sub)
-    if shmem > _MAX_DYNAMIC_SHMEM_BYTES:
-        msg = (
-            f"v25c shmem {shmem} B exceeds the {_MAX_DYNAMIC_SHMEM_BYTES} B "
-            f"per-block cap for (n_elem={n_elem}, n_sub={n_sub}); needs a "
-            f"smaller B_SCAT or a different probe."
-        )
-        raise RuntimeError(msg)
+    shmem = required_cuda_shared_memory(n_elem, n_sub)
+    unsupported_reason = cuda_shared_memory_unsupported_reason(n_elem, n_sub)
+    if unsupported_reason is not None:
+        raise RuntimeError(unsupported_reason)
 
     kernel = _get_kernel(n_elem, n_sub, n_freq)
     # Raise per-kernel dynamic-shmem cap when we exceed the 48 KB default.
-    # No-op when shmem fits under _DEFAULT_SHMEM_CAP_BYTES.
-    if shmem > _DEFAULT_SHMEM_CAP_BYTES:
+    # No-op when shmem fits under the default cap.
+    if shmem > DEFAULT_DYNAMIC_SHARED_MEMORY_BYTES:
         kernel.max_dynamic_shared_size_bytes = shmem
 
     # Output buffers; kernel uses atomicAdd into spect_re[elem*N_FREQ + f].

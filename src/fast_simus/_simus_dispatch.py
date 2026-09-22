@@ -56,14 +56,11 @@ def _unsupported_reasons(
     if kind is BackendKind.METAL and params.n_elements * 2 > 1024:
         reasons.append(f"n_elements={params.n_elements} exceeds the Metal receive-kernel limit")
     if kind is BackendKind.CUDA:
-        from fast_simus.kernels.cuda_simus import _MAX_DYNAMIC_SHMEM_BYTES, _shmem_bytes
+        from fast_simus.kernels._cuda_capabilities import cuda_shared_memory_unsupported_reason
 
-        shared_memory = _shmem_bytes(params.n_elements, n_sub)
-        if shared_memory > _MAX_DYNAMIC_SHMEM_BYTES:
-            reasons.append(
-                f"required CUDA shared memory ({shared_memory} bytes) exceeds "
-                f"the kernel limit ({_MAX_DYNAMIC_SHMEM_BYTES} bytes)"
-            )
+        shared_memory_reason = cuda_shared_memory_unsupported_reason(params.n_elements, n_sub)
+        if shared_memory_reason is not None:
+            reasons.append(shared_memory_reason)
     return reasons
 
 

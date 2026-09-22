@@ -18,7 +18,12 @@ if not _cupy_has_cuda_device(cp):
     pytest.skip("CuPy CUDA device not available", allow_module_level=True)
 
 from fast_simus import BackendKind
-from fast_simus.kernels.cuda_simus import _DEFAULT_SHMEM_CAP_BYTES, _get_kernel, _kernel_cache, _shmem_bytes
+from fast_simus.kernels._cuda_capabilities import (
+    DEFAULT_DYNAMIC_SHARED_MEMORY_BYTES,
+    cuda_shared_memory_unsupported_reason,
+    required_cuda_shared_memory,
+)
+from fast_simus.kernels.cuda_simus import _get_kernel, _kernel_cache
 from fast_simus.simus import simus
 from fast_simus.transducer_params import BaffleType
 from fast_simus.transducer_presets import C5_2v, L11_5v, P4_2v
@@ -44,8 +49,22 @@ def test_kernel_cache_miss_on_different_shapes():
 
 def test_shmem_under_default_cap():
     """Pinned config must fit under the 48 KB default dynamic-shmem cap."""
-    assert _shmem_bytes(64, 1) < _DEFAULT_SHMEM_CAP_BYTES
-    assert _shmem_bytes(128, 1) < _DEFAULT_SHMEM_CAP_BYTES
+    assert required_cuda_shared_memory(64, 1) < DEFAULT_DYNAMIC_SHARED_MEMORY_BYTES
+    assert required_cuda_shared_memory(128, 1) < DEFAULT_DYNAMIC_SHARED_MEMORY_BYTES
+
+
+def test_device_shared_memory_limit_matches_cuda_eligibility():
+    """CUDA eligibility reflects the active device rather than a fixed ceiling."""
+    params = L11_5v()
+    reason = cuda_shared_memory_unsupported_reason(params.n_elements, 2)
+
+    if reason is None:
+        assert (
+            required_cuda_shared_memory(params.n_elements, 2)
+            <= cp.cuda.Device().attributes["MaxSharedMemoryPerBlockOptin"]
+        )
+    else:
+        assert "device limit" in reason
 
 
 def test_simus_cuda_output_is_cupy():
