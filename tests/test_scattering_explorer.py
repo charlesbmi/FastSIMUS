@@ -46,7 +46,7 @@ def test_canvas_physical_round_trip() -> None:
     restored = physical_to_canvas(physical, extent, width=640, height=480)
 
     np.testing.assert_allclose(restored, canvas)
-    np.testing.assert_allclose(physical[[0, -1]], [[-20.0, 5.0], [20.0, 55.0]])
+    np.testing.assert_allclose(physical[[0, -1]], [[-20.0, 55.0], [20.0, 5.0]])
 
 
 def test_speckle_lesion_is_deterministic_and_hypoechoic() -> None:
@@ -74,11 +74,11 @@ def test_drawing_classes_map_to_nonnegative_reflectivity() -> None:
 
 
 def test_drawing_axes_show_physical_coordinates() -> None:
-    """Drawing ticks span the ROI with increasing depth from bottom to top."""
+    """Drawing ticks follow ultrasound convention with depth increasing downward."""
     x_ticks, z_ticks = drawing_axis_ticks((-20.0, 20.0, 5.0, 55.0))
 
     assert x_ticks == (-20.0, -10.0, 0.0, 10.0, 20.0)
-    assert z_ticks == (55.0, 42.5, 30.0, 17.5, 5.0)
+    assert z_ticks == (5.0, 17.5, 30.0, 42.5, 55.0)
 
 
 def test_drawing_without_a_class_uses_class_a_reflectivity() -> None:

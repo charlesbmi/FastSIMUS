@@ -82,13 +82,13 @@ def canvas_to_physical(
     width: int,
     height: int,
 ) -> np.ndarray:
-    """Convert drawdata's bottom-up canvas coordinates to physical millimetres."""
+    """Convert canvas coordinates to millimetres with depth increasing downward."""
     points = np.asarray(points, dtype=np.float64)
     if points.size == 0:
         return np.empty((0, 2), dtype=np.float64)
     x_min, x_max, z_min, z_max = extent_mm
     x = x_min + points[:, 0] / width * (x_max - x_min)
-    z = z_min + points[:, 1] / height * (z_max - z_min)
+    z = z_max - points[:, 1] / height * (z_max - z_min)
     return np.column_stack([x, z])
 
 
@@ -99,13 +99,13 @@ def physical_to_canvas(
     width: int,
     height: int,
 ) -> np.ndarray:
-    """Convert physical millimetres to drawdata's bottom-up canvas coordinates."""
+    """Convert physical millimetres to drawdata's bottom-up coordinates."""
     points_mm = np.asarray(points_mm, dtype=np.float64)
     if points_mm.size == 0:
         return np.empty((0, 2), dtype=np.float64)
     x_min, x_max, z_min, z_max = extent_mm
     x = (points_mm[:, 0] - x_min) / (x_max - x_min) * width
-    y = (points_mm[:, 1] - z_min) / (z_max - z_min) * height
+    y = (z_max - points_mm[:, 1]) / (z_max - z_min) * height
     return np.column_stack([x, y])
 
 
@@ -122,7 +122,7 @@ def drawing_axis_ticks(
     """Return lateral and top-down depth ticks for the drawing canvas."""
     x_min, x_max, z_min, z_max = extent_mm
     x_ticks = tuple(float(value) for value in np.linspace(x_min, x_max, 5))
-    z_ticks = tuple(float(value) for value in np.linspace(z_max, z_min, 5))
+    z_ticks = tuple(float(value) for value in np.linspace(z_min, z_max, 5))
     return x_ticks, z_ticks
 
 

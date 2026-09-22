@@ -58,6 +58,19 @@ with app.setup(hide_code=True):
 
     import fast_simus as fs
 
+    class ExplorerScatterWidget(ScatterWidget):
+        """Keep drawdata's canvas aligned with the explorer's fixed physical axes."""
+
+        _css = (
+            str(ScatterWidget._css)
+            + """
+        .dd-scatter-container {
+            width: calc(640px + 0.5rem);
+            max-width: none;
+        }
+        """
+        )
+
 
 @app.cell(hide_code=True)
 def _():
@@ -391,7 +404,7 @@ def _(set_custom_draft_rows, set_custom_error, x_roi_ui, z_roi_ui):
     class_b_ui = mo.ui.number(0.0, None, 0.001, value=0.002, label="class B reflectivity")
     class_c_ui = mo.ui.number(0.0, None, 0.001, value=0.005, label="class C reflectivity")
     class_d_ui = mo.ui.number(0.0, None, 0.001, value=0.02, label="class D reflectivity")
-    draw_widget = mo.ui.anywidget(ScatterWidget(data=[], width=640, height=480, brushsize=14, n_classes=4))
+    draw_widget = mo.ui.anywidget(ExplorerScatterWidget(data=[], width=640, height=480, brushsize=14, n_classes=4))
 
     x_ticks, z_ticks = drawing_axis_ticks(custom_extent)
     y_tick_markup = "".join(
@@ -401,9 +414,9 @@ def _(set_custom_draft_rows, set_custom_error, x_roi_ui, z_roi_ui):
     )
     y_axis = mo.Html(
         f"""
-        <svg width="72" height="526" viewBox="0 0 72 526" role="img"
-             aria-label="Depth z in millimetres, from {z_ticks[-1]:g} to {z_ticks[0]:g}">
-          <g transform="translate(0 42)" fill="currentColor" stroke="currentColor" font-size="12">
+        <svg width="72" height="516" viewBox="0 0 72 516" role="img"
+             aria-label="Depth z in millimetres, from {z_ticks[0]:g} to {z_ticks[-1]:g}">
+          <g transform="translate(0 32)" fill="currentColor" stroke="currentColor" font-size="12">
             <line x1="71" y1="0" x2="71" y2="480" />
             {y_tick_markup}
             <text transform="rotate(-90)" x="-240" y="13" text-anchor="middle" stroke="none">
@@ -422,7 +435,7 @@ def _(set_custom_draft_rows, set_custom_error, x_roi_ui, z_roi_ui):
     )
     x_axis = mo.Html(
         f"""
-        <svg width="640" height="44" viewBox="0 0 640 44" role="img"
+        <svg width="640" height="44" viewBox="0 0 640 44" role="img" style="margin-left: 0.25rem"
              aria-label="Lateral x in millimetres, from {x_ticks[0]:g} to {x_ticks[-1]:g}">
           <g fill="currentColor" stroke="currentColor" font-size="12">
             <line x1="0" y1="1" x2="640" y2="1" />
@@ -437,6 +450,7 @@ def _(set_custom_draft_rows, set_custom_error, x_roi_ui, z_roi_ui):
         justify="start",
         align="start",
         gap=0.0,
+        widths=[72, 640],
     )
 
     def add_drawing(_value):
