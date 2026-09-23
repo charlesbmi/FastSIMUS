@@ -38,6 +38,55 @@ L11_PICMUS_ATTENUATION_DB_CM_MHZ = 0.5
 L11_PICMUS_SAMPLING_FREQUENCY_HZ = 4.001 * L11_PICMUS_FREQ_CENTER_HZ
 L11_PICMUS_SIMUS_DB_THRESH = -60.0
 
+PICMUS_PHANTOM_X_M = 1e-3 * np.array(
+    [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -15.0,
+        -10.0,
+        -5.0,
+        5.0,
+        10.0,
+        15.0,
+        -15.0,
+        -10.0,
+        -5.0,
+        5.0,
+        10.0,
+        15.0,
+    ]
+)
+PICMUS_PHANTOM_Z_M = 1e-3 * np.array(
+    [
+        10.0,
+        15.0,
+        20.0,
+        25.0,
+        30.0,
+        35.0,
+        40.0,
+        45.0,
+        20.0,
+        20.0,
+        20.0,
+        20.0,
+        20.0,
+        20.0,
+        40.0,
+        40.0,
+        40.0,
+        40.0,
+        40.0,
+        40.0,
+    ]
+)
+
 DYNAMIC_RANGE_DB = 60.0
 PICMUS_GRID_WARN_PIXELS = 1_000_000
 PICMUS_RECONSTRUCTION_WARN_PIXEL_FIRINGS = 5_000_000
@@ -57,6 +106,15 @@ class Phantom(NamedTuple):
     x: np.ndarray
     z: np.ndarray
     rc: np.ndarray
+
+
+def _make_picmus_resolution_phantom() -> Phantom:
+    """Create a compact in-code version of the PICMUS resolution phantom."""
+    return Phantom(
+        PICMUS_PHANTOM_X_M.copy(),
+        PICMUS_PHANTOM_Z_M.copy(),
+        np.ones(PICMUS_PHANTOM_X_M.shape, dtype=np.float64),
+    )
 
 
 class MatchedSimulatorParams(NamedTuple):

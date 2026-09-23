@@ -14,6 +14,7 @@ from array_api_compat import is_jax_namespace
 from jaxtyping import Complex, Float
 
 from fast_simus._pfield_math import (
+    _canonical_frequency_grid,
     _distances_and_angles,
     _init_exponentials,
     _obliquity_factor,
@@ -193,9 +194,7 @@ def _prepare_simus_sweep(request: _SimusSpectrumRequest) -> dict:
         xp,
     )
     obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
-    freq_start = plan.selected_freqs[0]
-    n_freqs = plan.selected_freqs.shape[0]
-    freq_step = (plan.selected_freqs[1] - plan.selected_freqs[0]) if n_freqs > 1 else xp.asarray(0.0)
+    freq_start, freq_step = _canonical_frequency_grid(params.freq_center, plan.n_freq_full, plan.freq_idx_start)
     phase_init, phase_step = _init_exponentials(
         freq_start,
         medium.speed_of_sound,
