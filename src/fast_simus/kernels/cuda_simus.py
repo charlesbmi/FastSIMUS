@@ -2,9 +2,10 @@
 
 Compiles the v25c register-resident TX kernel via NVRTC at runtime
 (``cupy.RawModule``) -- no nanobind, no setuptools build step. Pinned to
-``(B_SCAT=10, ELEM_TILE=2)`` for RTX 4090 / sm_89 / P4-2v; performance may
+``(B_SCAT<=10, ELEM_TILE=2)`` for RTX 4090 / sm_89 / P4-2v; performance may
 regress on other probes / GPUs (see exp22 + the FastSIMUS-cuda-tune
-follow-up).
+follow-up). The scatterer tile shrinks only when required to fit the
+active device's shared-memory limit.
 
 Output layout matches ``metal_simus.simus_metal``: complex64
 ``(n_freq, n_elements)``. The shipped kernel does its own per-scatterer
@@ -28,10 +29,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 import cupy as cp
 
-from fast_simus._pfield_math import NEPER_TO_DB, _subelement_centroids
+from fast_simus._pfield_math import NEPER_TO_DB, _canonical_frequency_grid, _subelement_centroids
 from fast_simus.kernels._cuda_capabilities import (
-    CUDA_SCATTERER_TILE,
     DEFAULT_DYNAMIC_SHARED_MEMORY_BYTES,
+    cuda_scatterer_tile,
     cuda_shared_memory_unsupported_reason,
     required_cuda_shared_memory,
 )
@@ -48,7 +49,6 @@ _SOURCE_NAME = "simus_fused.cu"
 
 # Pinned tuning -- see docs/progress/experiments/exp22-svshmem-et2.md.
 # These constants are RTX 4090 / sm_89 / P4-2v optimal; not autotuned.
-_B_SCAT = CUDA_SCATTERER_TILE
 _ELEM_TILE = 2
 _TG_SIZE = 128
 _TILE_SE = 16
@@ -56,10 +56,10 @@ _GRID_BLOCKS = 256  # 2 * 128 SMs on RTX 4090
 
 # CuPy / NVRTC auto-derives ``--gpu-architecture`` from the current device,
 # so we don't pin it here. Tuning constants (B_SCAT, ELEM_TILE, TG_SIZE)
-# are still hardwired for sm_89 and may need adjustment for sm_80 / sm_90.
+# retain the preferred sm_89 values; B_SCAT shrinks to fit shared memory.
 
 _source_cache: dict[str, str] = {}
-_kernel_cache: dict[tuple[int, int, int], Any] = {}
+_kernel_cache: dict[tuple[int, int, int, int], Any] = {}
 
 
 def cuda_simus_unsupported_reason(n_elements: int, n_sub: int) -> str | None:
@@ -76,11 +76,12 @@ def _load_source(filename: str) -> str:
 def _get_kernel(n_elem: int, n_sub: int, n_freq: int) -> Any:
     """Compile + cache simus_fused_kernel for the given problem shape.
 
-    The cache key is ``(n_elem, n_sub, n_freq)`` -- ``n_scat`` is not in
-    the key because the kernel grid-strides over scatterers (one fused
+    The cache key includes the shape and device-sized scatterer tile.
+    ``n_scat`` is not in the key because the kernel grid-strides over scatterers (one fused
     launch covers the whole sweep, unlike the Metal split-kernel path).
     """
-    key = (n_elem, n_sub, n_freq)
+    scatterer_tile = cuda_scatterer_tile(n_elem, n_sub)
+    key = (n_elem, n_sub, n_freq, scatterer_tile)
     if key in _kernel_cache:
         return _kernel_cache[key]
 
@@ -98,7 +99,7 @@ def _get_kernel(n_elem: int, n_sub: int, n_freq: int) -> Any:
         f"-DTILE_SE={_TILE_SE}",
         f"-DTG_SIZE={_TG_SIZE}",
         f"-DMAX_FPT={max_fpt}",
-        f"-DB_SCAT={_B_SCAT}",
+        f"-DB_SCAT={scatterer_tile}",
         f"-DELEM_TILE={_ELEM_TILE}",
     )
 
@@ -150,8 +151,7 @@ def _prepare_inputs(
     sin_neg_te = cp.ascontiguousarray(cp.sin(-theta_e).astype(cp.float32))
 
     # Frequency-grid scalars
-    freq_start = float(plan.selected_freqs[0])
-    freq_step = float(plan.selected_freqs[1] - plan.selected_freqs[0]) if n_freq > 1 else 0.0
+    freq_start, freq_step = _canonical_frequency_grid(params.freq_center, plan.n_freq_full, plan.freq_idx_start)
 
     # Delay+apodization as separate per-element arrays. The kernel folds
     # tx_apodization into the initial value and steps phase by 2*pi*freq_step
@@ -178,7 +178,8 @@ def _prepare_inputs(
     # all si slots while contributing zero to the spectrum (rc=0 zeros
     # tk in Phase 2, and the GEO progression stays finite).
     n_scat = int(scatterers.shape[0])
-    n_scat_padded = ((n_scat + _B_SCAT - 1) // _B_SCAT) * _B_SCAT
+    scatterer_tile = cuda_scatterer_tile(n_elem, n_sub)
+    n_scat_padded = ((n_scat + scatterer_tile - 1) // scatterer_tile) * scatterer_tile
     if n_scat_padded > n_scat:
         pad = n_scat_padded - n_scat
         scat_x = cp.concatenate(
@@ -255,7 +256,7 @@ def simus_cuda(
     d = _prepare_inputs(scatterers, rc, delays_clean, tx_apodization, plan, params, medium)
     n_elem, n_sub, n_freq = d["n_elem"], d["n_sub"], d["n_freq"]
 
-    shmem = required_cuda_shared_memory(n_elem, n_sub)
+    shmem = required_cuda_shared_memory(n_elem, n_sub, cuda_scatterer_tile(n_elem, n_sub))
     unsupported_reason = cuda_simus_unsupported_reason(n_elem, n_sub)
     if unsupported_reason is not None:
         raise RuntimeError(unsupported_reason)
