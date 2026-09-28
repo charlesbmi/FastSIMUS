@@ -25,6 +25,7 @@ from array_api_compat import array_namespace
 from beartype import beartype as typechecker
 from jaxtyping import Float, jaxtyped
 
+from fast_simus.aperture import _same_arrays
 from fast_simus.utils._array_api import Array
 
 
@@ -274,3 +275,37 @@ def _angles_to_virtual_source(
     x0 = sign_correction * z0 * tan(width_rad / 2 - tilt_norm) + aperture_length / 2
 
     return x0, z0
+
+
+def _delay_geometry(centers, vector, speed_of_sound):
+    xp = _same_arrays(centers, vector)
+    if (
+        centers.ndim != 2
+        or centers.shape[0] == 0
+        or centers.shape[1] not in (2, 3)
+        or vector.shape != (centers.shape[1],)
+    ):
+        raise ValueError("Expected nonempty (E,D) centers and (D,) target/direction")
+    if not bool(xp.all(xp.isfinite(centers))) or not bool(xp.all(xp.isfinite(vector))):
+        raise ValueError("Delay geometry must be finite")
+    if not 0 < speed_of_sound < float("inf"):
+        raise ValueError("speed_of_sound must be finite and positive")
+    return xp
+
+
+def focus_delays(centers, target, *, speed_of_sound=1540.0, diverging=False):
+    """Return nonnegative seconds for a focus or virtual source in 2D or 3D."""
+    xp = _delay_geometry(centers, target, speed_of_sound)
+    delays = xp.sqrt(xp.sum((centers - target) ** 2, axis=-1)) / speed_of_sound
+    if not diverging:
+        delays = -delays
+    return delays - xp.min(delays)
+
+
+def plane_wave_delays(centers, direction, *, speed_of_sound=1540.0):
+    """Return steering delays in seconds for a finite unit propagation direction."""
+    xp = _delay_geometry(centers, direction, speed_of_sound)
+    if abs(float(xp.sum(direction * direction)) - 1) > 1e-5:
+        raise ValueError("direction must be a unit vector")
+    delays = centers @ direction / speed_of_sound
+    return delays - xp.min(delays)
