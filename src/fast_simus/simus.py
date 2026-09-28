@@ -15,7 +15,7 @@ References:
 from __future__ import annotations
 
 from enum import StrEnum
-from math import ceil, inf, log2, pi
+from math import ceil, log2, pi
 from types import ModuleType
 from typing import NamedTuple, cast
 
@@ -23,23 +23,19 @@ import array_api_extra as xpx
 from array_api_compat import is_jax_namespace
 from jaxtyping import Complex, Float
 
-from fast_simus._pfield_math import (
-    _distances_and_angles,
-    _init_exponentials,
-    _obliquity_factor,
-    _select_frequencies,
-    _subelement_centroids,
-)
+from fast_simus._capabilities import _require_strategy, _unsupported
+from fast_simus._compat import _clean_transmit_inputs, _transfer_plan
+from fast_simus._pfield_math import _select_frequencies
+from fast_simus._transfer import _prepare_strip_transfer
 from fast_simus.medium_params import MediumParams
 from fast_simus.spectrum import probe_spectrum as _probe_spectrum_fn
 from fast_simus.spectrum import pulse_spectrum as _pulse_spectrum_fn
-from fast_simus.transducer_params import TransducerParams
+from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.utils._array_api import (
     Array,
     _ArrayNamespace,
     _ArrayNamespaceWithFFT,
     array_namespace,
-    is_cupy_namespace,
 )
 from fast_simus.utils.geometry import element_positions
 
@@ -278,57 +274,27 @@ def _prepare_simus_sweep(
     Delay+apodization are NOT absorbed into the geometric progression --
     they are kept separate for the TX/RX chain.
     """
-    element_pos, theta_elements, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
-    if theta_elements is None:
-        theta_elements = xp.zeros(params.n_elements)
-
-    speed_of_sound = medium.speed_of_sound
-    attenuation = medium.attenuation
-
-    subelement_offsets = _subelement_centroids(params.element_width, plan.n_sub, theta_elements, xp)
-
-    x = scatterers[..., 0]
-    z = scatterers[..., 1]
-    is_out = z < 0
-    if params.radius != inf:
-        is_out = is_out | ((x**2 + (z + apex_offset) ** 2) <= params.radius**2)
-
-    distances, sin_theta, theta_arr = _distances_and_angles(
-        scatterers, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
+    transfer = _prepare_strip_transfer(
+        scatterers,
+        delays_clean,
+        tx_apodization,
+        _transfer_plan(plan),
+        params,
+        medium,
+        full_frequency_directivity=full_frequency_directivity,
+        xp=xp,
     )
-
-    obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
-
-    freq_start = plan.selected_freqs[0]
-    n_freqs = plan.selected_freqs.shape[0]
-    freq_step = (plan.selected_freqs[1] - plan.selected_freqs[0]) if n_freqs > 1 else xp.asarray(0.0)
-
-    phase_init, phase_step = _init_exponentials(
-        freq_start, speed_of_sound, attenuation, distances, obliquity_factor, freq_step, xp
-    )
-
-    if not full_frequency_directivity:
-        center_wavenumber = 2.0 * pi * params.freq_center / speed_of_sound
-        sinc_arg = xp.asarray(center_wavenumber * plan.seg_length / 2.0) * sin_theta / pi
-        phase_init = phase_init * xpx.sinc(sinc_arg, xp=xp)
-
-    # Delay+apodization as separate geometric progressions (not absorbed)
-    delay_apod_init = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_start * delays_clean) * tx_apodization
-    delay_apod_step = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_step * delays_clean)
-
-    wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
-
     return {
-        "phase_init": phase_init,
-        "phase_step": phase_step,
-        "delay_apod_init": delay_apod_init,
-        "delay_apod_step": delay_apod_step,
-        "is_out": is_out,
-        "wavenumbers": wavenumbers,
+        "phase_init": transfer.phase,
+        "phase_step": transfer.phase_step,
+        "delay_apod_init": transfer.delay_apod,
+        "delay_apod_step": transfer.delay_apod_step,
+        "is_out": transfer.is_out,
+        "wavenumbers": transfer.wavenumbers,
         "pulse_spect": plan.pulse_spectrum,
         "probe_spect": plan.probe_spectrum,
         "seg_length": plan.seg_length,
-        "sin_theta": sin_theta,
+        "sin_theta": transfer.sin_theta,
         "full_frequency_directivity": full_frequency_directivity,
     }
 
@@ -367,25 +333,21 @@ def _irfft_and_threshold(
     return rf, full_spectrum
 
 
-def _select_simus_strategy(xp: _ArrayNamespace, strategy: SimusStrategy | None) -> SimusStrategy:
-    """Auto-select simus strategy based on array backend."""
+def _select_simus_strategy(
+    xp: _ArrayNamespace,
+    strategy: SimusStrategy | None,
+    baffle: BaffleType | float = BaffleType.SOFT,
+    full_frequency_directivity: bool = False,
+) -> SimusStrategy:
+    """Select an execution path that supports the requested physics."""
     if strategy is not None:
+        _require_strategy(strategy, xp, baffle, full_frequency_directivity)
         return strategy
-
     if is_jax_namespace(cast(ModuleType, xp)):
         return SimusStrategy.SCAN
-
-    try:
-        import mlx.core
-
-        if xp is mlx.core:
-            return SimusStrategy.METAL
-    except ImportError:
-        pass
-
-    if is_cupy_namespace(xp):
-        return SimusStrategy.CUDA
-
+    for native in (SimusStrategy.METAL, SimusStrategy.CUDA):
+        if not _unsupported(native, xp, baffle, full_frequency_directivity):
+            return native
     return SimusStrategy.PYTHON
 
 
@@ -421,19 +383,14 @@ def simus_compute(
     """
     xp = array_namespace(scatterers, rc, delays)
 
-    if tx_apodization is None:
-        tx_apodization = xp.ones(params.n_elements)
-
-    nan_mask = xp.isnan(delays)
-    tx_apodization = xp.where(nan_mask, xp.asarray(0.0), tx_apodization)
-    delays_clean = xp.where(nan_mask, xp.asarray(0.0), delays)
+    delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
 
     # Flatten scatterers for the frequency sweep
     n_scat = scatterers.shape[0] if scatterers.ndim >= 2 else 1
     scatterers_flat = xp.reshape(scatterers, (n_scat, 2)) if scatterers.ndim > 2 else scatterers
     rc_flat = xp.reshape(rc, (n_scat,)) if rc.ndim > 1 else rc
 
-    selected = _select_simus_strategy(xp, strategy)
+    selected = _select_simus_strategy(xp, strategy, params.baffle, full_frequency_directivity)
 
     if selected == SimusStrategy.METAL:
         import mlx.core as mx

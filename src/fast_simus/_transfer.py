@@ -1,0 +1,70 @@
+"""Element-to-point transfer setup shared by pressure and pulse-echo sweeps.
+
+The strip model retains cylindrical spreading and its existing normalization.
+Output contractions decide whether to preserve element identity or flatten it.
+"""
+
+from math import pi
+from typing import NamedTuple
+
+import array_api_extra as xpx
+
+from fast_simus._aperture import _prepare_strip_geometry
+from fast_simus._pfield_math import _init_exponentials
+from fast_simus.medium_params import MediumParams
+from fast_simus.transducer_params import TransducerParams
+from fast_simus.utils._array_api import Array, _ArrayNamespace
+
+
+class _TransferPlan(NamedTuple):
+    """Frequency samples and strip subdivision used by either output path."""
+
+    selected_freqs: Array
+    n_sub: int
+    seg_length: float
+
+
+class _Transfer(NamedTuple):
+    """Geometric and transmit progressions on a uniform frequency grid."""
+
+    phase: Array
+    phase_step: Array
+    delay_apod: Array
+    delay_apod_step: Array
+    sin_theta: Array
+    is_out: Array
+    wavenumbers: Array
+
+
+def _prepare_strip_transfer(
+    positions: Array,
+    delays: Array,
+    apodization: Array,
+    plan: _TransferPlan,
+    params: TransducerParams,
+    medium: MediumParams,
+    *,
+    full_frequency_directivity: bool,
+    xp: _ArrayNamespace,
+) -> _Transfer:
+    """Build one transfer for both TX and reciprocal RX, without conjugation."""
+    geometry = _prepare_strip_geometry(positions, plan.n_sub, params, medium, xp)
+    freq_start = plan.selected_freqs[0]
+    freq_step = plan.selected_freqs[1] - freq_start if plan.selected_freqs.shape[0] > 1 else xp.asarray(0.0)
+    phase, phase_step = _init_exponentials(
+        freq_start,
+        medium.speed_of_sound,
+        medium.attenuation,
+        geometry.distances,
+        geometry.obliquity,
+        freq_step,
+        xp,
+    )
+    if not full_frequency_directivity:
+        center_wavenumber = 2.0 * pi * params.freq_center / medium.speed_of_sound
+        sinc_arg = xp.asarray(center_wavenumber * plan.seg_length / 2.0) * geometry.sin_theta / pi
+        phase = phase * xpx.sinc(sinc_arg, xp=xp)
+    delay_apod = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_start * delays) * apodization
+    delay_apod_step = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_step * delays)
+    wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / medium.speed_of_sound
+    return _Transfer(phase, phase_step, delay_apod, delay_apod_step, geometry.sin_theta, geometry.is_out, wavenumbers)

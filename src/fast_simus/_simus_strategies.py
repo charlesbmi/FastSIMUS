@@ -17,6 +17,7 @@ from math import pi
 import array_api_extra as xpx
 from jaxtyping import Bool, Complex, Float
 
+from fast_simus._contractions import _element_response, _receive_spectrum, _transmit_pressure
 from fast_simus.utils._array_api import Array, _ArrayNamespace
 
 
@@ -56,20 +57,9 @@ def _simus_freq_step_body(
         spect_k is the complex RF spectrum contribution for this frequency,
         shape (n_elements,).
     """
-    if directivity_k is not None:
-        rp_mono = xp.mean(phase * directivity_k, axis=-1)
-    else:
-        rp_mono = xp.mean(phase, axis=-1)
-
-    # TX: contract over elements -> pressure at each scatterer
-    p_k = pulse_probe_k * (rp_mono @ delay_apod_phase[..., None])[..., 0]
-    p_k = xp.where(is_out, xp.asarray(0.0 + 0j), p_k)
-
-    # RX: contract over scatterers -> spectrum per element
-    # (rc * p_k)^T @ rp_mono = sum_i(rc_i * p_k_i * rp_mono[i, e])
-    weighted = rc * p_k
-    spect_k = weighted @ rp_mono
-    spect_k = probe_k * spect_k
+    rp_mono = _element_response(phase, directivity_k, xp)
+    p_k = _transmit_pressure(rp_mono, delay_apod_phase, pulse_probe_k, is_out, xp)
+    spect_k = probe_k * _receive_spectrum(rp_mono, rc * p_k)
 
     phase = phase * phase_step
     delay_apod_phase = delay_apod_phase * delay_apod_step
@@ -181,10 +171,9 @@ def _simus_freq_outer_scan(
             spectrum_k, probe_k, wavenum_k = xs
             sinc_arg = wavenum_k * seg_length / 2.0 * sin_theta / pi
             directivity_k = xpx.sinc(sinc_arg, xp=xp)
-            rp_mono = xp.mean(phase * directivity_k, axis=-1)
-            p_k = spectrum_k * (rp_mono @ delay_apod[..., None])[..., 0]
-            p_k = xp.where(is_out, xp.asarray(0.0 + 0j), p_k)
-            spect_k = probe_k * (rc * p_k) @ rp_mono
+            rp_mono = _element_response(phase, directivity_k, xp)
+            p_k = _transmit_pressure(rp_mono, delay_apod, spectrum_k, is_out, xp)
+            spect_k = _receive_spectrum(rp_mono, probe_k * (rc * p_k))
             phase = phase * phase_step
             delay_apod = delay_apod * delay_apod_step
             return (phase, delay_apod), spect_k
@@ -196,10 +185,9 @@ def _simus_freq_outer_scan(
         def scan_fn_no_dir(carry, xs):
             phase, delay_apod = carry
             spectrum_k, probe_k = xs
-            rp_mono = xp.mean(phase, axis=-1)
-            p_k = spectrum_k * (rp_mono @ delay_apod[..., None])[..., 0]
-            p_k = xp.where(is_out, xp.asarray(0.0 + 0j), p_k)
-            spect_k = probe_k * (rc * p_k) @ rp_mono
+            rp_mono = _element_response(phase, None, xp)
+            p_k = _transmit_pressure(rp_mono, delay_apod, spectrum_k, is_out, xp)
+            spect_k = _receive_spectrum(rp_mono, probe_k * (rc * p_k))
             phase = phase * phase_step
             delay_apod = delay_apod * delay_apod_step
             return (phase, delay_apod), spect_k

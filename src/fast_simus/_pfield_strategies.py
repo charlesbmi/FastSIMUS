@@ -15,19 +15,8 @@ import array_api_extra as xpx
 from beartype import beartype as typechecker
 from jaxtyping import Bool, Complex, Float, jaxtyped
 
+from fast_simus._contractions import _pressure_at_freq
 from fast_simus.utils._array_api import Array, _ArrayNamespace
-
-
-def _pressure_at_freq(
-    phase: Complex[Array, " *grid n_sources"],
-    spectrum_k: complex | Array,
-    xp: _ArrayNamespace,
-    *,
-    directivity_k: Float[Array, " *grid n_sources"] | None = None,
-) -> Complex[Array, " *grid"]:
-    """Contract source phases and apply the spectrum weight at one frequency."""
-    phase_weighted = phase if directivity_k is None else phase * directivity_k
-    return spectrum_k * xp.sum(phase_weighted, axis=-1)
 
 
 def _freq_step_body(
@@ -215,7 +204,7 @@ def _freq_outer_scan(
                 phase, rp = carry
                 sinc_arg = wavenumbers[k] * seg_length / 2.0 * sin_theta_g / pi
                 directivity_k = xpx.sinc(sinc_arg, xp=xp)
-                p_k = spectra[k] * xp.sum(phase * directivity_k)
+                p_k = _pressure_at_freq(phase, spectra[k], xp, directivity_k=directivity_k)
                 rp_k = xp.real(p_k * xp.conj(p_k))
                 rp = rp + xp.where(is_out_g, xp.asarray(0.0), rp_k)
                 phase = phase * phase_step_g
@@ -232,7 +221,7 @@ def _freq_outer_scan(
         ) -> jax.Array:
             def scan_fn(carry, spectrum_k):
                 phase, rp = carry
-                p_k = spectrum_k * xp.sum(phase)
+                p_k = _pressure_at_freq(phase, spectrum_k, xp)
                 rp_k = xp.real(p_k * xp.conj(p_k))
                 rp = rp + xp.where(is_out_g, xp.asarray(0.0), rp_k)
                 phase = phase * phase_step_g

@@ -14,25 +14,27 @@ References:
 from __future__ import annotations
 
 from enum import StrEnum
-from math import ceil, inf, pi, prod
+from math import ceil, prod
 from types import ModuleType
 from typing import TYPE_CHECKING, NamedTuple, cast
 
-import array_api_extra as xpx
 from array_api_compat import is_jax_namespace
 from beartype import beartype as typechecker
 from jaxtyping import Bool, Complex, Float, jaxtyped
 
+from fast_simus._capabilities import _require_strategy, _unsupported
+from fast_simus._compat import _clean_transmit_inputs, _transfer_plan
 from fast_simus._pfield_math import (
     _distances_and_angles,
-    _init_exponentials,
-    _obliquity_factor,
     _select_frequencies,
     _subelement_centroids,
 )
+from fast_simus._pfield_math import _init_exponentials as _init_exponentials
+from fast_simus._pfield_math import _obliquity_factor as _obliquity_factor
+from fast_simus._transfer import _prepare_strip_transfer
 from fast_simus.medium_params import MediumParams
-from fast_simus.transducer_params import BaffleType, TransducerParams
-from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace, is_mlx_namespace
+from fast_simus.transducer_params import TransducerParams
+from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace
 from fast_simus.utils.geometry import element_positions
 
 _DEFAULT_MEDIUM = MediumParams()
@@ -142,45 +144,23 @@ def _prepare_frequency_sweep(
     Shared setup for VECTORIZED and SCAN strategies. The Metal kernel
     computes geometry on-the-fly and does not use this function.
     """
-    element_pos, theta_elements, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
-    if theta_elements is None:
-        theta_elements = xp.zeros(params.n_elements)
-
-    speed_of_sound = medium.speed_of_sound
-    attenuation = medium.attenuation
-
-    subelement_offsets = _subelement_centroids(params.element_width, plan.n_sub, theta_elements, xp)
-
-    x = positions[..., 0]
-    z = positions[..., 1]
-    is_out = z < 0
-    if params.radius != inf:
-        is_out = is_out | ((x**2 + (z + apex_offset) ** 2) <= params.radius**2)
-
-    distances, sin_theta, theta_arr = _distances_and_angles(
-        positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
+    transfer = _prepare_strip_transfer(
+        positions,
+        delays_clean,
+        tx_apodization,
+        _transfer_plan(plan),
+        params,
+        medium,
+        full_frequency_directivity=full_frequency_directivity,
+        xp=xp,
     )
-    obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
-
-    freq_start = plan.selected_freqs[0]
-    n_freqs = plan.selected_freqs.shape[0]
-    freq_step = (plan.selected_freqs[1] - plan.selected_freqs[0]) if n_freqs > 1 else xp.asarray(0.0)
-
-    phase_decay_init, phase_decay_step = _init_exponentials(
-        freq_start, speed_of_sound, attenuation, distances, obliquity_factor, freq_step, xp
-    )
-
-    if not full_frequency_directivity:
-        center_wavenumber = 2.0 * pi * params.freq_center / speed_of_sound
-        sinc_arg = xp.asarray(center_wavenumber * plan.seg_length / 2.0) * sin_theta / pi
-        phase_decay_init = phase_decay_init * xpx.sinc(sinc_arg, xp=xp)
+    phase_decay_init, phase_decay_step = transfer.phase, transfer.phase_step
+    sin_theta = transfer.sin_theta
 
     # Absorb delay+apodization into the geometric progression so loop
     # drivers don't need a per-frequency multiply for delays.
-    delay_apod_init = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_start * delays_clean) * tx_apodization
-    delay_apod_step = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_step * delays_clean)
-    phase_decay_init = phase_decay_init * delay_apod_init[:, None]
-    phase_decay_step = phase_decay_step * delay_apod_step[:, None]
+    phase_decay_init = phase_decay_init * transfer.delay_apod[:, None]
+    phase_decay_step = phase_decay_step * transfer.delay_apod_step[:, None]
 
     # Absorb 1/n_sub normalization and flatten (n_elements, n_sub) -> (n_sources,).
     # After this, sub-elements and elements are equivalent source points
@@ -195,44 +175,17 @@ def _prepare_frequency_sweep(
     phase_decay_step = _flatten_sources(phase_decay_step)
     sin_theta = _flatten_sources(sin_theta)
 
-    wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / speed_of_sound
-
     return _SweepInputs(
         phase_decay_init=phase_decay_init,
         phase_decay_step=phase_decay_step,
-        is_out=is_out,
-        wavenumbers=wavenumbers,
+        is_out=transfer.is_out,
+        wavenumbers=transfer.wavenumbers,
         pulse_spect=plan.pulse_spectrum,
         probe_spect=plan.probe_spectrum,
         seg_length=plan.seg_length,
         sin_theta=sin_theta,
         full_frequency_directivity=full_frequency_directivity,
     )
-
-
-def _clean_transmit_inputs(
-    delays: Float[Array, " n_elements"],
-    tx_apodization: Float[Array, " n_elements"] | None,
-    n_elements: int,
-    xp: _ArrayNamespace,
-) -> tuple[Float[Array, " n_elements"], Float[Array, " n_elements"]]:
-    """Zero disabled elements and replace their NaN delays."""
-    if tx_apodization is None:
-        tx_apodization = xp.ones(n_elements)
-    nan_mask = xp.isnan(delays)
-    return (
-        xp.where(nan_mask, xp.asarray(0.0), delays),
-        xp.where(nan_mask, xp.asarray(0.0), tx_apodization),
-    )
-
-
-def _metal_supported(params: TransducerParams, full_frequency_directivity: bool) -> bool:
-    """Check whether the Metal kernel supports the given configuration."""
-    if full_frequency_directivity:
-        return False
-    if not isinstance(params.baffle, str | BaffleType):
-        return False
-    return params.baffle == BaffleType.SOFT
 
 
 def _select_strategy(
@@ -245,19 +198,11 @@ def _select_strategy(
 ) -> PfieldStrategy:
     """Auto-select the best pfield strategy for the detected backend."""
     if strategy is not None:
-        if strategy == PfieldStrategy.METAL and not _metal_supported(params, full_frequency_directivity):
-            unsupported = []
-            if full_frequency_directivity:
-                unsupported.append("full_frequency_directivity=True")
-            if params.baffle != BaffleType.SOFT:
-                unsupported.append(f"baffle={params.baffle!r} (only SOFT supported)")
-            raise NotImplementedError(
-                f"Metal kernel does not support: {', '.join(unsupported)}. Use strategy=None for auto-selection."
-            )
+        _require_strategy(strategy, xp, params.baffle, full_frequency_directivity)
         return strategy
     if is_jax_namespace(cast(ModuleType, xp)):
         return PfieldStrategy.SCAN
-    if is_mlx_namespace(xp) and _metal_supported(params, full_frequency_directivity):
+    if not _unsupported("metal", xp, params.baffle, full_frequency_directivity):
         return PfieldStrategy.METAL
     return PfieldStrategy.VECTORIZED
 
