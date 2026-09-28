@@ -24,6 +24,7 @@ from jaxtyping import Bool, Complex, Float, jaxtyped
 
 from fast_simus._capabilities import _require_strategy, _unsupported
 from fast_simus._compat import _clean_transmit_inputs, _transfer_plan
+from fast_simus._field import field_spectrum
 from fast_simus._pfield_math import (
     _distances_and_angles,
     _select_frequencies,
@@ -33,6 +34,8 @@ from fast_simus._pfield_math import _init_exponentials as _init_exponentials
 from fast_simus._pfield_math import _obliquity_factor as _obliquity_factor
 from fast_simus._transfer import _prepare_strip_transfer
 from fast_simus.medium_params import MediumParams
+from fast_simus.plans import FieldPlan, FieldSpectrumInfo, prepare_field
+from fast_simus.transducer import Transducer
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.utils._array_api import Array, _ArrayNamespace, array_namespace
 from fast_simus.utils.geometry import element_positions
@@ -129,7 +132,7 @@ class _SweepInputs(NamedTuple):
 
 
 def _prepare_frequency_sweep(
-    positions: Float[Array, "*grid_shape 2"],
+    positions: Float[Array, "*grid_shape dim"],
     delays_clean: Float[Array, " n_elements"],
     tx_apodization: Float[Array, " n_elements"],
     plan: PfieldPlan,
@@ -208,16 +211,16 @@ def _select_strategy(
 
 
 def pfield_precompute(
-    positions: Float[Array, "*grid_shape 2"],
+    positions: Float[Array, "*grid_shape dim"],
     delays: Float[Array, " n_elements"],
-    params: TransducerParams,
+    params: TransducerParams | Transducer,
     medium: MediumParams = _DEFAULT_MEDIUM,
     *,
     tx_n_wavelengths: float | int = 1.0,
     db_thresh: float | int = -60.0,
-    element_splitting: int | None = None,
+    element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
-) -> PfieldPlan:
+) -> PfieldPlan | FieldPlan:
     """Precompute static quantities for pfield computation.
 
     Extracts all data-dependent scalars and
@@ -237,6 +240,19 @@ def pfield_precompute(
     Returns:
         PfieldPlan with static-shaped arrays and precomputed scalars.
     """
+    if isinstance(params, Transducer):
+        return prepare_field(
+            positions,
+            delays,
+            params,
+            medium,
+            tx_n_wavelengths=tx_n_wavelengths,
+            db_thresh=db_thresh,
+            element_splitting=element_splitting,
+            frequency_step=frequency_step,
+        )
+    if isinstance(element_splitting, tuple):
+        raise ValueError("2D element_splitting must be an integer")
     xp = array_namespace(positions, delays)
     speed_of_sound = medium.speed_of_sound
 
@@ -291,10 +307,10 @@ def pfield_precompute(
 
 
 def pfield_compute(
-    positions: Float[Array, "*grid_shape 2"],
+    positions: Float[Array, "*grid_shape dim"],
     delays: Float[Array, " n_elements"],
-    plan: PfieldPlan,
-    params: TransducerParams,
+    plan: PfieldPlan | FieldPlan,
+    params: TransducerParams | Transducer,
     medium: MediumParams = _DEFAULT_MEDIUM,
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
@@ -322,6 +338,15 @@ def pfield_compute(
     Returns:
         RMS pressure field with shape ``(*grid_shape,)``.
     """
+    if isinstance(params, Transducer):
+        if not isinstance(plan, FieldPlan):
+            raise ValueError("3D description requires a FieldPlan")
+        spectrum = field_spectrum(
+            positions, delays, plan, params, medium, tx_apodization, full_frequency_directivity, strategy
+        )
+        return rms_from_spectrum(spectrum, plan)
+    if isinstance(plan, FieldPlan):
+        raise ValueError("2D description requires a legacy plan")
     xp = array_namespace(positions, delays, tx_apodization)
 
     delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
@@ -367,16 +392,16 @@ def pfield_compute(
 
 @jaxtyped(typechecker=typechecker)
 def pfield(
-    positions: Float[Array, "*grid_shape 2"],
+    positions: Float[Array, "*grid_shape dim"],
     delays: Float[Array, " n_elements"],
-    params: TransducerParams,
+    params: TransducerParams | Transducer,
     medium: MediumParams = _DEFAULT_MEDIUM,
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
     tx_n_wavelengths: float | int = 1.0,
     db_thresh: float | int = -60.0,
     full_frequency_directivity: bool = False,
-    element_splitting: int | None = None,
+    element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
     strategy: PfieldStrategy | None = None,
 ) -> Float[Array, " *grid_shape"]:
@@ -463,18 +488,18 @@ def pfield(
 
 
 def pfield_spectrum(
-    positions: Float[Array, "*grid_shape 2"],
+    positions: Float[Array, "*grid_shape dim"],
     delays: Float[Array, " n_elements"],
-    params: TransducerParams,
+    params: TransducerParams | Transducer,
     medium: MediumParams = _DEFAULT_MEDIUM,
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
     tx_n_wavelengths: float | int = 1.0,
     db_thresh: float | int = -60.0,
     full_frequency_directivity: bool = False,
-    element_splitting: int | None = None,
+    element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
-) -> tuple[Complex[Array, "*grid_shape n_freq_selected"], PfieldSpectrumInfo]:
+) -> tuple[Complex[Array, "*grid_shape n_freq_selected"], PfieldSpectrumInfo | FieldSpectrumInfo]:
     """Compute the complex acoustic pressure spectrum of a transducer array.
 
     This uses the same frequency sweep as :func:`pfield`, but preserves the
@@ -529,6 +554,8 @@ def pfield_spectrum(
         tx_apodization=tx_apodization,
         full_frequency_directivity=full_frequency_directivity,
     )
+    if isinstance(plan, FieldPlan):
+        return spectrum, FieldSpectrumInfo(plan._grid)
     info = PfieldSpectrumInfo(
         selected_freqs=plan.selected_freqs,
         freq_idx_start=plan.freq_idx_start,
@@ -540,10 +567,10 @@ def pfield_spectrum(
 
 
 def pfield_spectrum_compute(
-    positions: Float[Array, "*grid_shape 2"],
+    positions: Float[Array, "*grid_shape dim"],
     delays: Float[Array, " n_elements"],
-    plan: PfieldPlan,
-    params: TransducerParams,
+    plan: PfieldPlan | FieldPlan,
+    params: TransducerParams | Transducer,
     medium: MediumParams = _DEFAULT_MEDIUM,
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
@@ -554,6 +581,13 @@ def pfield_spectrum_compute(
     Bind ``plan``, ``params``, ``medium``, and keyword options in a closure to
     compile this function with :func:`fast_simus.jit`.
     """
+    if isinstance(params, Transducer):
+        if not isinstance(plan, FieldPlan):
+            raise ValueError("3D description requires a FieldPlan")
+        spectrum = field_spectrum(positions, delays, plan, params, medium, tx_apodization, full_frequency_directivity)
+        return spectrum
+    if isinstance(plan, FieldPlan):
+        raise ValueError("2D description requires a legacy plan")
     xp = array_namespace(positions, delays, tx_apodization)
     delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
 
@@ -574,7 +608,7 @@ def pfield_spectrum_compute(
 
 def rms_from_spectrum(
     spectrum: Complex[Array, "*grid_shape n_freq_selected"],
-    info: PfieldPlan | PfieldSpectrumInfo,
+    info: PfieldPlan | PfieldSpectrumInfo | FieldSpectrumInfo,
 ) -> Float[Array, " *grid_shape"]:
     """Rebuild the RMS pressure field from a ``pfield_spectrum`` result.
 

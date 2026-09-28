@@ -30,6 +30,7 @@ def test_legacy_plan_tuple_contracts():
     common = ("selected_freqs", "pulse_spectrum", "probe_spectrum", "n_sub", "seg_length", "correction_factor")
     field = pfield_precompute(points, delays, params=params)
     echo = simus_precompute(points, rc, delays, params=params)
+    assert isinstance(field, PfieldPlan)
     assert field._fields == (*common, "freq_step", "n_freq_full", "freq_idx_start")
     assert echo._fields == (*common, "n_freq_full", "freq_idx_start", "n_fft")
     assert isinstance(field, PfieldPlan)

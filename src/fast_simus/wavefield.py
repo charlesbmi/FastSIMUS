@@ -17,6 +17,7 @@ from jaxtyping import Complex, Float
 
 from fast_simus.medium_params import MediumParams
 from fast_simus.pfield import PfieldPlan, PfieldSpectrumInfo, pfield_spectrum
+from fast_simus.plans import FieldSpectrumInfo
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.utils._array_api import Array, array_namespace
 
@@ -43,7 +44,7 @@ class WavefieldResult(NamedTuple):
 
 def spectrum_to_wavefield(
     spectrum: Complex[Array, "*grid_shape n_freq_selected"],
-    info: PfieldPlan | PfieldSpectrumInfo,
+    info: PfieldPlan | PfieldSpectrumInfo | FieldSpectrumInfo,
 ) -> WavefieldResult:
     """Transform a complex pressure spectrum into a propagating wave over time.
 
@@ -61,6 +62,8 @@ def spectrum_to_wavefield(
     Returns:
         WavefieldResult with real frames and their times in seconds.
     """
+    if isinstance(info, FieldSpectrumInfo) and info.is_cw:
+        raise ValueError("CW has no transient wavefield")
     xp = array_namespace(spectrum)
 
     n_selected = spectrum.shape[-1]
