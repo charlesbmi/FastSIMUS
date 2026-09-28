@@ -162,7 +162,13 @@ void simus_fused_kernel(
                 float cos_th = (dz*ct - dx*snt) * inv_r;
                 float obliq = (cos_th <= 0.0f) ? 1e-16f : cos_th;
                 float sa = center_kw * seg_len * 0.5f * sin_th;
-                float sv = (fabsf(sa) < 1e-8f) ? 1.0f : __fdividef(__sinf(sa), sa);
+                /* Fast sine's absolute error is amplified by division near zero.
+                 * The sinc series avoids that loss; its omitted term is <2e-10
+                 * for |sa| < 0.1. Keep fast sine outside this small-angle range. */
+                float sa2 = sa * sa;
+                float sv = (fabsf(sa) < 0.1f)
+                    ? 1.0f - sa2 * (1.0f / 6.0f - sa2 / 120.0f)
+                    : __fdividef(__sinf(sa), sa);
 
                 GEO_AMP(si)[se]       = obliq * sv * rsqrtf(rc_);
                 GEO_KW_R(si)[se]      = kw_init * rc_;

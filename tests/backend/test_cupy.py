@@ -18,6 +18,7 @@ if not _cupy_has_cuda_device(cp):
 from fast_simus import BackendKind
 from fast_simus.kernels._cuda_capabilities import (
     DEFAULT_DYNAMIC_SHARED_MEMORY_BYTES,
+    cuda_scatterer_tile,
     cuda_shared_memory_unsupported_reason,
     required_cuda_shared_memory,
 )
@@ -56,7 +57,7 @@ def test_device_shared_memory_limit_matches_cuda_eligibility():
 
     if reason is None:
         assert (
-            required_cuda_shared_memory(params.n_elements, 2)
+            required_cuda_shared_memory(params.n_elements, 2, cuda_scatterer_tile(params.n_elements, 2))
             <= cp.cuda.Device().attributes["MaxSharedMemoryPerBlockOptin"]
         )
     else:

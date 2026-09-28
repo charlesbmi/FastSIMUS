@@ -123,6 +123,17 @@ def _distances_and_angles(
     return distances_clipped, sin_theta, theta_arr
 
 
+def _canonical_frequency_grid(freq_center: float, n_freq_full: int, freq_idx_start: int) -> tuple[float, float]:
+    """Return start and step in Hz for a band of a full regular grid.
+
+    The full grid has more than one bin and spans zero to twice the center
+    frequency. Derive phase scalars from its integer metadata rather than
+    subtracting rounded, closely spaced float32 frequency samples.
+    """
+    step = 2.0 * freq_center / (n_freq_full - 1)
+    return freq_idx_start * step, step
+
+
 def _select_frequencies(
     fc: float,
     bandwidth: float,

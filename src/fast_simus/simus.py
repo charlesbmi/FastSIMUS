@@ -112,7 +112,9 @@ class SimusPlan(NamedTuple):
     """Precomputed plan for simus computation.
 
     Contains all data-dependent quantities so that ``simus_compute`` has
-    static array shapes.
+    static array shapes. The selected band is contiguous on the regular grid
+    from zero to twice the original probe's center frequency. Phase frequencies
+    follow the integer grid metadata, independent of the stored samples' dtype.
 
     Attributes:
         selected_freqs: Significant frequency samples in Hz.

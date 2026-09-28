@@ -48,6 +48,8 @@ from tests._picmus_phantom_shared import (
     L11_PICMUS_SPEED_OF_SOUND_M_S,
     L11_PICMUS_TX_N_WAVELENGTHS,
     PICMUS_GRID_WARN_PIXELS,
+    PICMUS_PHANTOM_X_M,
+    PICMUS_PHANTOM_Z_M,
     PICMUS_RECONSTRUCTION_WARN_PIXEL_FIRINGS,
     Phantom,
     PhantomCase,
@@ -58,6 +60,7 @@ from tests._picmus_phantom_shared import (
     _fastsimus_array_namespace,
     _iq_residual_display_db,
     _iq_to_display_db,
+    _make_picmus_resolution_phantom,
     _reconstruct_iq,
     _simulate_rf_stacks_for_case,
     make_l11_picmus_matched_params,
@@ -87,54 +90,6 @@ ATTENUATION_DB_CM_MHZ = L11_PICMUS_ATTENUATION_DB_CM_MHZ
 SAMPLING_FREQUENCY_HZ = L11_PICMUS_SAMPLING_FREQUENCY_HZ
 SIMUS_DB_THRESH = L11_PICMUS_SIMUS_DB_THRESH
 
-PICMUS_PHANTOM_X_M = 1e-3 * np.array(
-    [
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        -15.0,
-        -10.0,
-        -5.0,
-        5.0,
-        10.0,
-        15.0,
-        -15.0,
-        -10.0,
-        -5.0,
-        5.0,
-        10.0,
-        15.0,
-    ]
-)
-PICMUS_PHANTOM_Z_M = 1e-3 * np.array(
-    [
-        10.0,
-        15.0,
-        20.0,
-        25.0,
-        30.0,
-        35.0,
-        40.0,
-        45.0,
-        20.0,
-        20.0,
-        20.0,
-        20.0,
-        20.0,
-        20.0,
-        40.0,
-        40.0,
-        40.0,
-        40.0,
-        40.0,
-        40.0,
-    ]
-)
 PICMUS_FULL_ANGLES_RAD = np.deg2rad(np.linspace(-16.0, 16.0, 75))
 PICMUS_BROADSIDE_ANGLES_RAD = PICMUS_FULL_ANGLES_RAD[36:39].copy()
 PICMUS_APERTURE_X_M = 19.05000114440918e-3
@@ -392,15 +347,6 @@ def _expects_large_reconstruction_warning(
         wavelength_m=case.wavelength_m,
         warn_pixels=PICMUS_GRID_WARN_PIXELS,
         warn_pixel_firings=PICMUS_RECONSTRUCTION_WARN_PIXEL_FIRINGS,
-    )
-
-
-def _make_picmus_resolution_phantom() -> Phantom:
-    """Create a compact in-code version of the PICMUS resolution phantom."""
-    return Phantom(
-        PICMUS_PHANTOM_X_M.copy(),
-        PICMUS_PHANTOM_Z_M.copy(),
-        np.ones(PICMUS_PHANTOM_X_M.shape, dtype=np.float64),
     )
 
 
