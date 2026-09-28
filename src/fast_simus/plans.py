@@ -20,8 +20,10 @@ def _validate_arrays(positions, delays, params):
         raise ValueError("3D points require nonempty (*shape,3) coordinates")
     if delays.shape != (params.n_elements,):
         raise ValueError("Delays must have shape (E,)")
-    if not bool(xp.all(xp.isfinite(positions))):
-        raise ValueError("Positions must be finite")
+    flat = xp.reshape(positions, (-1, 3))
+    for start in range(0, flat.shape[0], 32):
+        if not bool(xp.all(xp.isfinite(flat[start : min(start + 32, flat.shape[0]), :]))):
+            raise ValueError("Positions must be finite")
     active = xp.where(xp.isnan(delays), xp.zeros_like(delays), delays)
     if not bool(xp.all(xp.isfinite(active))) or bool(xp.any(active < 0)):
         raise ValueError("Active delays must be finite and nonnegative")
@@ -33,9 +35,11 @@ def _path_bound(points, aperture, xp, block_size=32):
     flat = xp.reshape(points, (-1, 3))
     maximum = 0.0
     for e in range(aperture.centers.shape[0]):
-        radius = xp.sqrt(xp.sum(aperture.sizes[e] ** 2)) / 2
+        radius = xp.sqrt(xp.sum(aperture.sizes[e, :] ** 2)) / 2
         for start in range(0, flat.shape[0], block_size):
-            distances = xp.sqrt(xp.sum((flat[start : start + block_size] - aperture.centers[e]) ** 2, axis=-1))
+            distances = xp.sqrt(
+                xp.sum((flat[start : min(start + block_size, flat.shape[0]), :] - aperture.centers[e, :]) ** 2, axis=-1)
+            )
             maximum = max(maximum, float(xp.max(distances) + radius))
     return maximum
 
@@ -96,6 +100,7 @@ class FieldPlan(FieldSpectrumInfo):
     _probe: Array
     execution: ExecutionOptions
     _tiles: Tiles
+    _lens_delay: float
 
     @property
     def estimated_workspace_bytes(self):
@@ -112,7 +117,7 @@ class FieldPlan(FieldSpectrumInfo):
     @property
     def lens_reference_delay(self):
         """Common lens delay in seconds, applied once per propagation leg."""
-        return lens_reference_delay(self._params, self._medium.speed_of_sound)
+        return self._lens_delay
 
     def validate_inputs(self, positions, delays):
         """Eagerly enforce shapes, physical validity and original planning bounds."""
@@ -147,7 +152,8 @@ def prepare_field(
     wavelength = medium.speed_of_sound / (params.freq_center * (1 + params.bandwidth / 2))
     if element_splitting is None:
         counts = tuple(
-            (max(1, ceil(float(size[0]) / wavelength)), max(1, ceil(float(size[1]) / wavelength))) for size in sizes
+            (max(1, ceil(float(sizes[e, 0]) / wavelength)), max(1, ceil(float(sizes[e, 1]) / wavelength)))
+            for e in range(params.n_elements)
         )
     else:
         if (
@@ -167,7 +173,7 @@ def prepare_field(
                 raise ValueError(f"Lens phase requires at least {required} height subdivisions")
             refined.append((nu, max(nv, required)))
         counts = tuple(refined)
-    path = max(_path_bound(positions, params.aperture, xp), wavelength / 2)
+    path = max(_path_bound(positions, params.aperture, xp), medium.speed_of_sound / (2 * params.freq_center))
     delay = float(xp.max(xp.where(xp.isnan(delays), xp.zeros_like(delays), delays)))
     duration = 0 if tx_n_wavelengths == float("inf") else tx_n_wavelengths / params.freq_center
     max_step = frequency_step / (
@@ -179,7 +185,19 @@ def prepare_field(
     execution = execution or ExecutionOptions()
     tiles = choose_tiles(prod(positions.shape[:-1]), counts, execution)
     return FieldPlan(
-        grid, params, medium, positions.shape, positions.dtype, counts, path, delay, pulse, probe, execution, tiles
+        grid,
+        params,
+        medium,
+        positions.shape,
+        positions.dtype,
+        counts,
+        path,
+        delay,
+        pulse,
+        probe,
+        execution,
+        tiles,
+        lens_reference_delay(params, medium.speed_of_sound),
     )
 
 
@@ -199,6 +217,12 @@ class EchoPlan(FieldPlan):
     """Finite-aperture pulse-echo plan with explicit sampling metadata."""
 
     _sampling: SamplingInfo
+
+    @property
+    def output_bytes(self):
+        """Returned full channel spectrum plus causal RF bytes."""
+        item = 4 if self._dtype == array_namespace(self.selected_freqs).float32 else 8
+        return self._params.n_elements * (self.n_freq_full * 2 * item + (self.n_fft + 1) // 2 * item)
 
     @property
     def correction_factor(self):
@@ -253,8 +277,12 @@ def prepare_echo(
         raise ValueError("RF sampling frequency must be at least 4*fc")
     xp = _validate_arrays(positions, delays, params)
     _same_arrays(positions, rc)
-    if rc.shape != positions.shape[:-1] or not bool(xp.all(xp.isfinite(rc))):
+    if rc.shape != positions.shape[:-1]:
         raise ValueError("Finite reflectivity must exactly match scatterer shape")
+    flat_rc = xp.reshape(rc, (-1,))
+    for start in range(0, flat_rc.shape[0], 32):
+        if not bool(xp.all(xp.isfinite(flat_rc[start : min(start + 32, flat_rc.shape[0])]))):
+            raise ValueError("Finite reflectivity must exactly match scatterer shape")
     base = prepare_field(
         positions,
         delays,
@@ -287,5 +315,6 @@ def prepare_echo(
         probe,
         base.execution,
         base._tiles,
+        base._lens_delay,
         sampling,
     )

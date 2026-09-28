@@ -12,10 +12,11 @@ from fast_simus.utils._array_api import is_mlx_namespace
 
 @dataclass(frozen=True)
 class Tiles:
-    """Conservative live-buffer estimate with frequency/element tiles of one."""
+    """Conservative live-buffer estimate with one frequency per tile."""
 
     points: int
     patches: int
+    elements: int
     max_patches: int
     workspace_bytes: int
 
@@ -23,9 +24,14 @@ class Tiles:
 def choose_tiles(n_points, counts, options):
     """Budget displacement, angles, complex phase and reduction temporaries."""
     maximum = max(nu * nv for nu, nv in counts)
-    patches = min(maximum, 32, max(1, options.workspace_bytes // 1024))
-    points = min(n_points, 1024, max(1, options.workspace_bytes // (512 * patches + 512)))
-    return Tiles(points, patches, maximum, points * (512 * patches + 512))
+    fixed = len(counts) * 64  # subdivision metadata and cleaned excitation arrays
+    available = options.workspace_bytes - fixed
+    if available < 1024:
+        raise ValueError("Workspace is too small for aperture metadata and one tile")
+    elements = min(len(counts), 16, max(1, available // 4096))
+    patches = min(maximum, 32, max(1, available // (1024 * elements)))
+    points = min(n_points, 1024, max(1, available // (elements * (512 * patches + 512))))
+    return Tiles(points, patches, elements, maximum, fixed + points * elements * (512 * patches + 512))
 
 
 def run_loop(count, body, state, xp):
@@ -45,7 +51,7 @@ def point_block(points, index, size, xp):
     """Gather a fixed-size finite block and its validity mask."""
     indices = index * size + xp.arange(size)
     valid = indices < points.shape[0]
-    return points[xp.minimum(indices, points.shape[0] - 1)], valid
+    return xp.take(points, xp.minimum(indices, xp.asarray(points.shape[0] - 1)), axis=0), valid
 
 
 def block_count(length, size):
@@ -59,3 +65,10 @@ def legacy_point_count(execution, n_elements, n_sub):
     if execution.workspace_bytes < per_point:
         raise ValueError(f"Legacy strip execution needs at least {per_point} workspace bytes for one point")
     return max(1, execution.workspace_bytes // per_point)
+
+
+def element_block(index, size, count, xp):
+    """Safe channel indices and validity for one static element tile."""
+    indices = index * size + xp.arange(size)
+    valid = indices < count
+    return xp.minimum(indices, xp.asarray(count - 1)), valid

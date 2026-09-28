@@ -92,3 +92,12 @@ def test_sparse_nonplanar_geometry_and_permutation():
     swapped = Transducer(RectangularAperture(centers[::-1], u[::-1], v[::-1], size[::-1]), "3d", 2e6)
     other, _ = pfield_spectrum(p, delays[::-1], swapped, element_splitting=(2, 2), full_frequency_directivity=True)
     np.testing.assert_allclose(other, spectrum, rtol=1e-10)
+
+
+def test_array_api_strict_field():
+    """Geometry and propagation obey the strict namespace without NumPy coercion."""
+    xp = pytest.importorskip("array_api_strict")
+    aperture = matrix_aperture(shape=(1, 1), pitch=(0.001, 0.001), size=(0.0002, 0.0002), xp=xp, dtype=xp.float64)
+    probe = Transducer(aperture, "3d", 2e6)
+    result = pfield(xp.asarray([[0.0, 0.0, 0.02]]), xp.zeros(1), probe)
+    assert float(result[0]) > 0

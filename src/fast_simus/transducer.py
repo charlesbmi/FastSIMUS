@@ -7,6 +7,7 @@ from typing import Literal
 from fast_simus.aperture import RectangularAperture, _same_arrays
 from fast_simus.lens import ElevationLens
 from fast_simus.transducer_params import BaffleType
+from fast_simus.utils._array_api import is_mlx_namespace
 from fast_simus.utils.geometry import element_positions
 
 
@@ -53,7 +54,7 @@ def transducer_from_params(params, *, model="3d", xp, dtype=None, device=None) -
     pos, theta, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
     kw = dict(dtype=dtype or xp.float32)
     if device is not None:
-        kw["device"] = device
+        kw["stream" if is_mlx_namespace(xp) else "device"] = device
     pos = xp.asarray(pos, **kw)
     zeros = xp.zeros(params.n_elements, **kw)
     theta = zeros if theta is None else xp.asarray(theta, **kw)

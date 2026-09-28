@@ -56,3 +56,19 @@ def test_echo_invalid_and_single_point():
         simus(p, np.asarray(1.0), d, t, tx_n_wavelengths=np.inf)
     with pytest.raises(ValueError, match="reflectivity"):
         simus(p, np.ones(1), d, t)
+
+
+def test_echo_linearity_and_arrival():
+    """Raw spectra superpose and a single point echo has the expected round-trip arrival."""
+    t = Transducer(
+        matrix_aperture(shape=(1, 1), pitch=(0.001, 0.001), size=(0.0002, 0.0002), xp=np, dtype=np.float64), "3d", 2e6
+    )
+    p = np.array([[0.0, 0.0, 0.02]])
+    d = np.zeros(1)
+    rc = np.ones(1)
+    plan = simus_precompute(p, rc, d, t)
+    a = simus_compute(p, rc, d, plan, t)
+    b = simus_compute(p, rc * 2, d, plan, t, tx_apodization=np.array([0.3]))
+    np.testing.assert_allclose(b.spectrum, a.spectrum * 0.6, rtol=0, atol=1e-10 * np.max(np.abs(a.spectrum)))
+    arrival = plan.sample_times[np.argmax(np.abs(np.asarray(a.rf)[:, 0]))]
+    assert abs(float(arrival) - 0.04 / 1540) <= 1 / plan.sampling_frequency + 1 / 2e6

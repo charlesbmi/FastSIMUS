@@ -5,7 +5,7 @@ from math import isfinite
 
 import array_api_compat
 
-from fast_simus.utils._array_api import Array, array_namespace
+from fast_simus.utils._array_api import Array, array_namespace, is_mlx_namespace
 
 
 def _same_arrays(*arrays):
@@ -51,6 +51,8 @@ class RectangularAperture:
     def __post_init__(self):
         """Validate the physical description eagerly."""
         xp = _same_arrays(self.centers, self.width_axes, self.height_axes, self.sizes)
+        if self.centers.ndim != 2:
+            raise ValueError("Centers must have shape (E,3)")
         e = self.centers.shape[0]
         if (
             e < 1
@@ -90,7 +92,7 @@ def matrix_aperture(*, shape, pitch, size, xp, dtype=None, device=None) -> Recta
         raise ValueError("pitch and size must be finite positive pairs")
     kw = dict(dtype=dtype or xp.float32)
     if device is not None:
-        kw["device"] = device
+        kw["stream" if is_mlx_namespace(xp) else "device"] = device
     nx, ny = shape
     idx = xp.arange(nx * ny, **kw)
     x = (idx % nx - (nx - 1) / 2) * pitch[0]

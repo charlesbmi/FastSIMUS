@@ -65,3 +65,16 @@ def test_jax_compiled_tiles():
     np.testing.assert_allclose(
         to_numpy(echo(p, rc, d).rf), to_numpy(simus_compute(p, rc, d, echo_plan, t).rf), rtol=1e-4, atol=1e-8
     )
+
+
+def test_uneven_element_patch_and_point_tiles():
+    """Three-axis tails preserve coherent interference across element tiles."""
+    a = matrix_aperture(shape=(17, 1), pitch=(0.0004, 0.0004), size=(0.0003, 0.0002), xp=np, dtype=np.float64)
+    t = Transducer(a, "3d", 2e6)
+    points = np.array([[x, 0.001, 0.02] for x in np.linspace(-0.003, 0.003, 5)])
+    delays = np.linspace(0.0, 1e-6, 17)
+    reference = pfield(points, delays, t, tx_n_wavelengths=np.inf, element_splitting=(6, 7))
+    result = pfield(
+        points, delays, t, tx_n_wavelengths=np.inf, element_splitting=(6, 7), execution=ExecutionOptions(1024 * 1024)
+    )
+    np.testing.assert_allclose(result, reference, rtol=1e-10)

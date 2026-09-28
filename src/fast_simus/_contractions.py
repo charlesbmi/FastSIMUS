@@ -23,11 +23,11 @@ def _element_response(phase: Array, directivity: Array | None, xp: _ArrayNamespa
 
 
 def _transmit_pressure(
-    response: Array, excitation: Array, spectrum: complex | Array, is_out: Array, xp: _ArrayNamespace
+    response: Array, excitation: Array, spectrum: complex | Array, is_out: Array | None, xp: _ArrayNamespace
 ) -> Array:
     """Contract elements into pressure at each scattering point."""
     pressure = spectrum * (response @ excitation[..., None])[..., 0]
-    return xp.where(is_out, xp.asarray(0.0 + 0j), pressure)
+    return pressure if is_out is None else xp.where(is_out, xp.asarray(0.0 + 0j), pressure)
 
 
 def _receive_spectrum(response: Array, weighted_pressure: Array) -> Array:

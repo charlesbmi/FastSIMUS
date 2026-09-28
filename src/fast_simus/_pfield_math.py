@@ -12,6 +12,7 @@ from typing import NamedTuple
 from beartype import beartype as typechecker
 from jaxtyping import Complex, Float, jaxtyped
 
+from fast_simus._propagation import propagation_exponential
 from fast_simus.spectrum import probe_spectrum, pulse_spectrum
 from fast_simus.transducer_params import BaffleType
 from fast_simus.utils._array_api import Array, _ArrayNamespace
@@ -232,10 +233,7 @@ def _init_exponentials(
     attenuation_wavenum = attenuation / NEPER_TO_DB * freq_start / 1e6 * 1e2
 
     # exp(-kwa*distances + 1j*mod(kw*distances, 2pi))
-    kw0_r = xp.asarray(wavenumber_init) * distances
-    two_pi = xp.asarray(2.0 * pi)
-    phase_mod = kw0_r - two_pi * xp.floor(kw0_r / two_pi)
-    phase_decay = xp.exp(xp.asarray(-attenuation_wavenum) * distances + xp.asarray(1j) * phase_mod)
+    phase_decay = propagation_exponential(distances, wavenumber_init, attenuation_wavenum, xp, wrap=True)
 
     wavenumber_step = 2.0 * pi * freq_step / speed_of_sound
     attenuation_step = attenuation / NEPER_TO_DB * freq_step / 1e6 * 1e2

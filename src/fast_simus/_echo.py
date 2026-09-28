@@ -3,7 +3,9 @@
 import array_api_extra as xpx
 
 from fast_simus._blocking import block_count, point_block, run_loop
+from fast_simus._capabilities import _require_strategy
 from fast_simus._compat import _clean_transmit_inputs
+from fast_simus._contractions import _receive_spectrum
 from fast_simus._field import transmit_at_frequency
 from fast_simus._transfer_3d import element_response
 from fast_simus.plans import response_medium
@@ -18,6 +20,8 @@ def echo_spectrum(points, rc, delays, plan, params, medium, apodization, full_di
     if strategy in ("metal", "cuda"):
         raise NotImplementedError("Native kernels do not support finite 3D apertures")
     xp = array_namespace(points, rc, delays, apodization)
+    if strategy is not None:
+        _require_strategy(strategy, xp, params.baffle, full_directivity)
     if apodization is not None and apodization.shape != delays.shape:
         raise ValueError("Apodization must have shape (E,)")
     delays, apodization = _clean_transmit_inputs(delays, apodization, params.n_elements, xp)
@@ -35,7 +39,7 @@ def echo_spectrum(points, rc, delays, plan, params, medium, apodization, full_di
         def scatterer_step(i, channels):
             block, valid = point_block(flat, i, size, xp)
             indices = xp.where(valid, i * size + xp.arange(size), xp.asarray(flat.shape[0] - 1))
-            coefficients = xp.where(valid, rc[indices], xp.zeros_like(rc[indices]))
+            coefficients = xp.where(valid, xp.take(rc, indices, axis=0), xp.zeros_like(xp.take(rc, indices, axis=0)))
             pressure = transmit_at_frequency(block, delays, apodization, plan, f, full_directivity, xp)
             weighted = coefficients * pressure * plan._pulse[k] * plan._probe[k]
 
@@ -43,12 +47,17 @@ def echo_spectrum(points, rc, delays, plan, params, medium, apodization, full_di
                 h = element_response(
                     block, params.aperture, counts, e, f, params.freq_center, physics, full_directivity, plan._tiles, xp
                 )
-                value = xp.sum(weighted * h) * plan._probe[k]
-                return xpx.at(result)[e].add(value)  # type: ignore[attr-defined]
+                value = _receive_spectrum(h, weighted) * plan._probe[k]
+                return xpx.at(result)[e, :].add(value)  # type: ignore[attr-defined]
 
-            return run_loop(params.n_elements, receive, channels, xp)
+            return run_loop(block_count(params.n_elements, plan._tiles.elements), receive, channels, xp)
 
-        channels = run_loop(block_count(flat.shape[0], size), scatterer_step, xp.zeros_like(spectrum[0]), xp)
-        return xpx.at(spectrum)[k].set(channels)  # type: ignore[attr-defined]
+        initial = (
+            xp.zeros((block_count(params.n_elements, plan._tiles.elements), plan._tiles.elements), dtype=points.dtype)
+            + 0j
+        )
+        channels = run_loop(block_count(flat.shape[0], size), scatterer_step, initial, xp)
+        channels = xp.reshape(channels, (-1,))[: params.n_elements]
+        return xpx.at(spectrum)[k, :].set(channels)  # type: ignore[attr-defined]
 
     return run_loop(n_freq, frequency_step, output, xp)
