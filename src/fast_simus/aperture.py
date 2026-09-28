@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from math import isfinite
 
-from array_api_compat import device as array_device
+import array_api_compat
 
 from fast_simus.utils._array_api import Array, array_namespace
 
@@ -13,9 +13,13 @@ def _same_arrays(*arrays):
     xp = array_namespace(*arrays)
     first = arrays[0]
     for a in arrays:
-        if a.dtype != first.dtype or array_device(a) != array_device(first):
+        actual_device, expected_device = array_api_compat.device(a), array_api_compat.device(first)
+        # JAX tracers have no concrete device; eager plan validation checked it.
+        if a.dtype != first.dtype or (
+            actual_device is not None and expected_device is not None and actual_device != expected_device
+        ):
             raise ValueError("Arrays must share dtype and device")
-        if a.dtype not in (xp.float32, xp.float64):
+        if a.dtype not in (xp.float32, getattr(xp, "float64", None)):
             raise ValueError("Coordinates must be real floating arrays")
     return xp
 
@@ -84,7 +88,9 @@ def matrix_aperture(*, shape, pitch, size, xp, dtype=None, device=None) -> Recta
         raise ValueError("shape must contain two positive integers")
     if len(pitch) != 2 or len(size) != 2 or any(not isfinite(v) or v <= 0 for v in (*pitch, *size)):
         raise ValueError("pitch and size must be finite positive pairs")
-    kw = dict(dtype=dtype or xp.float32, device=device)
+    kw = dict(dtype=dtype or xp.float32)
+    if device is not None:
+        kw["device"] = device
     nx, ny = shape
     idx = xp.arange(nx * ny, **kw)
     x = (idx % nx - (nx - 1) / 2) * pitch[0]

@@ -4,8 +4,12 @@ from dataclasses import dataclass
 from math import ceil, isfinite, prod
 from types import SimpleNamespace
 
+from fast_simus._blocking import Tiles, choose_tiles
 from fast_simus._frequency import FrequencyGrid, SamplingInfo, _two_way_pulse_duration, frequency_grid
 from fast_simus.aperture import _same_arrays
+from fast_simus.execution import ExecutionOptions
+from fast_simus.lens import lens_reference_delay
+from fast_simus.medium_params import MediumParams
 from fast_simus.transducer import Transducer
 from fast_simus.utils._array_api import Array, array_namespace
 
@@ -24,14 +28,15 @@ def _validate_arrays(positions, delays, params):
     return xp
 
 
-def _path_bound(points, aperture, xp):
+def _path_bound(points, aperture, xp, block_size=32):
     # Triangle inequality encloses every patch while avoiding P*E*Q allocation.
     flat = xp.reshape(points, (-1, 3))
     maximum = 0.0
     for e in range(aperture.centers.shape[0]):
-        distances = xp.sqrt(xp.sum((flat - aperture.centers[e]) ** 2, axis=-1))
         radius = xp.sqrt(xp.sum(aperture.sizes[e] ** 2)) / 2
-        maximum = max(maximum, float(xp.max(distances) + radius))
+        for start in range(0, flat.shape[0], block_size):
+            distances = xp.sqrt(xp.sum((flat[start : start + block_size] - aperture.centers[e]) ** 2, axis=-1))
+            maximum = max(maximum, float(xp.max(distances) + radius))
     return maximum
 
 
@@ -81,7 +86,7 @@ class FieldPlan(FieldSpectrumInfo):
     """
 
     _params: Transducer
-    _medium: object
+    _medium: MediumParams
     _shape: tuple
     _dtype: object
     _counts: tuple
@@ -89,6 +94,25 @@ class FieldPlan(FieldSpectrumInfo):
     _delay: float
     _pulse: Array
     _probe: Array
+    execution: ExecutionOptions
+    _tiles: Tiles
+
+    @property
+    def estimated_workspace_bytes(self):
+        """Conservative live numerical workspace estimate, excluding outputs."""
+        return self._tiles.workspace_bytes
+
+    @property
+    def output_bytes(self):
+        """Dense complex field spectrum bytes (RF plans override this estimate)."""
+        return (
+            prod(self._shape[:-1]) * self.selected_freqs.shape[0] * (8 if str(self._dtype).endswith("float32") else 16)
+        )
+
+    @property
+    def lens_reference_delay(self):
+        """Common lens delay in seconds, applied once per propagation leg."""
+        return lens_reference_delay(self._params, self._medium.speed_of_sound)
 
     def validate_inputs(self, positions, delays):
         """Eagerly enforce shapes, physical validity and original planning bounds."""
@@ -112,7 +136,9 @@ class FieldPlan(FieldSpectrumInfo):
             raise ValueError("Inputs are incompatible with plan configuration")
 
 
-def prepare_field(positions, delays, params, medium, *, tx_n_wavelengths, db_thresh, element_splitting, frequency_step):
+def prepare_field(
+    positions, delays, params, medium, *, tx_n_wavelengths, db_thresh, element_splitting, frequency_step, execution=None
+):
     """Resolve topology, support bounds and the uniform spectral grid."""
     xp = _validate_arrays(positions, delays, params)
     if not isfinite(frequency_step) or frequency_step <= 0:
@@ -131,20 +157,40 @@ def prepare_field(positions, delays, params, medium, *, tx_n_wavelengths, db_thr
         ):
             raise ValueError("3D element_splitting must be a positive (nu,nv) tuple")
         counts = (element_splitting,) * params.n_elements
+    if params.lens is not None:
+        refined = []
+        for e, (nu, nv) in enumerate(counts):
+            height = float(sizes[e, 1])
+            focus = float(params.lens.focal_lengths[e])
+            required = max(1, ceil(height / min(wavelength, wavelength * focus / (8 * height))))
+            if element_splitting is not None and nv < required:
+                raise ValueError(f"Lens phase requires at least {required} height subdivisions")
+            refined.append((nu, max(nv, required)))
+        counts = tuple(refined)
     path = max(_path_bound(positions, params.aperture, xp), wavelength / 2)
     delay = float(xp.max(xp.where(xp.isnan(delays), xp.zeros_like(delays), delays)))
     duration = 0 if tx_n_wavelengths == float("inf") else tx_n_wavelengths / params.freq_center
-    max_step = frequency_step / (2 * (path / medium.speed_of_sound + delay + duration))
+    max_step = frequency_step / (
+        2 * (path / medium.speed_of_sound + delay + duration + lens_reference_delay(params, medium.speed_of_sound))
+    )
     grid, pulse, probe = frequency_grid(
         params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, max_step, xp, positions.dtype
     )
-    return FieldPlan(grid, params, medium, positions.shape, positions.dtype, counts, path, delay, pulse, probe)
+    execution = execution or ExecutionOptions()
+    tiles = choose_tiles(prod(positions.shape[:-1]), counts, execution)
+    return FieldPlan(
+        grid, params, medium, positions.shape, positions.dtype, counts, path, delay, pulse, probe, execution, tiles
+    )
 
 
 def response_medium(plan):
     """Resolve response constants once before entering a driver."""
     return SimpleNamespace(
-        speed_of_sound=plan._medium.speed_of_sound, attenuation=plan._medium.attenuation, baffle=plan._params.baffle
+        speed_of_sound=plan._medium.speed_of_sound,
+        attenuation=plan._medium.attenuation,
+        baffle=plan._params.baffle,
+        lens=plan._params.lens,
+        lens_reference_delay=plan.lens_reference_delay,
     )
 
 
@@ -186,7 +232,18 @@ class EchoPlan(FieldPlan):
 
 
 def prepare_echo(
-    positions, rc, delays, params, medium, *, fs, tx_n_wavelengths, db_thresh, element_splitting, frequency_step
+    positions,
+    rc,
+    delays,
+    params,
+    medium,
+    *,
+    fs,
+    tx_n_wavelengths,
+    db_thresh,
+    element_splitting,
+    frequency_step,
+    execution=None,
 ):
     """Prepare round-trip support using the common spectral grid builder."""
     if not isfinite(tx_n_wavelengths) or tx_n_wavelengths <= 0:
@@ -207,13 +264,28 @@ def prepare_echo(
         db_thresh=db_thresh,
         element_splitting=element_splitting,
         frequency_step=frequency_step,
+        execution=execution,
     )
     duration = _two_way_pulse_duration(params.freq_center, params.bandwidth, tx_n_wavelengths, xp)
-    step = frequency_step / (2 * (2 * (base._path / medium.speed_of_sound + duration) + base._delay))
+    step = frequency_step / (
+        2 * (2 * (base._path / medium.speed_of_sound + duration + base.lens_reference_delay) + base._delay)
+    )
     grid, pulse, probe = frequency_grid(
         params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, step, xp, positions.dtype
     )
     sampling = SamplingInfo(fs, ceil(fs / (2 * params.freq_center) * (grid.n_freq_full - 1)), grid.freq_step)
     return EchoPlan(
-        grid, params, medium, base._shape, base._dtype, base._counts, base._path, base._delay, pulse, probe, sampling
+        grid,
+        params,
+        medium,
+        base._shape,
+        base._dtype,
+        base._counts,
+        base._path,
+        base._delay,
+        pulse,
+        probe,
+        base.execution,
+        base._tiles,
+        sampling,
     )

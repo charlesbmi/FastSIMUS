@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from math import inf, isfinite
 from typing import Literal
 
-from fast_simus.aperture import RectangularAperture
+from fast_simus.aperture import RectangularAperture, _same_arrays
+from fast_simus.lens import ElevationLens
 from fast_simus.transducer_params import BaffleType
 from fast_simus.utils.geometry import element_positions
 
@@ -22,9 +23,14 @@ class Transducer:
     freq_center: float
     bandwidth: float = 0.75
     baffle: BaffleType | float = BaffleType.SOFT
+    lens: ElevationLens | None = None
 
     def __post_init__(self):
         """Validate the physical description eagerly."""
+        if self.lens is not None:
+            _same_arrays(self.aperture.centers, self.lens.focal_lengths)
+            if self.lens.focal_lengths.shape != (self.n_elements,):
+                raise ValueError("Lens focal lengths must match element count")
         if self.model != "3d":
             raise ValueError("Transducer requires model='3d'")
         if not isfinite(self.freq_center) or self.freq_center <= 0 or not 0 < self.bandwidth <= 2:
@@ -44,10 +50,10 @@ def transducer_from_params(params, *, model="3d", xp, dtype=None, device=None) -
     """Explicitly convert a finite-height conventional probe, preserving its origin."""
     if not isfinite(params.height):
         raise ValueError("Finite height is required for 3D conversion")
-    if params.elev_focus != inf:
-        raise ValueError("Finite elevation focus requires the lens response implementation")
     pos, theta, _ = element_positions(params.n_elements, params.pitch, params.radius, xp)
-    kw = dict(dtype=dtype or xp.float32, device=device)
+    kw = dict(dtype=dtype or xp.float32)
+    if device is not None:
+        kw["device"] = device
     pos = xp.asarray(pos, **kw)
     zeros = xp.zeros(params.n_elements, **kw)
     theta = zeros if theta is None else xp.asarray(theta, **kw)
@@ -56,5 +62,10 @@ def transducer_from_params(params, *, model="3d", xp, dtype=None, device=None) -
     v = xp.stack((zeros, xp.ones_like(zeros), zeros), axis=-1)
     sizes = xp.broadcast_to(xp.asarray([params.element_width, params.height], **kw), (params.n_elements, 2))
     return Transducer(
-        RectangularAperture(centers, u, v, sizes), model, params.freq_center, params.bandwidth, params.baffle
+        RectangularAperture(centers, u, v, sizes),
+        model,
+        params.freq_center,
+        params.bandwidth,
+        params.baffle,
+        ElevationLens(xp.full((params.n_elements,), params.elev_focus, **kw)) if params.elev_focus != inf else None,
     )

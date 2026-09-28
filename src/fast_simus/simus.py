@@ -15,13 +15,14 @@ References:
 from __future__ import annotations
 
 from enum import StrEnum
-from math import ceil
+from math import ceil, prod
 from types import ModuleType
 from typing import NamedTuple, cast, overload
 
 from array_api_compat import is_jax_namespace
 from jaxtyping import Complex, Float
 
+from fast_simus._blocking import legacy_point_count
 from fast_simus._capabilities import _require_strategy, _unsupported
 from fast_simus._compat import _clean_transmit_inputs, _transfer_plan
 from fast_simus._echo import echo_spectrum
@@ -29,6 +30,7 @@ from fast_simus._frequency import _two_way_pulse_duration
 from fast_simus._pfield_math import _select_frequencies
 from fast_simus._spectral_output import _irfft_and_threshold
 from fast_simus._transfer import _prepare_strip_transfer
+from fast_simus.execution import ExecutionOptions
 from fast_simus.medium_params import MediumParams
 from fast_simus.plans import EchoPlan, prepare_echo
 from fast_simus.transducer import Transducer
@@ -114,6 +116,7 @@ def simus_precompute(
     db_thresh: float | int = -60.0,
     element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
+    execution: ExecutionOptions | None = None,
 ) -> SimusPlan: ...
 
 
@@ -130,6 +133,7 @@ def simus_precompute(
     db_thresh: float | int = -60.0,
     element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
+    execution: ExecutionOptions | None = None,
 ) -> EchoPlan: ...
 
 
@@ -145,10 +149,12 @@ def simus_precompute(
     db_thresh: float | int = -60.0,
     element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
+    execution: ExecutionOptions | None = None,
 ) -> SimusPlan | EchoPlan:
     """Precompute static quantities for simus computation.
 
     Args:
+        execution: Optional bound on live numerical workspace; retained by new plans.
         scatterers: Scatterer positions in meters. Shape ``(*batch, 2)``.
         rc: Reflection coefficients. Shape ``(*batch,)``.
         delays: Transmit time delays in seconds. Shape ``(n_elements,)``.
@@ -175,6 +181,7 @@ def simus_precompute(
             db_thresh=db_thresh,
             element_splitting=element_splitting,
             frequency_step=frequency_step,
+            execution=execution,
         )
     if isinstance(element_splitting, tuple):
         raise ValueError("2D element_splitting must be an integer")
@@ -202,10 +209,12 @@ def simus_precompute(
     if theta_elements is None:
         theta_elements = xp.zeros(params.n_elements)
 
-    x = scatterers[..., 0]
-    z = scatterers[..., 1]
-    d2 = (xp.reshape(x, (-1, 1)) - element_pos[:, 0]) ** 2 + (xp.reshape(z, (-1, 1)) - element_pos[:, 1]) ** 2
-    max_d = float(xp.max(xp.sqrt(d2)))
+    flat = xp.reshape(scatterers, (-1, 2))
+    size = flat.shape[0] if execution is None else legacy_point_count(execution, params.n_elements, n_sub)
+    max_d = 0.0
+    for start in range(0, flat.shape[0], size):
+        delta = flat[start : start + size, None, :] - element_pos
+        max_d = max(max_d, float(xp.max(xp.sqrt(xp.sum(delta * delta, axis=-1)))))
 
     # Two-way pulse length correction (matches MATLAB: getpulse(param,2))
     if tx_n_wavelengths != float("inf"):
@@ -318,10 +327,12 @@ def simus_compute(
     tx_apodization: Float[Array, " n_elements"] | None = None,
     full_frequency_directivity: bool = False,
     strategy: SimusStrategy | None = None,
+    execution: ExecutionOptions | None = None,
 ) -> SimusResult:
     """Compute RF signals given a precomputed plan.
 
     Args:
+        execution: Optional bound on live numerical workspace; retained by new plans.
         scatterers: Scatterer positions in meters. Shape ``(*batch, 2)``.
         rc: Reflection coefficients. Shape ``(*batch,)``.
         delays: Transmit time delays in seconds. Shape ``(n_elements,)``.
@@ -340,6 +351,8 @@ def simus_compute(
     if isinstance(params, Transducer):
         if not isinstance(plan, EchoPlan):
             raise ValueError("3D RF requires an EchoPlan")
+        if execution is not None and execution != plan.execution:
+            raise ValueError("execution differs from plan")
         spect = echo_spectrum(
             scatterers, rc, delays, plan, params, medium, tx_apodization, full_frequency_directivity, strategy
         )
@@ -352,11 +365,15 @@ def simus_compute(
     delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
 
     # Flatten scatterers for the frequency sweep
-    n_scat = scatterers.shape[0] if scatterers.ndim >= 2 else 1
-    scatterers_flat = xp.reshape(scatterers, (n_scat, 2)) if scatterers.ndim > 2 else scatterers
-    rc_flat = xp.reshape(rc, (n_scat,)) if rc.ndim > 1 else rc
+    n_scat = prod(scatterers.shape[:-1])
+    scatterers_flat = xp.reshape(scatterers, (n_scat, 2))
+    rc_flat = xp.reshape(rc, (n_scat,))
 
-    selected = _select_simus_strategy(xp, strategy, params.baffle, full_frequency_directivity)
+    if execution is not None and strategy in (SimusStrategy.METAL, SimusStrategy.CUDA):
+        raise NotImplementedError("Native strategy does not support an execution budget")
+    selected = _select_simus_strategy(
+        xp, SimusStrategy.PYTHON if execution is not None else strategy, params.baffle, full_frequency_directivity
+    )
 
     if selected == SimusStrategy.METAL:
         import mlx.core as mx
@@ -391,24 +408,24 @@ def simus_compute(
             ),
         )
     else:
-        sweep = _prepare_simus_sweep(
-            scatterers_flat,
-            delays_clean,
-            tx_apodization,
-            plan,
-            params,
-            medium,
-            full_frequency_directivity=full_frequency_directivity,
-            xp=xp,
-        )
-        if selected == SimusStrategy.SCAN:
-            from fast_simus._simus_strategies import _simus_freq_outer_scan
+        from fast_simus._simus_strategies import _simus_freq_outer_python, _simus_freq_outer_scan
 
-            spect_selected = _simus_freq_outer_scan(rc=rc_flat, xp=xp, **sweep)
-        else:
-            from fast_simus._simus_strategies import _simus_freq_outer_python
-
-            spect_selected = _simus_freq_outer_python(rc=rc_flat, xp=xp, **sweep)
+        driver = _simus_freq_outer_scan if selected == SimusStrategy.SCAN else _simus_freq_outer_python
+        size = n_scat if execution is None else legacy_point_count(execution, params.n_elements, plan.n_sub)
+        spect_selected = xp.zeros((plan.selected_freqs.shape[0], params.n_elements), dtype=plan.pulse_spectrum.dtype)
+        for start in range(0, n_scat, size):
+            sweep = _prepare_simus_sweep(
+                scatterers_flat[start : start + size, :],
+                delays_clean,
+                tx_apodization,
+                plan,
+                params,
+                medium,
+                full_frequency_directivity=full_frequency_directivity,
+                xp=xp,
+            )
+            block = driver(rc=rc_flat[start : start + size], xp=xp, **sweep)
+            spect_selected = spect_selected + block
 
     # Apply correction factor
     spect_selected = spect_selected * xp.asarray(plan.correction_factor)
@@ -433,6 +450,7 @@ def simus(
     element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
     strategy: SimusStrategy | None = None,
+    execution: ExecutionOptions | None = None,
 ) -> SimusResult:
     """Simulate ultrasound RF signals for a linear or convex array.
 
@@ -442,6 +460,7 @@ def simus(
     (acoustic reciprocity), and IFFT to time domain.
 
     Args:
+        execution: Optional bound on live numerical workspace; retained by new plans.
         scatterers: Scatterer positions in meters. Shape ``(*batch, 2)`` where
             ``[..., 0]`` is lateral (x) and ``[..., 1]`` is axial (z).
         rc: Reflection coefficients. Shape ``(*batch,)``. Same size as scatterers
@@ -476,6 +495,7 @@ def simus(
         db_thresh=db_thresh,
         element_splitting=element_splitting,
         frequency_step=frequency_step,
+        execution=execution,
     )
     return simus_compute(
         scatterers,
@@ -487,4 +507,5 @@ def simus(
         tx_apodization=tx_apodization,
         full_frequency_directivity=full_frequency_directivity,
         strategy=strategy,
+        execution=execution,
     )

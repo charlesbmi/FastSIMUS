@@ -1,16 +1,63 @@
-"""Finite-aperture pressure orchestration over the shared element response."""
+"""Bounded pressure orchestration over the shared element response."""
 
 from math import pi
 
+import array_api_extra as xpx
+
+from fast_simus._blocking import block_count, point_block, run_loop
 from fast_simus._compat import _clean_transmit_inputs
-from fast_simus._contractions import _transmit_pressure
-from fast_simus._transfer_3d import rectangle_response
+from fast_simus._transfer_3d import element_response
 from fast_simus.plans import response_medium
 from fast_simus.utils._array_api import array_namespace
 
 
-def field_spectrum(positions, delays, plan, params, medium, apodization, full_directivity, strategy=None):
-    """Compute raw selected pressure samples with preserved spatial axes."""
+def transmit_at_frequency(points, delays, apodization, plan, frequency, full_directivity, xp):
+    """Complete the coherent element sum before any output reduction."""
+    params = plan._params
+    physics = response_medium(plan)
+    counts = xp.asarray(plan._counts, dtype=xp.int32)
+
+    def add_element(e, pressure):
+        h = element_response(
+            points,
+            params.aperture,
+            counts,
+            e,
+            frequency,
+            params.freq_center,
+            physics,
+            full_directivity,
+            plan._tiles,
+            xp,
+        )
+        return pressure + h * xp.exp(2j * pi * frequency * delays[e]) * apodization[e]
+
+    return run_loop(params.n_elements, add_element, xp.zeros_like(points[:, 0]) + 0j, xp)
+
+
+def field_block(points, delays, apodization, plan, full_directivity, xp, rms=False):
+    """Compute one fixed point block, accumulating energy only after coherent TX."""
+    n = plan.selected_freqs.shape[0]
+    shape = (points.shape[0],) if rms else (points.shape[0], n)
+    output = xp.zeros(shape, dtype=points.dtype) if rms else xp.zeros(shape, dtype=points.dtype) + 0j
+
+    def frequency_step(k, result):
+        f = (plan.freq_idx_start + k) * plan.freq_step
+        pressure = (
+            transmit_at_frequency(points, delays, apodization, plan, f, full_directivity, xp)
+            * plan._pulse[k]
+            * plan._probe[k]
+        )
+        if rms:
+            return result + xp.real(pressure * xp.conj(pressure))
+        return xpx.at(result)[:, k].set(pressure)  # type: ignore[attr-defined]
+
+    output = run_loop(n, frequency_step, output, xp)
+    return xp.sqrt(output * plan.correction_factor) if rms else output
+
+
+def field_spectrum(positions, delays, plan, params, medium, apodization, full_directivity, strategy=None, rms=False):
+    """Compute raw samples or RMS with preserved spatial axes and bounded work."""
     plan.check_static(positions, delays, params, medium)
     if strategy in ("metal", "cuda"):
         raise NotImplementedError("Native kernels do not support finite 3D apertures")
@@ -19,14 +66,18 @@ def field_spectrum(positions, delays, plan, params, medium, apodization, full_di
         raise ValueError("Apodization must have shape (E,)")
     delays, apodization = _clean_transmit_inputs(delays, apodization, params.n_elements, xp)
     points = xp.reshape(positions, (-1, 3))
-    physics = response_medium(plan)
-    samples = []
-    for k in range(plan.selected_freqs.shape[0]):
-        frequency = (plan.freq_idx_start + k) * plan.freq_step
-        h = rectangle_response(
-            points, params.aperture, plan._counts, frequency, params.freq_center, physics, full_directivity, xp
-        )
-        excitation = xp.exp(2j * pi * frequency * delays) * apodization
-        pressure = _transmit_pressure(h, excitation, plan._pulse[k] * plan._probe[k], xp.zeros(points.shape[0]) < 0, xp)
-        samples.append(pressure)
-    return xp.reshape(xp.stack(samples, axis=-1), (*positions.shape[:-1], len(samples)))
+    size = plan._tiles.points
+    blocks = block_count(points.shape[0], size)
+    tail = () if rms else (plan.selected_freqs.shape[0],)
+    output = xp.zeros((blocks, size, *tail), dtype=positions.dtype)
+    if not rms:
+        output = output + 0j
+
+    def compute_block(i, result):
+        block, _valid = point_block(points, i, size, xp)
+        values = field_block(block, delays, apodization, plan, full_directivity, xp, rms)
+        return xpx.at(result)[i].set(values)  # type: ignore[attr-defined]
+
+    output = run_loop(blocks, compute_block, output, xp)
+    output = xp.reshape(output, (blocks * size, *tail))[: points.shape[0]]
+    return xp.reshape(output, (*positions.shape[:-1], *tail))

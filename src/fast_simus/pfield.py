@@ -22,6 +22,7 @@ from array_api_compat import is_jax_namespace
 from beartype import beartype as typechecker
 from jaxtyping import Bool, Complex, Float, jaxtyped
 
+from fast_simus._blocking import legacy_point_count
 from fast_simus._capabilities import _require_strategy, _unsupported
 from fast_simus._compat import _clean_transmit_inputs, _transfer_plan
 from fast_simus._field import field_spectrum
@@ -33,6 +34,7 @@ from fast_simus._pfield_math import (
 from fast_simus._pfield_math import _init_exponentials as _init_exponentials
 from fast_simus._pfield_math import _obliquity_factor as _obliquity_factor
 from fast_simus._transfer import _prepare_strip_transfer
+from fast_simus.execution import ExecutionOptions
 from fast_simus.medium_params import MediumParams
 from fast_simus.plans import FieldPlan, FieldSpectrumInfo, prepare_field
 from fast_simus.transducer import Transducer
@@ -221,6 +223,7 @@ def pfield_precompute(
     db_thresh: float | int = -60.0,
     element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
+    execution: ExecutionOptions | None = None,
 ) -> PfieldPlan: ...
 
 
@@ -235,6 +238,7 @@ def pfield_precompute(
     db_thresh: float | int = -60.0,
     element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
+    execution: ExecutionOptions | None = None,
 ) -> FieldPlan: ...
 
 
@@ -248,6 +252,7 @@ def pfield_precompute(
     db_thresh: float | int = -60.0,
     element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
+    execution: ExecutionOptions | None = None,
 ) -> PfieldPlan | FieldPlan:
     """Precompute static quantities for pfield computation.
 
@@ -256,6 +261,7 @@ def pfield_precompute(
     suitable for JAX JIT compilation.
 
     Args:
+        execution: Optional bound on live numerical workspace; retained by new plans.
         positions: Grid positions in meters. Shape ``(*grid_shape, 2)``.
         delays: Transmit time delays in seconds. Shape ``(n_elements,)``.
         params: Transducer parameters.
@@ -278,6 +284,7 @@ def pfield_precompute(
             db_thresh=db_thresh,
             element_splitting=element_splitting,
             frequency_step=frequency_step,
+            execution=execution,
         )
     if isinstance(element_splitting, tuple):
         raise ValueError("2D element_splitting must be an integer")
@@ -304,12 +311,27 @@ def pfield_precompute(
     if theta_elements is None:
         theta_elements = xp.zeros(params.n_elements)
     subelement_offsets = _subelement_centroids(params.element_width, n_sub, theta_elements, xp)
-    distances, _, _ = _distances_and_angles(
-        positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
-    )
-
-    # Frequency step: requires float() extraction from array
-    df = 1.0 / (float(xp.max(distances)) / speed_of_sound + float(xp.max(delays_clean)))
+    if execution is None:
+        distances, _, _ = _distances_and_angles(
+            positions, subelement_offsets, element_pos, theta_elements, speed_of_sound, params.freq_center, xp
+        )
+        maximum = float(xp.max(distances))
+    else:
+        block_size = legacy_point_count(execution, params.n_elements, n_sub)
+        flat = xp.reshape(positions, (-1, 2))
+        maximum = 0.0
+        for start in range(0, flat.shape[0], block_size):
+            distances, _, _ = _distances_and_angles(
+                flat[start : start + block_size, :],
+                subelement_offsets,
+                element_pos,
+                theta_elements,
+                speed_of_sound,
+                params.freq_center,
+                xp,
+            )
+            maximum = max(maximum, float(xp.max(distances)))
+    df = 1.0 / (maximum / speed_of_sound + float(xp.max(delays_clean)))
     df = float(frequency_step) * df
 
     # Frequency selection: uses boolean masking -> dynamic n_frequencies
@@ -344,6 +366,7 @@ def pfield_compute(
     tx_apodization: Float[Array, " n_elements"] | None = None,
     full_frequency_directivity: bool = False,
     strategy: PfieldStrategy | None = None,
+    execution: ExecutionOptions | None = None,
 ) -> Float[Array, " *grid_shape"]:
     """Compute the RMS pressure field given a precomputed plan.
 
@@ -351,6 +374,7 @@ def pfield_compute(
     compilation when ``plan`` and ``params`` are treated as static arguments.
 
     Args:
+        execution: Optional bound on live numerical workspace; retained by new plans.
         positions: Grid positions in meters. Shape ``(*grid_shape, 2)``.
         delays: Transmit time delays in seconds. Shape ``(n_elements,)``.
         plan: Precomputed plan from ``pfield_precompute``.
@@ -369,12 +393,20 @@ def pfield_compute(
     if isinstance(params, Transducer):
         if not isinstance(plan, FieldPlan):
             raise ValueError("3D description requires a FieldPlan")
+        if execution is not None and execution != plan.execution:
+            raise ValueError("execution differs from plan")
         spectrum = field_spectrum(
-            positions, delays, plan, params, medium, tx_apodization, full_frequency_directivity, strategy
+            positions, delays, plan, params, medium, tx_apodization, full_frequency_directivity, strategy, rms=True
         )
-        return rms_from_spectrum(spectrum, plan)
+        return spectrum
     if isinstance(plan, FieldPlan):
         raise ValueError("2D description requires a legacy plan")
+    if execution is not None:
+        if strategy == PfieldStrategy.METAL:
+            raise NotImplementedError("Native strategy does not support an execution budget")
+        return _legacy_field_blocks(
+            positions, delays, plan, params, medium, tx_apodization, full_frequency_directivity, execution, rms=True
+        )
     xp = array_namespace(positions, delays, tx_apodization)
 
     delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
@@ -432,6 +464,7 @@ def pfield(
     element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
     strategy: PfieldStrategy | None = None,
+    execution: ExecutionOptions | None = None,
 ) -> Float[Array, " *grid_shape"]:
     """Compute the RMS acoustic pressure field of a transducer array.
 
@@ -470,6 +503,7 @@ def pfield(
     - **Directivity**: Can be frequency-dependent (slower) or center-frequency only
 
     Args:
+        execution: Optional bound on live numerical workspace; retained by new plans.
         positions: Grid positions in meters. Shape ``(*grid_shape, 2)`` where
             ``positions[..., 0]`` is lateral (x) and ``positions[..., 1]`` is
             axial (z, into tissue).
@@ -502,6 +536,7 @@ def pfield(
         db_thresh=db_thresh,
         element_splitting=element_splitting,
         frequency_step=frequency_step,
+        execution=execution,
     )
     return pfield_compute(
         positions,
@@ -512,6 +547,7 @@ def pfield(
         tx_apodization=tx_apodization,
         full_frequency_directivity=full_frequency_directivity,
         strategy=strategy,
+        execution=execution,
     )
 
 
@@ -527,6 +563,7 @@ def pfield_spectrum(
     full_frequency_directivity: bool = False,
     element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
+    execution: ExecutionOptions | None = None,
 ) -> tuple[Complex[Array, "*grid_shape n_freq_selected"], PfieldSpectrumInfo | FieldSpectrumInfo]:
     """Compute the complex acoustic pressure spectrum of a transducer array.
 
@@ -534,12 +571,13 @@ def pfield_spectrum(
     complex pressure at every selected temporal frequency. The spatial input
     shape is preserved and frequency is appended as the final axis::
 
-        spectrum, info = pfield_spectrum(positions, delays, params)
+        spectrum, info = pfield_spectrum(positions, delays, params, execution=execution)
         rms = rms_from_spectrum(spectrum, info)
 
     Unlike :func:`pfield`, this materializes ``O(grid * n_freq)`` values.
 
     Args:
+        execution: Optional bound on live numerical workspace; retained by new plans.
         positions: Grid positions in meters. Shape ``(*grid_shape, 2)`` where
             ``positions[..., 0]`` is lateral (x) and ``positions[..., 1]`` is
             axial (z, into tissue).
@@ -571,6 +609,7 @@ def pfield_spectrum(
         db_thresh=db_thresh,
         element_splitting=element_splitting,
         frequency_step=frequency_step,
+        execution=execution,
     )
 
     spectrum = pfield_spectrum_compute(
@@ -581,6 +620,7 @@ def pfield_spectrum(
         medium,
         tx_apodization=tx_apodization,
         full_frequency_directivity=full_frequency_directivity,
+        execution=execution,
     )
     if isinstance(plan, FieldPlan):
         return spectrum, FieldSpectrumInfo(plan._grid)
@@ -603,6 +643,7 @@ def pfield_spectrum_compute(
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
     full_frequency_directivity: bool = False,
+    execution: ExecutionOptions | None = None,
 ) -> Complex[Array, "*grid_shape n_freq_selected"]:
     """Compute a pressure spectrum from a precomputed static-shape plan.
 
@@ -612,10 +653,16 @@ def pfield_spectrum_compute(
     if isinstance(params, Transducer):
         if not isinstance(plan, FieldPlan):
             raise ValueError("3D description requires a FieldPlan")
+        if execution is not None and execution != plan.execution:
+            raise ValueError("execution differs from plan")
         spectrum = field_spectrum(positions, delays, plan, params, medium, tx_apodization, full_frequency_directivity)
         return spectrum
     if isinstance(plan, FieldPlan):
         raise ValueError("2D description requires a legacy plan")
+    if execution is not None:
+        return _legacy_field_blocks(
+            positions, delays, plan, params, medium, tx_apodization, full_frequency_directivity, execution, rms=False
+        )
     xp = array_namespace(positions, delays, tx_apodization)
     delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
 
@@ -646,6 +693,7 @@ def rms_from_spectrum(
     both use the same per-frequency pressure.
 
     Args:
+        execution: Optional bound on live numerical workspace; retained by new plans.
         spectrum: Complex pressure from :func:`pfield_spectrum`.
         info: Metadata from the same call, or the ``PfieldPlan`` used by
             :func:`pfield_spectrum_compute`.
@@ -656,3 +704,36 @@ def rms_from_spectrum(
     xp = array_namespace(spectrum)
     energy = xp.sum(xp.real(spectrum * xp.conj(spectrum)), axis=-1)
     return xp.sqrt(energy * info.correction_factor)
+
+
+def _legacy_field_blocks(positions, delays, plan, params, medium, apodization, full_directivity, execution, *, rms):
+    """Bound legacy point workspace while preserving source reduction order."""
+    xp = array_namespace(positions, delays)
+    size = legacy_point_count(execution, params.n_elements, plan.n_sub)
+    flat = xp.reshape(positions, (-1, 2))
+    parts = []
+    for start in range(0, flat.shape[0], size):
+        if rms:
+            value = pfield_compute(
+                flat[start : start + size, :],
+                delays,
+                plan,
+                params,
+                medium,
+                tx_apodization=apodization,
+                full_frequency_directivity=full_directivity,
+                strategy=PfieldStrategy.VECTORIZED,
+            )
+        else:
+            value = pfield_spectrum_compute(
+                flat[start : start + size, :],
+                delays,
+                plan,
+                params,
+                medium,
+                tx_apodization=apodization,
+                full_frequency_directivity=full_directivity,
+            )
+        parts.append(value)
+    tail = () if rms else (plan.selected_freqs.shape[0],)
+    return xp.reshape(xp.concat(parts, axis=0), (*positions.shape[:-1], *tail))
