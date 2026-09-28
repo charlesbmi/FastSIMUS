@@ -22,6 +22,8 @@ class _TransferPlan(NamedTuple):
     selected_freqs: Array
     n_sub: int
     seg_length: float
+    freq_start: float
+    freq_step: float
 
 
 class _Transfer(NamedTuple):
@@ -49,8 +51,8 @@ def _prepare_strip_transfer(
 ) -> _Transfer:
     """Build one transfer for both TX and reciprocal RX, without conjugation."""
     geometry = _prepare_strip_geometry(positions, plan.n_sub, params, medium, xp)
-    freq_start = plan.selected_freqs[0]
-    freq_step = plan.selected_freqs[1] - freq_start if plan.selected_freqs.shape[0] > 1 else xp.asarray(0.0)
+    freq_start = plan.freq_start
+    freq_step = plan.freq_step
     phase, phase_step = _init_exponentials(
         freq_start,
         medium.speed_of_sound,

@@ -153,8 +153,9 @@ def _prepare_inputs(
     sin_neg_te = cp.ascontiguousarray(cp.sin(-theta_e).astype(cp.float32))
 
     # Frequency-grid scalars
-    freq_start = float(plan.selected_freqs[0])
-    freq_step = float(plan.selected_freqs[1] - plan.selected_freqs[0]) if n_freq > 1 else 0.0
+    # Recover the canonical grid; subtraction of rounded bins accumulates phase error.
+    freq_step = 2 * params.freq_center / (plan.n_freq_full - 1)
+    freq_start = plan.freq_idx_start * freq_step
 
     # Delay+apodization as separate per-element arrays. The kernel folds
     # tx_apodization into the initial value and steps phase by 2*pi*freq_step

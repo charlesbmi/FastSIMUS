@@ -198,8 +198,9 @@ def _prepare_common(
         in_arc = (x_flat**2 + (z_flat + apex_offset) ** 2) <= params.radius**2
         is_out = mx.maximum(is_out, in_arc.astype(mx.float32))
 
-    freq_start = float(plan.selected_freqs[0])
-    freq_step = float(plan.selected_freqs[1] - plan.selected_freqs[0]) if n_freq > 1 else 0.0
+    # Recover the canonical grid; subtraction of rounded bins accumulates phase error.
+    freq_step = 2 * params.freq_center / (plan.n_freq_full - 1)
+    freq_start = plan.freq_idx_start * freq_step
 
     ph_init = mx.array(2.0 * pi * freq_start, dtype=mx.float32) * delays_clean
     da_init_re = (mx.cos(ph_init) * tx_apodization).astype(mx.float32)

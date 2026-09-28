@@ -1,5 +1,7 @@
 """Public 2D contracts retained by the shared simulation core."""
 
+from typing import cast
+
 import numpy as np
 import pytest
 
@@ -15,6 +17,7 @@ from fast_simus import (
     simus_precompute,
 )
 from fast_simus.transducer_params import BaffleType
+from fast_simus.utils._array_api import Array
 from tests.conftest import to_numpy
 
 
@@ -103,3 +106,18 @@ def test_supported_metal_calls_skip_portable_preparation(monkeypatch):
     echo = simus(points, rc, delays, params, strategy=SimusStrategy.METAL)
     for result in (pressure, echo.rf, echo.spectrum):
         assert np.all(np.isfinite(to_numpy(result)))
+
+
+def test_rounded_frequency_samples_preserve_canonical_echo_grid():
+    """Float32 frequency storage must not change recurrence spacing."""
+    from fast_simus import simus_compute
+
+    params, points, rc, delays = _inputs(np)
+    points = cast(Array, np.asarray(points, dtype=np.float64))
+    plan = simus_precompute(points, rc, delays, params)
+    reference = simus_compute(points, rc, delays, plan, params)
+    rounded = plan._replace(selected_freqs=np.asarray(plan.selected_freqs, dtype=np.float32))
+    result = simus_compute(points, rc, delays, rounded, params)
+    for value, expected in zip(result, reference, strict=True):
+        expected = to_numpy(expected)
+        np.testing.assert_allclose(to_numpy(value), expected, rtol=0, atol=1e-4 * np.max(np.abs(expected)))

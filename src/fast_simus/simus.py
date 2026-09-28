@@ -24,7 +24,7 @@ from jaxtyping import Complex, Float
 
 from fast_simus._blocking import legacy_point_count
 from fast_simus._capabilities import _require_strategy, _unsupported
-from fast_simus._compat import _clean_transmit_inputs, _transfer_plan
+from fast_simus._compat import _clean_transmit_inputs, _transfer_plan, _validate_apodization
 from fast_simus._echo import echo_spectrum
 from fast_simus._frequency import _two_way_pulse_duration
 from fast_simus._pfield_math import _select_frequencies
@@ -32,7 +32,7 @@ from fast_simus._spectral_output import _irfft_and_threshold
 from fast_simus._transfer import _prepare_strip_transfer
 from fast_simus.execution import ExecutionOptions
 from fast_simus.medium_params import MediumParams
-from fast_simus.plans import EchoPlan, prepare_echo
+from fast_simus.plans import EchoPlan, FieldPlan, prepare_echo
 from fast_simus.transducer import Transducer
 from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.utils._array_api import (
@@ -277,7 +277,7 @@ def _prepare_simus_sweep(
         scatterers,
         delays_clean,
         tx_apodization,
-        _transfer_plan(plan),
+        _transfer_plan(plan, params.freq_center),
         params,
         medium,
         full_frequency_directivity=full_frequency_directivity,
@@ -358,7 +358,7 @@ def simus_compute(
         )
         rf, full = _irfft_and_threshold(spect, plan, params.n_elements, array_namespace(scatterers))
         return SimusResult(rf, full)
-    if isinstance(plan, EchoPlan):
+    if isinstance(plan, FieldPlan):
         raise ValueError("2D RF requires a legacy plan")
     xp = array_namespace(scatterers, rc, delays)
 
@@ -484,6 +484,8 @@ def simus(
         - rf: Time-domain RF signals, shape (n_samples, n_elements)
         - spectrum: Complex RF spectrum, shape (n_freq_full, n_elements)
     """
+    if isinstance(params, Transducer):
+        _validate_apodization(tx_apodization, delays)
     plan = simus_precompute(
         scatterers,
         rc,

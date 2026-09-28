@@ -24,7 +24,7 @@ from jaxtyping import Bool, Complex, Float, jaxtyped
 
 from fast_simus._blocking import legacy_point_count
 from fast_simus._capabilities import _require_strategy, _unsupported
-from fast_simus._compat import _clean_transmit_inputs, _transfer_plan
+from fast_simus._compat import _clean_transmit_inputs, _transfer_plan, _validate_apodization
 from fast_simus._field import field_spectrum
 from fast_simus._pfield_math import (
     _distances_and_angles,
@@ -153,7 +153,7 @@ def _prepare_frequency_sweep(
         positions,
         delays_clean,
         tx_apodization,
-        _transfer_plan(plan),
+        _transfer_plan(plan, params.freq_center),
         params,
         medium,
         full_frequency_directivity=full_frequency_directivity,
@@ -391,7 +391,7 @@ def pfield_compute(
         RMS pressure field with shape ``(*grid_shape,)``.
     """
     if isinstance(params, Transducer):
-        if not isinstance(plan, FieldPlan):
+        if type(plan) is not FieldPlan:
             raise ValueError("3D description requires a FieldPlan")
         if execution is not None and execution != plan.execution:
             raise ValueError("execution differs from plan")
@@ -527,6 +527,8 @@ def pfield(
     Returns:
         RMS pressure field with shape ``(*grid_shape,)``.
     """
+    if isinstance(params, Transducer):
+        _validate_apodization(tx_apodization, delays)
     plan = pfield_precompute(
         positions,
         delays,
@@ -600,6 +602,8 @@ def pfield_spectrum(
         Tuple of (spectrum, info) where spectrum has shape
         ``(*grid_shape, n_freq_selected)`` and is complex-valued.
     """
+    if isinstance(params, Transducer):
+        _validate_apodization(tx_apodization, delays)
     plan = pfield_precompute(
         positions,
         delays,
@@ -651,7 +655,7 @@ def pfield_spectrum_compute(
     compile this function with :func:`fast_simus.jit`.
     """
     if isinstance(params, Transducer):
-        if not isinstance(plan, FieldPlan):
+        if type(plan) is not FieldPlan:
             raise ValueError("3D description requires a FieldPlan")
         if execution is not None and execution != plan.execution:
             raise ValueError("execution differs from plan")

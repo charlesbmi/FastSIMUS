@@ -14,9 +14,10 @@ if TYPE_CHECKING:
     from fast_simus.simus import SimusPlan
 
 
-def _transfer_plan(plan: PfieldPlan | SimusPlan) -> _TransferPlan:
+def _transfer_plan(plan: PfieldPlan | SimusPlan, freq_center: float) -> _TransferPlan:
     """Adapt either public tuple without changing its layout or allocating arrays."""
-    return _TransferPlan(plan.selected_freqs, plan.n_sub, plan.seg_length)
+    step = 2 * freq_center / (plan.n_freq_full - 1)
+    return _TransferPlan(plan.selected_freqs, plan.n_sub, plan.seg_length, plan.freq_idx_start * step, step)
 
 
 def _clean_transmit_inputs(
@@ -33,3 +34,14 @@ def _clean_transmit_inputs(
         xp.where(nan_mask, xp.asarray(0.0), delays),
         xp.where(nan_mask, xp.asarray(0.0), tx_apodization),
     )
+
+
+def _validate_apodization(apodization, delays):
+    """Check eager public excitation input before entering traceable compute."""
+    if apodization is None:
+        return
+    from fast_simus.aperture import _same_arrays  # noqa: PLC0415
+
+    xp = _same_arrays(delays, apodization)
+    if apodization.shape != delays.shape or not bool(xp.all(xp.isfinite(apodization))):
+        raise ValueError("Apodization must be finite and match delays")
