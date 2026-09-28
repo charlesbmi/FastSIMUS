@@ -9,6 +9,8 @@ repo_name: charlesbmi/FastSIMUS
 nav:
   - Home: index.md
   - Modules: modules.md
+  - 3D simulation: 3d-simulation.md
+  - 3D validation: 3d-validation.md
 plugins:
   - search
   - mkdocstrings:

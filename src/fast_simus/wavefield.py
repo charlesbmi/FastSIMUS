@@ -15,9 +15,11 @@ from typing import NamedTuple
 
 from jaxtyping import Complex, Float
 
+from fast_simus.execution import ExecutionOptions
 from fast_simus.medium_params import MediumParams
 from fast_simus.pfield import PfieldPlan, PfieldSpectrumInfo, pfield_spectrum
 from fast_simus.plans import FieldSpectrumInfo
+from fast_simus.transducer import Transducer
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.utils._array_api import Array, array_namespace
 
@@ -105,8 +107,7 @@ def spectrum_to_wavefield(
     frames_flat = blocks[0] if len(blocks) == 1 else xp.concat(blocks, axis=0)
     frames = xp.reshape(frames_flat, (*grid_shape, n_keep))
 
-    dt = 1.0 / scale
-    times = xp.arange(n_keep, dtype=frames.dtype) * dt
+    times = wavefield_times(info)
 
     return WavefieldResult(frames=frames, times=times)
 
@@ -120,17 +121,18 @@ def _fft_namespace(xp):
 
 
 def wavefield(
-    positions: Float[Array, "*grid_shape 2"],
+    positions: Float[Array, "*grid_shape dim"],
     delays: Float[Array, " n_elements"],
-    params: TransducerParams,
+    params: TransducerParams | Transducer,
     medium: MediumParams = _DEFAULT_MEDIUM,
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
     tx_n_wavelengths: float | int = 1.0,
     db_thresh: float | int = -60.0,
     full_frequency_directivity: bool = False,
-    element_splitting: int | None = None,
+    element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 0.5,
+    execution: ExecutionOptions | None = None,
 ) -> WavefieldResult:
     """Simulate a transmitted wave propagating through a grid over time.
 
@@ -152,6 +154,7 @@ def wavefield(
             every frequency.
         element_splitting: Number of sub-elements per element. MUST's
             ``mkmovie`` forces 1; None selects the automatic value.
+        execution: Optional numerical workspace limit.
         frequency_step: Scaling factor for the frequency step. Smaller values
             lengthen the time record.
 
@@ -169,5 +172,15 @@ def wavefield(
         full_frequency_directivity=full_frequency_directivity,
         element_splitting=element_splitting,
         frequency_step=frequency_step,
+        execution=execution,
     )
     return spectrum_to_wavefield(spectrum, info)
+
+
+def wavefield_times(info):
+    """Return the default causal pressure time grid in seconds; reject CW metadata."""
+    if isinstance(info, FieldSpectrumInfo) and info.is_cw:
+        raise ValueError("CW has no transient wavefield")
+    xp = array_namespace(info.selected_freqs)
+    n = info.n_freq_full - 1
+    return xp.arange(n, dtype=info.selected_freqs.dtype) / (2 * n * info.freq_step)
