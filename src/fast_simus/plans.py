@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from math import ceil, isfinite, prod
 from types import SimpleNamespace
 
-from fast_simus._frequency import FrequencyGrid, frequency_grid
+from fast_simus._frequency import FrequencyGrid, SamplingInfo, _two_way_pulse_duration, frequency_grid
 from fast_simus.aperture import _same_arrays
 from fast_simus.transducer import Transducer
-from fast_simus.utils._array_api import Array
+from fast_simus.utils._array_api import Array, array_namespace
 
 
 def _validate_arrays(positions, delays, params):
@@ -145,4 +145,75 @@ def response_medium(plan):
     """Resolve response constants once before entering a driver."""
     return SimpleNamespace(
         speed_of_sound=plan._medium.speed_of_sound, attenuation=plan._medium.attenuation, baffle=plan._params.baffle
+    )
+
+
+@dataclass(frozen=True, eq=False)
+class EchoPlan(FieldPlan):
+    """Finite-aperture pulse-echo plan with explicit sampling metadata."""
+
+    _sampling: SamplingInfo
+
+    @property
+    def correction_factor(self):
+        """Raw receive spectra use unscaled inverse-DFT normalization."""
+        return 1.0
+
+    @property
+    def requested_sampling_frequency(self):
+        """Requested sample rate in Hz."""
+        return self._sampling.requested_sampling_frequency
+
+    @property
+    def sampling_frequency(self):
+        """Effective sample rate in Hz."""
+        return self._sampling.sampling_frequency
+
+    @property
+    def n_fft(self):
+        """Full inverse transform length."""
+        return self._sampling.n_fft
+
+    @property
+    def time_origin(self):
+        """Trigger-relative origin in seconds."""
+        return self._sampling.time_origin
+
+    @property
+    def sample_times(self):
+        """Causal RF sample times in seconds."""
+        return self._sampling.times(array_namespace(self.selected_freqs), self._dtype)
+
+
+def prepare_echo(
+    positions, rc, delays, params, medium, *, fs, tx_n_wavelengths, db_thresh, element_splitting, frequency_step
+):
+    """Prepare round-trip support using the common spectral grid builder."""
+    if not isfinite(tx_n_wavelengths) or tx_n_wavelengths <= 0:
+        raise ValueError("RF requires a finite positive pulse duration")
+    fs = 4 * params.freq_center if fs is None else fs
+    if not isfinite(fs) or fs < 4 * params.freq_center:
+        raise ValueError("RF sampling frequency must be at least 4*fc")
+    xp = _validate_arrays(positions, delays, params)
+    _same_arrays(positions, rc)
+    if rc.shape != positions.shape[:-1] or not bool(xp.all(xp.isfinite(rc))):
+        raise ValueError("Finite reflectivity must exactly match scatterer shape")
+    base = prepare_field(
+        positions,
+        delays,
+        params,
+        medium,
+        tx_n_wavelengths=tx_n_wavelengths,
+        db_thresh=db_thresh,
+        element_splitting=element_splitting,
+        frequency_step=frequency_step,
+    )
+    duration = _two_way_pulse_duration(params.freq_center, params.bandwidth, tx_n_wavelengths, xp)
+    step = frequency_step / (2 * (2 * (base._path / medium.speed_of_sound + duration) + base._delay))
+    grid, pulse, probe = frequency_grid(
+        params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, step, xp, positions.dtype
+    )
+    sampling = SamplingInfo(fs, ceil(fs / (2 * params.freq_center) * (grid.n_freq_full - 1)), grid.freq_step)
+    return EchoPlan(
+        grid, params, medium, base._shape, base._dtype, base._counts, base._path, base._delay, pulse, probe, sampling
     )

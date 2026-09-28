@@ -14,7 +14,7 @@ from fast_simus.pfield import (
     pfield_spectrum_compute,
     rms_from_spectrum,
 )
-from fast_simus.plans import FieldPlan, FieldSpectrumInfo
+from fast_simus.plans import EchoPlan, FieldPlan, FieldSpectrumInfo
 from fast_simus.simus import SimusPlan, SimusResult, SimusStrategy, simus, simus_compute, simus_precompute
 from fast_simus.transducer import Transducer, transducer_from_params
 from fast_simus.transducer_params import BaffleType, TransducerParams
@@ -31,6 +31,7 @@ from fast_simus.wavefield import WavefieldResult, spectrum_to_wavefield, wavefie
 
 __all__ = [
     "BaffleType",
+    "EchoPlan",
     "FieldPlan",
     "FieldSpectrumInfo",
     "MediumParams",

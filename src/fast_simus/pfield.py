@@ -16,7 +16,7 @@ from __future__ import annotations
 from enum import StrEnum
 from math import ceil, prod
 from types import ModuleType
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple, cast, overload
 
 from array_api_compat import is_jax_namespace
 from beartype import beartype as typechecker
@@ -208,6 +208,34 @@ def _select_strategy(
     if not _unsupported("metal", xp, params.baffle, full_frequency_directivity):
         return PfieldStrategy.METAL
     return PfieldStrategy.VECTORIZED
+
+
+@overload
+def pfield_precompute(
+    positions: Float[Array, "*grid_shape dim"],
+    delays: Float[Array, " n_elements"],
+    params: TransducerParams,
+    medium: MediumParams = _DEFAULT_MEDIUM,
+    *,
+    tx_n_wavelengths: float | int = 1.0,
+    db_thresh: float | int = -60.0,
+    element_splitting: int | tuple[int, int] | None = None,
+    frequency_step: float | int = 1.0,
+) -> PfieldPlan: ...
+
+
+@overload
+def pfield_precompute(
+    positions: Float[Array, "*grid_shape dim"],
+    delays: Float[Array, " n_elements"],
+    params: Transducer,
+    medium: MediumParams = _DEFAULT_MEDIUM,
+    *,
+    tx_n_wavelengths: float | int = 1.0,
+    db_thresh: float | int = -60.0,
+    element_splitting: int | tuple[int, int] | None = None,
+    frequency_step: float | int = 1.0,
+) -> FieldPlan: ...
 
 
 def pfield_precompute(

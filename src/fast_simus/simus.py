@@ -15,89 +15,32 @@ References:
 from __future__ import annotations
 
 from enum import StrEnum
-from math import ceil, log2, pi
+from math import ceil
 from types import ModuleType
-from typing import NamedTuple, cast
+from typing import NamedTuple, cast, overload
 
-import array_api_extra as xpx
 from array_api_compat import is_jax_namespace
 from jaxtyping import Complex, Float
 
 from fast_simus._capabilities import _require_strategy, _unsupported
 from fast_simus._compat import _clean_transmit_inputs, _transfer_plan
+from fast_simus._echo import echo_spectrum
+from fast_simus._frequency import _two_way_pulse_duration
 from fast_simus._pfield_math import _select_frequencies
+from fast_simus._spectral_output import _irfft_and_threshold
 from fast_simus._transfer import _prepare_strip_transfer
 from fast_simus.medium_params import MediumParams
-from fast_simus.spectrum import probe_spectrum as _probe_spectrum_fn
-from fast_simus.spectrum import pulse_spectrum as _pulse_spectrum_fn
+from fast_simus.plans import EchoPlan, prepare_echo
+from fast_simus.transducer import Transducer
 from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.utils._array_api import (
     Array,
     _ArrayNamespace,
-    _ArrayNamespaceWithFFT,
     array_namespace,
 )
 from fast_simus.utils.geometry import element_positions
 
 _DEFAULT_MEDIUM = MediumParams()
-
-
-def _two_way_pulse_duration(
-    freq_center: float,
-    bandwidth: float,
-    tx_n_wavelengths: float,
-    xp: _ArrayNamespace,
-) -> float:
-    """Compute the temporal extent of the two-way (pulse-echo) pulse.
-
-    Replicates the pulse duration computation from PyMUST's getpulse(param, 2).
-    Uses pulse_spectrum * probe_spectrum^2, IFFTs, and thresholds at 1/1023.
-
-    Args:
-        freq_center: Center frequency in Hz.
-        bandwidth: Fractional bandwidth (0.75 = 75%).
-        tx_n_wavelengths: Number of wavelengths of the TX pulse.
-        xp: Array namespace (must have FFT extension).
-
-    Returns:
-        Pulse duration in seconds.
-    """
-    # hasattr instead of isinstance(_ArrayNamespaceWithFFT) because Python 3.12+
-    # Protocol isinstance uses getattr_static, which misses lazy sub-module attrs
-    # like numpy.fft. See https://docs.python.org/3/whatsnew/3.12.html#typing
-    if not hasattr(xp, "fft"):
-        msg = "simus requires an array backend with FFT support (e.g. numpy, jax, cupy)"
-        raise RuntimeError(msg)
-    xp_fft = cast(_ArrayNamespaceWithFFT, xp)
-
-    dt = 1e-9
-    df = freq_center / tx_n_wavelengths / 32
-    p = ceil(log2(1.0 / dt / 2.0 / df))
-    n_fft = 2**p
-    omega = 2.0 * pi * xp.linspace(0, 1.0 / dt / 2.0, n_fft)
-
-    # Two-way spectrum: pulse * probe^2
-    ps = _pulse_spectrum_fn(omega, freq_center, tx_n_wavelengths)
-    pr = _probe_spectrum_fn(omega, freq_center, bandwidth)
-    two_way = ps * pr**2
-
-    pulse = xp_fft.fft.fftshift(xp_fft.fft.irfft(two_way))
-    pulse = pulse / xp.max(xp.abs(pulse))
-
-    above = pulse > (1.0 / 1023)
-    n = above.shape[0]
-    indices = xp.arange(n)
-    masked_min = xp.where(above, indices, xp.asarray(n))
-    masked_max = xp.where(above, indices, xp.asarray(-1))
-    idx1 = int(xp.min(masked_min))
-    idx2 = int(xp.max(masked_max))
-
-    if idx1 >= n:
-        return tx_n_wavelengths / freq_center
-
-    trim_idx = min(idx1 + 1, 2 * n_fft - 1 - idx2 - 1)
-    pulse_trimmed = pulse[-trim_idx : trim_idx - 2 : -1]
-    return float(pulse_trimmed.shape[0] * dt)
 
 
 class SimusStrategy(StrEnum):
@@ -158,6 +101,7 @@ class SimusPlan(NamedTuple):
     n_fft: int
 
 
+@overload
 def simus_precompute(
     scatterers: Float[Array, "*batch 2"],
     rc: Float[Array, " *batch"],
@@ -168,9 +112,40 @@ def simus_precompute(
     fs: float | None = None,
     tx_n_wavelengths: float | int = 1.0,
     db_thresh: float | int = -60.0,
-    element_splitting: int | None = None,
+    element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
-) -> SimusPlan:
+) -> SimusPlan: ...
+
+
+@overload
+def simus_precompute(
+    scatterers: Float[Array, "*batch 2"],
+    rc: Float[Array, " *batch"],
+    delays: Float[Array, " n_elements"],
+    params: Transducer,
+    medium: MediumParams = _DEFAULT_MEDIUM,
+    *,
+    fs: float | None = None,
+    tx_n_wavelengths: float | int = 1.0,
+    db_thresh: float | int = -60.0,
+    element_splitting: int | tuple[int, int] | None = None,
+    frequency_step: float | int = 1.0,
+) -> EchoPlan: ...
+
+
+def simus_precompute(
+    scatterers: Float[Array, "*batch 2"],
+    rc: Float[Array, " *batch"],
+    delays: Float[Array, " n_elements"],
+    params: TransducerParams | Transducer,
+    medium: MediumParams = _DEFAULT_MEDIUM,
+    *,
+    fs: float | None = None,
+    tx_n_wavelengths: float | int = 1.0,
+    db_thresh: float | int = -60.0,
+    element_splitting: int | tuple[int, int] | None = None,
+    frequency_step: float | int = 1.0,
+) -> SimusPlan | EchoPlan:
     """Precompute static quantities for simus computation.
 
     Args:
@@ -188,6 +163,21 @@ def simus_precompute(
     Returns:
         SimusPlan with static-shaped arrays and precomputed scalars.
     """
+    if isinstance(params, Transducer):
+        return prepare_echo(
+            scatterers,
+            rc,
+            delays,
+            params,
+            medium,
+            fs=fs,
+            tx_n_wavelengths=tx_n_wavelengths,
+            db_thresh=db_thresh,
+            element_splitting=element_splitting,
+            frequency_step=frequency_step,
+        )
+    if isinstance(element_splitting, tuple):
+        raise ValueError("2D element_splitting must be an integer")
     xp = array_namespace(scatterers, delays)
     speed_of_sound = medium.speed_of_sound
     fc = params.freq_center
@@ -299,40 +289,6 @@ def _prepare_simus_sweep(
     }
 
 
-def _irfft_and_threshold(
-    spect_selected: Complex[Array, "n_freq_sel n_elem"],
-    plan: SimusPlan,
-    n_elements: int,
-    xp: _ArrayNamespace,
-) -> tuple[Float[Array, "n_samples n_elem"], Complex[Array, "n_freq_full n_elem"]]:
-    """Place selected spectrum, IFFT to time domain, apply smooth thresholding."""
-    if not hasattr(xp, "fft"):
-        msg = "simus requires an array backend with FFT support (e.g. numpy, jax, cupy)"
-        raise RuntimeError(msg)
-    xp_fft = cast(_ArrayNamespaceWithFFT, xp)
-
-    n_freq_sel = spect_selected.shape[0]
-    full_spectrum = xp.zeros((plan.n_freq_full, n_elements), dtype=spect_selected.dtype)
-    full_spectrum = xpx.at(full_spectrum)[plan.freq_idx_start : plan.freq_idx_start + n_freq_sel, :].set(  # type: ignore[attr-defined]
-        spect_selected
-    )
-
-    rf = xp_fft.fft.irfft(xp.conj(full_spectrum), n=plan.n_fft, axis=0)
-
-    n_keep = (plan.n_fft + 1) // 2
-    rf = rf[:n_keep, ...]
-
-    # Smooth thresholding of small values (-100 dB)
-    rel_thresh = 1e-5
-    rf_peak = xp.max(xp.abs(rf))
-    rel_rf = xp.abs(rf) / (rf_peak + xp.asarray(1e-30))
-    smooth_gate = 0.5 * (1.0 + xp.tanh((rel_rf - rel_thresh) / (rel_thresh / 10.0)))  # type: ignore[attr-defined]
-
-    rf = rf * smooth_gate
-
-    return rf, full_spectrum
-
-
 def _select_simus_strategy(
     xp: _ArrayNamespace,
     strategy: SimusStrategy | None,
@@ -355,8 +311,8 @@ def simus_compute(
     scatterers: Float[Array, "*batch 2"],
     rc: Float[Array, " *batch"],
     delays: Float[Array, " n_elements"],
-    plan: SimusPlan,
-    params: TransducerParams,
+    plan: SimusPlan | EchoPlan,
+    params: TransducerParams | Transducer,
     medium: MediumParams = _DEFAULT_MEDIUM,
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
@@ -381,6 +337,16 @@ def simus_compute(
     Returns:
         SimusResult with RF signals and complex spectrum.
     """
+    if isinstance(params, Transducer):
+        if not isinstance(plan, EchoPlan):
+            raise ValueError("3D RF requires an EchoPlan")
+        spect = echo_spectrum(
+            scatterers, rc, delays, plan, params, medium, tx_apodization, full_frequency_directivity, strategy
+        )
+        rf, full = _irfft_and_threshold(spect, plan, params.n_elements, array_namespace(scatterers))
+        return SimusResult(rf, full)
+    if isinstance(plan, EchoPlan):
+        raise ValueError("2D RF requires a legacy plan")
     xp = array_namespace(scatterers, rc, delays)
 
     delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
@@ -456,7 +422,7 @@ def simus(
     scatterers: Float[Array, "*batch 2"],
     rc: Float[Array, " *batch"],
     delays: Float[Array, " n_elements"],
-    params: TransducerParams,
+    params: TransducerParams | Transducer,
     medium: MediumParams = _DEFAULT_MEDIUM,
     *,
     fs: float | None = None,
@@ -464,7 +430,7 @@ def simus(
     tx_n_wavelengths: float | int = 1.0,
     db_thresh: float | int = -60.0,
     full_frequency_directivity: bool = False,
-    element_splitting: int | None = None,
+    element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
     strategy: SimusStrategy | None = None,
 ) -> SimusResult:
