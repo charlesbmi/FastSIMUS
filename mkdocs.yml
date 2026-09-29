@@ -10,6 +10,7 @@ nav:
   - Home: index.md
   - Modules: modules.md
   - 3D simulation: 3d-simulation.md
+  - Scattered wavefields: scattered-wavefields.md
   - 3D validation: 3d-validation.md
 plugins:
   - search

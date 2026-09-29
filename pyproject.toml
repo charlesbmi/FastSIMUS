@@ -99,6 +99,11 @@ test-parallel = [
     { include-group = "test" },
     "pytest-xdist>=3.8.0",
 ]
+plot3d = [
+    { include-group = "plot" },
+    "fastplotlib>=0.7,<0.8",
+    "rendercanvas>=2.7,<3",
+]
 test-plot = [
     { include-group = "test" },
     { include-group = "plot" },
@@ -318,6 +323,8 @@ ignore = [
 "src/fast_simus/utils/_array_api.py" = ["PLC0415"]  # optional CuPy / MLX in default_namespace
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 # Marimo notebooks are a DAG of cells; imports live inside cells by design.
+"examples/wavefield_3d_explorer.py" = ["PLC0415", "B018", "D103"]
+"examples/_wavefield3d*.py" = ["PLC0415"]
 "examples/wavefield_explorer.py" = ["PLC0415", "B018", "D103", "RUF046", "RUF059"]
 
 [tool.ruff.lint.pydocstyle]
