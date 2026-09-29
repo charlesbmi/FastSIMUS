@@ -1,8 +1,8 @@
 # Incident and scattered wavefields
 
 The 3D explorer simulates pressure inside the notebook and displays three orthogonal planes in a rotatable scene, with
-matching 2D views. The planes share physical coordinates and a common time axis. Beamforming is not part of this
-example.
+matching 2D views and received RF across the matrix elements. The planes share physical coordinates and a common time
+axis. Beamforming is not part of this example.
 
 From the repository root:
 
@@ -17,7 +17,21 @@ Only the displayed scatterer markers may be subsampled; the notebook reports bot
 The coarse preview setting changes observation spacing, not the simulated scatterer count. Acoustic sampling uses
 spacing no greater than half the wavelength at the highest frequency on the simulation grid. Change observation
 resolution or transmission settings and simulate again. Time, component, magnitude, gain, and geometry controls reuse
-the current result. The simulation can be cancelled between illumination or observation blocks.
+the current result. The simulation can be cancelled between illumination or observation blocks; the receive-RF stage
+finishes before a pending cancellation is applied.
+
+## Received RF during playback
+
+The bottom-left panel shows signed received RF with flattened element index on the horizontal axis and time in
+microseconds on the vertical axis. Its yellow cursor follows wavefield playback. The bottom-right panel shows the
+instantaneous signal across all receive elements, interpolated onto the same physical time. Both views use one fixed RF
+peak scale; pressure component, magnitude, and gain controls do not change RF values or rerun the simulation.
+
+RF is computed with the finite receive-element model, including its receive directivity and probe response. It is not
+pressure sampled at element centers. The point scene provides a clear round-trip echo; the no-scatterer scene has zero
+RF.
+
+![Received RF at the point-target echo](assets/3d-received-rf.png)
 
 ## Pressure at arbitrary points
 
@@ -90,19 +104,25 @@ The three planes intersect at the same physical coordinates; drag the 3D panel t
 ![Scattered propagation](assets/3d-scattered.png)
 
 On an Apple M4 Max with MLX, the default 10,000-scatterer phantom and coarse preview produced 969 observation points and
-280 time samples in 223 seconds using the notebook simulation function; a browser run took 213 seconds. The measured
-standalone process peak was 143 MiB, MLX peak device allocation 22.3 MiB, and stored pressure arrays 2.1 MiB. The plan's
-conservative numerical workspace estimate was 36.9 MiB. These are first-run measurements, not a real-time guarantee.
-CUDA timing could not be measured because the available Dell host was unreachable.
+280 time samples in 223 seconds using the pressure-only simulation before the RF panels were added; a browser run took
+213 seconds. The measured standalone process peak was 143 MiB, MLX peak device allocation 22.3 MiB, and stored pressure
+arrays 2.1 MiB. The plan's conservative numerical workspace estimate was 36.9 MiB. These are single-run measurements,
+not a real-time guarantee.
+
+On Dell's GTX 1060 Max-Q (CuPy 14.0.1, driver 535.288.01), the same default scene including received RF completed in 887
+seconds: 690 seconds for pressure and 198 seconds for RF. It produced 362 RF samples across 256 receive elements. CuPy's
+memory pool reserved 25.8 MiB at completion; process peak resident memory was 540 MiB and stored output arrays were 2.8
+MiB. Pool reservation includes reusable allocations and is not a measurement of live tensor memory.
 
 Run the small deterministic scene and rendering check without opening the notebook:
 
 ```sh
-uv run --group plot3d --group test pytest tests/test_scattered_field.py tests/test_wavefield3d_view.py
+uv run --group plot3d --group test pytest tests/test_scattered_field.py tests/test_wavefield3d_rf.py tests/test_wavefield3d_view.py
 RENDERCANVAS_FORCE_OFFSCREEN=1 uv run --group plot3d python examples/wavefield_3d_explorer.py
 ```
 
 Numerical checks cover complex pressure against an independent reference, common-grid component addition, coefficient
 linearity, empty clouds, arrival timing, unchanged inputs, multiple tile budgets, and slice samples against a dense
 volume. The plotting check exercises physical transforms and renderer cleanup. NumPy, JAX and MLX were exercised
-locally; CUDA coverage requires a CUDA-capable host.
+locally; pressure and finite-element RF checks also passed on Dell's CUDA device, including RF parity with NumPy at a
+normalized absolute tolerance of 1e-4.
