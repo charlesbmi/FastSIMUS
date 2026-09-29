@@ -165,6 +165,30 @@ def _(mo, simulation):
 
 
 @app.cell
+def _(mo, simulation):
+    _nx, _ny = simulation.matrix_shape
+    _centers = simulation.elements.reshape(_ny, _nx, 3)
+    rf_row = mo.ui.dropdown(
+        {f"{i}: y = {_centers[i, 0, 1] * 1000:.2f} mm": i for i in range(_ny)},
+        value=f"{(_ny - 1) // 2}: y = {_centers[(_ny - 1) // 2, 0, 1] * 1000:.2f} mm",
+        label="RF Y row (X-directed)",
+    )
+    rf_column = mo.ui.dropdown(
+        {f"{i}: x = {_centers[0, i, 0] * 1000:.2f} mm": i for i in range(_nx)},
+        value=f"{(_nx - 1) // 2}: x = {_centers[0, (_nx - 1) // 2, 0] * 1000:.2f} mm",
+        label="RF X column (Y-directed)",
+    )
+    mo.hstack([rf_row, rf_column], wrap=True)
+    return rf_column, rf_row
+
+
+@app.cell
+def _(rf_column, rf_row, viewer):
+    viewer.received.select(rf_row.value, rf_column.value)
+    return
+
+
+@app.cell
 def _(component, gain, geometry, magnitude, mo, playing, time_control, viewer):
     viewer.playing = playing.value
     viewer.configure(component.value, magnitude.value, gain.value, geometry.value)
@@ -173,8 +197,10 @@ def _(component, gain, geometry, magnitude, mo, playing, time_control, viewer):
     mo.md(
         f"Showing {viewer.displayed_scatterers:,} of {len(viewer.simulation.scatterers):,} scatterer markers. "
         "Each component uses its own fixed peak scale over the full movie; gain is display-only. "
-        "RF stays signed with its own fixed scale; the yellow cursor follows the same physical time. "
-        "Receive channels are flattened in aperture element order."
+        "Both RF cross-sections share a fixed signed amplitude scale and follow playback. "
+        "Lateral ticks are millimeters; vertical ticks are microseconds. "
+        "Equal screen distances represent equal travel times (position divided by sound speed). "
+        "Pan and zoom are linked between the RF panels."
     )
     return
 

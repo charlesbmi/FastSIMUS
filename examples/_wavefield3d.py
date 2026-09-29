@@ -101,6 +101,8 @@ class Simulation:
     backend: str
     rf: np.ndarray
     rf_times: np.ndarray
+    matrix_shape: tuple[int, int]
+    sound_speed: float
 
 
 def simulate(config, progress=None, cancelled=None):
@@ -108,8 +110,9 @@ def simulate(config, progress=None, cancelled=None):
     start = perf_counter()
     xp = namespace(config["backend"])
     fc = 2e6
+    medium = fs.MediumParams()
     # Physical Nyquist spacing for the retained grid up to 2*fc; preview is explicit.
-    spacing = 1540 / (4 * fc) * config.get("spacing_factor", 1)
+    spacing = medium.speed_of_sound / (4 * fc) * config.get("spacing_factor", 1)
     nx = max(3, int(np.ceil(0.008 / spacing)) + 1)
     nz = max(3, int(np.ceil(0.024 / spacing)) + 1)
     nx += (nx + 1) % 2
@@ -141,6 +144,7 @@ def simulate(config, progress=None, cancelled=None):
         strengths,
         delays,
         probe,
+        medium,
         execution=fs.ExecutionOptions(128 * 1024 * 1024),
         frequency_step=1.0,
     )
@@ -153,7 +157,7 @@ def simulate(config, progress=None, cancelled=None):
             progress(component, 0, len(slices.points))
         frames = np.empty((len(slices.points), len(times)), np.float32)
         iterator = fs.iter_scattered_pfield_spectrum(
-            observers, sources, strengths, delays, plan, probe, component=component, cancelled=cancelled
+            observers, sources, strengths, delays, plan, probe, medium, component=component, cancelled=cancelled
         )
         for block in iterator:
             if cancelled is not None and cancelled():
@@ -173,10 +177,11 @@ def simulate(config, progress=None, cancelled=None):
             strengths,
             delays,
             probe,
+            medium,
             frequency_step=1.0,
             execution=fs.ExecutionOptions(128 * 1024 * 1024),
         )
-        rf = host(fs.simus_compute(sources, strengths, delays, rf_plan, probe).rf)
+        rf = host(fs.simus_compute(sources, strengths, delays, rf_plan, probe, medium).rf)
         rf_times = host(rf_plan.sample_times)
         workspace_bytes = max(workspace_bytes, rf_plan.estimated_workspace_bytes)
     else:
@@ -198,4 +203,6 @@ def simulate(config, progress=None, cancelled=None):
         config["backend"],
         rf,
         rf_times,
+        (side, side),
+        medium.speed_of_sound,
     )

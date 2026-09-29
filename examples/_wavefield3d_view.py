@@ -36,6 +36,7 @@ class WavefieldViewer:
             shape=(3, 2),
             cameras=[camera, "2d", "2d", "2d", "2d", "2d"],
             controller_types=["orbit", "panzoom", "panzoom", "panzoom", "panzoom", "panzoom"],
+            controller_ids=[[0, 1], [2, 3], [4, 4]],
             canvas=canvas or NotebookCanvas(size=(1000, 1050), max_fps=20),
         )
         self.images = []
@@ -153,47 +154,60 @@ class ViewerSlot:
 
 
 class ReceivedRFView:
-    """A fixed-scale channel image and the receive-aperture signal at the current time."""
+    """Orthogonal matrix RF histories with equal lateral and temporal travel-time scales."""
 
-    def __init__(self, image_panel, signal_panel, simulation):
-        self.image_panel, self.signal_panel = image_panel, signal_panel
+    def __init__(self, x_panel, y_panel, simulation):
+        self.panels = (x_panel, y_panel)
         self.times = simulation.rf_times
-        self.rf = np.asarray(simulation.rf / max(float(np.max(np.abs(simulation.rf))), 1e-30), dtype=np.float32)
-        self.elements = np.arange(self.rf.shape[1], dtype=np.float32)
-        image_panel.title = "Received RF: element index (x), time (us, y)"
-        image = image_panel.add_image(self.rf, cmap="bwr", vmin=-1, vmax=1)
-        image.scale = (1, (self.times[1] - self.times[0]) * 1e6, 1)
-        image.offset = (0, self.times[0] * 1e6, 0)
-        self.cursor = image_panel.add_line(
-            np.array([[-0.5, 0, 1], [len(self.elements) - 0.5, 0, 1]], dtype=np.float32),
-            colors="#ffc857",
-            thickness=2,
-        )
-        self.signal = signal_panel.add_line(
-            np.column_stack([self.elements, np.zeros_like(self.elements)]),
-            colors="#ffc857",
-            thickness=2,
-        )
+        nx, ny = simulation.matrix_shape
+        self.sound_speed = simulation.sound_speed
+        peak = max(float(np.max(np.abs(simulation.rf))), 1e-30)
+        self.rf = np.asarray(simulation.rf / peak, dtype=np.float32).reshape(len(self.times), ny, nx)
+        centers = simulation.elements.reshape(ny, nx, 3)
+        self.axes = (centers[0, :, 0], centers[:, 0, 1])
+        self.images, self.cursors, self.bounds = [], [], []
+        for axis, panel in zip(self.axes, self.panels, strict=True):
+            positions = axis / self.sound_speed * 1e6
+            step = positions[1] - positions[0]
+            image = panel.add_image(np.zeros((len(self.times), len(axis)), np.float32), cmap="bwr", vmin=-1, vmax=1)
+            image.scale = (step, (self.times[1] - self.times[0]) * 1e6, 1)
+            image.offset = (positions[0], self.times[0] * 1e6, 0)
+            bounds = (positions[0] - step / 2, positions[-1] + step / 2)
+            cursor = panel.add_line(
+                np.array([[bounds[0], 0, 1], [bounds[1], 0, 1]], dtype=np.float32),
+                colors="#ffc857",
+                thickness=2,
+            )
+            panel.axes.x.tick_format = self.format_mm
+            self.images.append(image)
+            self.cursors.append(cursor)
+            self.bounds.append(bounds)
+        self.select((ny - 1) // 2, (nx - 1) // 2)
+
+    def format_mm(self, value, minimum, maximum):
+        """Label travel-time coordinates with their physical position in millimeters."""
+        return f"{value * self.sound_speed * 1e-3:.4g}"
+
+    def select(self, row, column):
+        """Select a Y row and X column without changing normalization or camera state."""
+        if not 0 <= row < self.rf.shape[1] or not 0 <= column < self.rf.shape[2]:
+            raise ValueError("RF row or column index out of range")
+        self.row, self.column = row, column
+        self.images[0].data = np.ascontiguousarray(self.rf[:, row, :])
+        self.images[1].data = np.ascontiguousarray(self.rf[:, :, column])
+        self.panels[0].title = f"X (mm) / time (us) | Y row {row}: {self.axes[1][row] * 1000:.2f} mm"
+        self.panels[1].title = f"Y (mm) / time (us) | X column {column}: {self.axes[0][column] * 1000:.2f} mm"
 
     def fit(self):
-        """Use independent channel/time scales; RF amplitude stays fixed over playback."""
-        for panel in (self.image_panel, self.signal_panel):
-            panel.camera.maintain_aspect = False
-        self.image_panel.camera.show_rect(-0.5, len(self.elements) - 0.5, 0, self.times[-1] * 1e6)
-        self.signal_panel.camera.local.scale_y = 1
-        self.signal_panel.camera.show_rect(-0.5, len(self.elements) - 0.5, -1.1, 1.1)
+        """Show full histories with shared bounds and an undistorted travel-time aspect."""
+        left = min(bound[0] for bound in self.bounds)
+        right = max(bound[1] for bound in self.bounds)
+        dt = (self.times[1] - self.times[0]) * 1e6
+        for panel in self.panels:
+            panel.camera.maintain_aspect = True
+            panel.camera.show_rect(left, right, self.times[0] * 1e6 - dt / 2, self.times[-1] * 1e6 + dt / 2)
 
     def update(self, time):
-        """Interpolate the displayed channel snapshot; never modify the simulated RF."""
-        index = int(np.searchsorted(self.times, time, side="right"))
-        if time < self.times[0] or time > self.times[-1]:
-            values = np.zeros_like(self.elements)
-        elif index == len(self.times):
-            values = self.rf[-1]
-        else:
-            before = max(0, index - 1)
-            weight = (time - self.times[before]) / (self.times[index] - self.times[before])
-            values = (1 - weight) * self.rf[before] + weight * self.rf[index]
-        self.cursor.data[:, 1] = time * 1e6
-        self.signal.data[:, 1] = values
-        self.signal_panel.title = f"RF across elements | {time * 1e6:.2f} us | normalized"
+        """Move both cursors to the physical playback time in seconds."""
+        for cursor in self.cursors:
+            cursor.data[:, 1] = time * 1e6

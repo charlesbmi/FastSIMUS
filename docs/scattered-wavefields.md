@@ -22,16 +22,25 @@ finishes before a pending cancellation is applied.
 
 ## Received RF during playback
 
-The bottom-left panel shows signed received RF with flattened element index on the horizontal axis and time in
-microseconds on the vertical axis. Its yellow cursor follows wavefield playback. The bottom-right panel shows the
-instantaneous signal across all receive elements, interpolated onto the same physical time. Both views use one fixed RF
-peak scale; pressure component, magnitude, and gain controls do not change RF values or rerun the simulation.
+The bottom-left image shows RF along X at a selected Y row; the bottom-right image shows RF along Y at a selected X
+column. Choose either cross-section below the viewer without rerunning the simulation. Selectors and panel titles show
+zero-based indices and physical coordinates. The default is the lower-index central row and column (index 7 for 16×16).
+
+Horizontal ticks label element positions in millimeters; vertical ticks label time in microseconds. Rendering uses
+position divided by the simulation sound speed, so equal horizontal and vertical screen distances represent equal travel
+times: at 1540 m/s, 1.54 mm horizontally spans the same distance as 1 microsecond vertically. Full histories can
+therefore appear narrow. Pan and zoom are linked between the RF panels and preserve this aspect ratio.
+
+Both images use one fixed RF peak scale across all channels and times. Their yellow cursors follow wavefield playback.
+Pressure component, magnitude, and gain controls do not change RF values or rerun the simulation.
 
 RF is computed with the finite receive-element model, including its receive directivity and probe response. It is not
 pressure sampled at element centers. The point scene provides a clear round-trip echo; the no-scatterer scene has zero
 RF.
 
-![Received RF at the point-target echo](assets/3d-received-rf.png)
+The example below is zoomed around the point-target echo; both panels retain equal travel-time scaling.
+
+![Orthogonal received RF cross-sections at the point-target echo](assets/3d-received-rf.png)
 
 ## Pressure at arbitrary points
 
