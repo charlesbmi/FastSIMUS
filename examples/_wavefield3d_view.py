@@ -33,10 +33,10 @@ class WavefieldViewer:
         camera = pygfx.PerspectiveCamera(50)
         camera.local.z = -100  # Keep initial rulers away from the camera projection plane.
         self.figure = fpl.Figure(
-            shape=(2, 2),
-            cameras=[camera, "2d", "2d", "2d"],
-            controller_types=["orbit", "panzoom", "panzoom", "panzoom"],
-            canvas=canvas or NotebookCanvas(size=(1000, 750), max_fps=20),
+            shape=(3, 2),
+            cameras=[camera, "2d", "2d", "2d", "2d", "2d"],
+            controller_types=["orbit", "panzoom", "panzoom", "panzoom", "panzoom", "panzoom"],
+            canvas=canvas or NotebookCanvas(size=(1000, 1050), max_fps=20),
         )
         self.images = []
         self.planes = []
@@ -83,8 +83,10 @@ class WavefieldViewer:
             "scattered": max(float(np.max(np.abs(simulation.scattered))), 1e-30),
             "total": max(float(np.max(np.abs(simulation.incident + simulation.scattered))), 1e-30),
         }
+        self.received = ReceivedRFView(self.figure[2, 0], self.figure[2, 1], simulation)
         self.figure.add_animations(self.animate)
         self.widget = self.figure.show()
+        self.received.fit()
         self.scene.camera.local.scale_y = 1
         self.scene.camera.show_object(self.scene.scene, view_dir=(-1, -1, -0.7), up=(0, 0, -1))
         self.update(0)
@@ -119,6 +121,7 @@ class WavefieldViewer:
             colors[..., 3] = np.clip(np.abs(data) * 4, 0, 0.95)
             plane.data = colors
             image.data = data
+        self.received.update(sim.times[self.index])
         self.scene.title = f"{self.component.capitalize()} | {sim.times[self.index] * 1e6:.2f} us"
 
     def animate(self, *args):
@@ -147,3 +150,50 @@ class ViewerSlot:
             self.viewer.close()
         self.viewer = WavefieldViewer(simulation)
         return self.viewer
+
+
+class ReceivedRFView:
+    """A fixed-scale channel image and the receive-aperture signal at the current time."""
+
+    def __init__(self, image_panel, signal_panel, simulation):
+        self.image_panel, self.signal_panel = image_panel, signal_panel
+        self.times = simulation.rf_times
+        self.rf = np.asarray(simulation.rf / max(float(np.max(np.abs(simulation.rf))), 1e-30), dtype=np.float32)
+        self.elements = np.arange(self.rf.shape[1], dtype=np.float32)
+        image_panel.title = "Received RF: element index (x), time (us, y)"
+        image = image_panel.add_image(self.rf, cmap="bwr", vmin=-1, vmax=1)
+        image.scale = (1, (self.times[1] - self.times[0]) * 1e6, 1)
+        image.offset = (0, self.times[0] * 1e6, 0)
+        self.cursor = image_panel.add_line(
+            np.array([[-0.5, 0, 1], [len(self.elements) - 0.5, 0, 1]], dtype=np.float32),
+            colors="#ffc857",
+            thickness=2,
+        )
+        self.signal = signal_panel.add_line(
+            np.column_stack([self.elements, np.zeros_like(self.elements)]),
+            colors="#ffc857",
+            thickness=2,
+        )
+
+    def fit(self):
+        """Use independent channel/time scales; RF amplitude stays fixed over playback."""
+        for panel in (self.image_panel, self.signal_panel):
+            panel.camera.maintain_aspect = False
+        self.image_panel.camera.show_rect(-0.5, len(self.elements) - 0.5, 0, self.times[-1] * 1e6)
+        self.signal_panel.camera.local.scale_y = 1
+        self.signal_panel.camera.show_rect(-0.5, len(self.elements) - 0.5, -1.1, 1.1)
+
+    def update(self, time):
+        """Interpolate the displayed channel snapshot; never modify the simulated RF."""
+        index = int(np.searchsorted(self.times, time, side="right"))
+        if time < self.times[0] or time > self.times[-1]:
+            values = np.zeros_like(self.elements)
+        elif index == len(self.times):
+            values = self.rf[-1]
+        else:
+            before = max(0, index - 1)
+            weight = (time - self.times[before]) / (self.times[index] - self.times[before])
+            values = (1 - weight) * self.rf[before] + weight * self.rf[index]
+        self.cursor.data[:, 1] = time * 1e6
+        self.signal.data[:, 1] = values
+        self.signal_panel.title = f"RF across elements | {time * 1e6:.2f} us | normalized"

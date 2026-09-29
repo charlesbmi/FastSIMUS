@@ -99,6 +99,8 @@ class Simulation:
     seconds: float
     workspace_bytes: int
     backend: str
+    rf: np.ndarray
+    rf_times: np.ndarray
 
 
 def simulate(config, progress=None, cancelled=None):
@@ -160,6 +162,30 @@ def simulate(config, progress=None, cancelled=None):
             if progress:
                 progress(component, block.stop, len(slices.points))
         outputs.append(frames)
+    if cancelled is not None and cancelled():
+        raise InterruptedError("Simulation cancelled before receive RF")
+    if progress:
+        progress("receive RF", 0, 1)
+    workspace_bytes = plan.estimated_workspace_bytes
+    if len(scatterers):
+        rf_plan = fs.simus_precompute(
+            sources,
+            strengths,
+            delays,
+            probe,
+            frequency_step=1.0,
+            execution=fs.ExecutionOptions(128 * 1024 * 1024),
+        )
+        rf = host(fs.simus_compute(sources, strengths, delays, rf_plan, probe).rf)
+        rf_times = host(rf_plan.sample_times)
+        workspace_bytes = max(workspace_bytes, rf_plan.estimated_workspace_bytes)
+    else:
+        rf = np.zeros((len(times), probe.n_elements), dtype=np.float32)
+        rf_times = times
+    if cancelled is not None and cancelled():
+        raise InterruptedError("Simulation cancelled during receive RF")
+    if progress:
+        progress("receive RF", 1, 1)
     return Simulation(
         slices,
         outputs[0],
@@ -168,6 +194,8 @@ def simulate(config, progress=None, cancelled=None):
         host(aperture.centers),
         scatterers,
         perf_counter() - start,
-        plan.estimated_workspace_bytes,
+        workspace_bytes,
         config["backend"],
+        rf,
+        rf_times,
     )

@@ -72,3 +72,29 @@ def test_echo_linearity_and_arrival():
     np.testing.assert_allclose(b.spectrum, a.spectrum * 0.6, rtol=0, atol=1e-10 * np.max(np.abs(a.spectrum)))
     arrival = plan.sample_times[np.argmax(np.abs(np.asarray(a.rf)[:, 0]))]
     assert abs(float(arrival) - 0.04 / 1540) <= 1 / plan.sampling_frequency + 1 / 2e6
+
+
+def test_echo_backend_matches_numpy(xp):
+    """Finite receive elements preserve the complex spectrum across available backends."""
+    from tests.conftest import to_numpy
+
+    def compute(namespace):
+        aperture = matrix_aperture(
+            shape=(2, 2), pitch=(0.0003, 0.0003), size=(0.0002, 0.0002), xp=namespace, dtype=namespace.float32
+        )
+        probe = Transducer(aperture, "3d", 2e6)
+        points = namespace.asarray([[0.001, -0.002, 0.017], [-0.002, 0.001, 0.024]], dtype=namespace.float32)
+        return simus(
+            points,
+            namespace.asarray([0.001, -0.0003], dtype=namespace.float32),
+            namespace.zeros(4, dtype=namespace.float32),
+            probe,
+            full_frequency_directivity=True,
+        )
+
+    expected, actual = compute(np), compute(xp)
+    for name in ("spectrum", "rf"):
+        reference = to_numpy(getattr(expected, name))
+        np.testing.assert_allclose(
+            to_numpy(getattr(actual, name)), reference, rtol=0, atol=1e-4 * np.max(np.abs(reference))
+        )

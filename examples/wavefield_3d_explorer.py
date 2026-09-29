@@ -89,7 +89,10 @@ def _(controls, mo, set_progress, set_result, simulate, simulation_lock, threadi
 
             def progress(component, done, total):
                 if not current.should_exit:
-                    set_progress(f"{component.capitalize()}: {done:,} / {total:,} observation points")
+                    if component == "receive RF":
+                        set_progress("Computing received RF..." if done == 0 else "Received RF complete.")
+                    else:
+                        set_progress(f"{component.capitalize()}: {done:,} / {total:,} observation points")
 
             # Serializes replacement runs; invalidated threads stop at a block boundary.
             with simulation_lock:
@@ -170,7 +173,8 @@ def _(component, gain, geometry, magnitude, mo, playing, time_control, viewer):
     mo.md(
         f"Showing {viewer.displayed_scatterers:,} of {len(viewer.simulation.scatterers):,} scatterer markers. "
         "Each component uses its own fixed peak scale over the full movie; gain is display-only. "
-        "Time is shown on the 3D panel."
+        "RF stays signed with its own fixed scale; the yellow cursor follows the same physical time. "
+        "Receive channels are flattened in aperture element order."
     )
     return
 
