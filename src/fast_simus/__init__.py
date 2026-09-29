@@ -18,6 +18,12 @@ from fast_simus.pfield import (
     rms_from_spectrum,
 )
 from fast_simus.plans import EchoPlan, FieldPlan, FieldSpectrumInfo
+from fast_simus.scattered import (
+    ScatteredFieldPlan,
+    iter_scattered_pfield_spectrum,
+    scattered_field_precompute,
+    scattered_pfield_spectrum,
+)
 from fast_simus.sequence import (
     SequenceEvent,
     SequencePlan,
@@ -54,6 +60,7 @@ __all__ = [
     "PfieldSpectrumInfo",
     "PfieldStrategy",
     "RectangularAperture",
+    "ScatteredFieldPlan",
     "SequenceEvent",
     "SequencePlan",
     "SequenceResult",
@@ -70,6 +77,7 @@ __all__ = [
     "focus_delays",
     "focused",
     "iter_pfield_spectrum",
+    "iter_scattered_pfield_spectrum",
     "iter_simus_sequence",
     "iter_wavefield",
     "jit",
@@ -82,6 +90,8 @@ __all__ = [
     "plane_wave",
     "plane_wave_delays",
     "rms_from_spectrum",
+    "scattered_field_precompute",
+    "scattered_pfield_spectrum",
     "sequence_precompute",
     "simus",
     "simus_compute",

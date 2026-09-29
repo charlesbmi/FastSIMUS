@@ -1,0 +1,173 @@
+"""Scene construction and in-notebook three-plane simulation, independent of plotting."""
+
+from dataclasses import dataclass
+from time import perf_counter
+
+import numpy as np
+
+import fast_simus as fs
+
+
+@dataclass(frozen=True)
+class Orthoslices:
+    """Unique physical observation points and maps back to XY, XZ, YZ planes."""
+
+    points: np.ndarray
+    indices: tuple
+    axes: tuple
+    center: tuple
+
+
+def orthoslices(x, y, z):
+    """Deduplicate intersections; arrays retain row-major image order."""
+    center = (x[len(x) // 2], y[len(y) // 2], z[len(z) // 2])
+    xy = np.stack(np.meshgrid(x, y, [center[2]], indexing="xy"), axis=-1).reshape(len(y), len(x), 3)
+    xz = np.stack(np.meshgrid(x, [center[1]], z, indexing="ij"), axis=-1).reshape(len(x), len(z), 3).transpose(1, 0, 2)
+    yz = np.stack(np.meshgrid([center[0]], y, z, indexing="ij"), axis=-1).reshape(len(y), len(z), 3).transpose(1, 0, 2)
+    points, inverse = np.unique(np.concatenate([v.reshape(-1, 3) for v in (xy, xz, yz)]), axis=0, return_inverse=True)
+    a, b = xy.shape[0] * xy.shape[1], xz.shape[0] * xz.shape[1]
+    indices = (
+        inverse[:a].reshape(xy.shape[:2]),
+        inverse[a : a + b].reshape(xz.shape[:2]),
+        inverse[a + b :].reshape(yz.shape[:2]),
+    )
+    return Orthoslices(points.astype(np.float32), indices, (x, y, z), center)
+
+
+def phantom(kind, count, seed=2026):
+    """Signed weak-scattering cloud with a 1.5 mm anechoic sphere and bright targets."""
+    if kind == "None":
+        return np.empty((0, 3), np.float32), np.empty(0, np.float32)
+    if kind == "Point":
+        return np.array([[0, 0, 0.017]], np.float32), np.array([2e-4], np.float32)
+    rng = np.random.default_rng(seed)
+    chunks = []
+    remaining = max(0, count - 2)
+    while remaining:
+        candidates = rng.uniform([-0.004, -0.004, 0.009], [0.004, 0.004, 0.025], (remaining + 64, 3))
+        candidates = candidates[np.linalg.norm(candidates - [0.001, 0, 0.018], axis=-1) > 0.0015][:remaining]
+        chunks.append(candidates)
+        remaining -= len(candidates)
+    background = np.concatenate(chunks) if chunks else np.empty((0, 3))
+    points = np.concatenate([background, [[-0.002, 0, 0.014], [0.002, 0, 0.023]]]).astype(np.float32)
+    rc = rng.normal(0, 2e-6, len(points)).astype(np.float32)
+    rc[-2:] = 2e-4
+    return points, rc
+
+
+def namespace(name):
+    """Resolve explicit backend choices without importing optional GPU packages eagerly."""
+    if name == "NumPy":
+        return np
+    if name == "Auto":
+        return fs.default_namespace()
+    if name == "JAX":
+        import jax.numpy as jnp
+
+        return jnp
+    if name == "MLX":
+        import mlx.core as mx
+
+        from fast_simus.backends.mlx import ensure_compat
+
+        ensure_compat(mx)
+        return mx
+    if name == "CuPy":
+        import cupy as cp
+
+        return cp
+    raise ValueError(f"Unknown backend {name}")
+
+
+def host(array):
+    """Synchronize and copy only at the display boundary."""
+    if hasattr(array, "get"):
+        return array.get()
+    return np.asarray(array)
+
+
+@dataclass(frozen=True)
+class Simulation:
+    """Latest completed notebook result, with time last and coordinates in meters."""
+
+    slices: Orthoslices
+    incident: np.ndarray
+    scattered: np.ndarray
+    times: np.ndarray
+    elements: np.ndarray
+    scatterers: np.ndarray
+    seconds: float
+    workspace_bytes: int
+    backend: str
+
+
+def simulate(config, progress=None, cancelled=None):
+    """Simulate all scatterers on just three planes; callbacks run between blocks."""
+    start = perf_counter()
+    xp = namespace(config["backend"])
+    fc = 2e6
+    # Physical Nyquist spacing for the retained grid up to 2*fc; preview is explicit.
+    spacing = 1540 / (4 * fc) * config.get("spacing_factor", 1)
+    nx = max(3, int(np.ceil(0.008 / spacing)) + 1)
+    nz = max(3, int(np.ceil(0.024 / spacing)) + 1)
+    nx += (nx + 1) % 2
+    nz += (nz + 1) % 2
+    if config.get("smoke"):
+        nx, nz = 5, 7
+    slices = orthoslices(np.linspace(-0.004, 0.004, nx), np.linspace(-0.004, 0.004, nx), np.linspace(0.004, 0.028, nz))
+    scatterers, rc = phantom(config["scene"], config["count"])
+    side = config.get("side", 16)
+    aperture = fs.matrix_aperture(
+        shape=(side, side), pitch=(0.0003, 0.0003), size=(0.0002, 0.0002), xp=xp, dtype=xp.float32
+    )
+    probe = fs.Transducer(aperture, "3d", fc)
+    angle = np.deg2rad(config["steer"])
+    if config["transmit"] == "Plane wave":
+        delays = fs.plane_wave_delays(aperture.centers, xp.asarray([np.sin(angle), 0, np.cos(angle)], dtype=xp.float32))
+    else:
+        depth = config["focus"] / 1000
+        target = xp.asarray(
+            [depth * np.tan(angle), 0, -depth if config["transmit"] == "Diverging" else depth], dtype=xp.float32
+        )
+        delays = fs.focus_delays(aperture.centers, target, diverging=config["transmit"] == "Diverging")
+    observers = xp.asarray(slices.points, dtype=xp.float32)
+    sources = xp.asarray(scatterers, dtype=xp.float32)
+    strengths = xp.asarray(rc, dtype=xp.float32)
+    plan = fs.scattered_field_precompute(
+        observers,
+        sources,
+        strengths,
+        delays,
+        probe,
+        execution=fs.ExecutionOptions(128 * 1024 * 1024),
+        frequency_step=1.0,
+    )
+    times = host(fs.wavefield_times(plan))
+    outputs = []
+    for component in ("incident", "scattered"):
+        if cancelled is not None and cancelled():
+            raise InterruptedError("Simulation cancelled")
+        if progress:
+            progress(component, 0, len(slices.points))
+        frames = np.empty((len(slices.points), len(times)), np.float32)
+        iterator = fs.iter_scattered_pfield_spectrum(
+            observers, sources, strengths, delays, plan, probe, component=component, cancelled=cancelled
+        )
+        for block in iterator:
+            if cancelled is not None and cancelled():
+                raise InterruptedError("Simulation cancelled between spatial blocks")
+            frames[block.start : block.stop] = host(fs.spectrum_to_wavefield(block.values, plan).frames)
+            if progress:
+                progress(component, block.stop, len(slices.points))
+        outputs.append(frames)
+    return Simulation(
+        slices,
+        outputs[0],
+        outputs[1],
+        times,
+        host(aperture.centers),
+        scatterers,
+        perf_counter() - start,
+        plan.estimated_workspace_bytes,
+        config["backend"],
+    )

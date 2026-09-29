@@ -6,7 +6,7 @@ from fast_simus._blocking import block_count, point_block, run_loop
 from fast_simus._capabilities import _require_strategy
 from fast_simus._compat import _clean_transmit_inputs
 from fast_simus._contractions import _receive_spectrum
-from fast_simus._field import transmit_at_frequency
+from fast_simus._illumination import scatterer_illumination
 from fast_simus._transfer_3d import element_response
 from fast_simus.plans import response_medium
 from fast_simus.utils._array_api import array_namespace
@@ -40,8 +40,7 @@ def echo_spectrum(points, rc, delays, plan, params, medium, apodization, full_di
             block, valid = point_block(flat, i, size, xp)
             indices = xp.where(valid, i * size + xp.arange(size), xp.asarray(flat.shape[0] - 1))
             coefficients = xp.where(valid, xp.take(rc, indices, axis=0), xp.zeros_like(xp.take(rc, indices, axis=0)))
-            pressure = transmit_at_frequency(block, delays, apodization, plan, f, full_directivity, xp)
-            weighted = coefficients * pressure * plan._pulse[k] * plan._probe[k]
+            weighted = scatterer_illumination(block, coefficients, delays, apodization, plan, k, full_directivity, xp)
 
             def receive(e, result):
                 h = element_response(
