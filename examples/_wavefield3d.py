@@ -34,22 +34,26 @@ def orthoslices(x, y, z):
     return Orthoslices(points.astype(np.float32), indices, (x, y, z), center)
 
 
-def phantom(kind, count, seed=2026):
+def phantom(kind, count, seed=2026, depth_mm=20):
     """Signed weak-scattering cloud with a 1.5 mm anechoic sphere and bright targets."""
     if kind == "None":
         return np.empty((0, 3), np.float32), np.empty(0, np.float32)
     if kind == "Point":
-        return np.array([[0, 0, 0.017]], np.float32), np.array([2e-4], np.float32)
+        return np.array([[0, 0, 0.007 if depth_mm == 20 else 0.017]], np.float32), np.array([2e-4], np.float32)
+    shallow = depth_mm == 20
+    lower, upper = (0.005, 0.018) if shallow else (0.009, 0.025)
+    cavity_depth = 0.012 if shallow else 0.018
+    targets = (0.007, 0.017) if shallow else (0.014, 0.023)
     rng = np.random.default_rng(seed)
     chunks = []
     remaining = max(0, count - 2)
     while remaining:
-        candidates = rng.uniform([-0.004, -0.004, 0.009], [0.004, 0.004, 0.025], (remaining + 64, 3))
-        candidates = candidates[np.linalg.norm(candidates - [0.001, 0, 0.018], axis=-1) > 0.0015][:remaining]
+        candidates = rng.uniform([-0.004, -0.004, lower], [0.004, 0.004, upper], (remaining + 64, 3))
+        candidates = candidates[np.linalg.norm(candidates - [0.001, 0, cavity_depth], axis=-1) > 0.0015][:remaining]
         chunks.append(candidates)
         remaining -= len(candidates)
     background = np.concatenate(chunks) if chunks else np.empty((0, 3))
-    points = np.concatenate([background, [[-0.002, 0, 0.014], [0.002, 0, 0.023]]]).astype(np.float32)
+    points = np.concatenate([background, [[-0.002, 0, targets[0]], [0.002, 0, targets[1]]]]).astype(np.float32)
     rc = rng.normal(0, 2e-6, len(points)).astype(np.float32)
     rc[-2:] = 2e-4
     return points, rc
@@ -114,13 +118,15 @@ def simulate(config, progress=None, cancelled=None):
     # Physical Nyquist spacing for the retained grid up to 2*fc; preview is explicit.
     spacing = medium.speed_of_sound / (4 * fc) * config.get("spacing_factor", 1)
     nx = max(3, int(np.ceil(0.008 / spacing)) + 1)
-    nz = max(3, int(np.ceil(0.024 / spacing)) + 1)
+    depth_mm = config.get("depth_mm", 20)
+    z_min, z_max = (0.002 if depth_mm == 20 else 0.004), depth_mm / 1000
+    nz = max(3, int(np.ceil((z_max - z_min) / spacing)) + 1)
     nx += (nx + 1) % 2
     nz += (nz + 1) % 2
     if config.get("smoke"):
         nx, nz = 5, 7
-    slices = orthoslices(np.linspace(-0.004, 0.004, nx), np.linspace(-0.004, 0.004, nx), np.linspace(0.004, 0.028, nz))
-    scatterers, rc = phantom(config["scene"], config["count"])
+    slices = orthoslices(np.linspace(-0.004, 0.004, nx), np.linspace(-0.004, 0.004, nx), np.linspace(z_min, z_max, nz))
+    scatterers, rc = phantom(config["scene"], config["count"], depth_mm=depth_mm)
     side = config.get("side", 16)
     aperture = fs.matrix_aperture(
         shape=(side, side), pitch=(0.0003, 0.0003), size=(0.0002, 0.0002), xp=xp, dtype=xp.float32

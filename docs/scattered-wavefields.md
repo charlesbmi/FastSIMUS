@@ -135,3 +135,14 @@ linearity, empty clouds, arrival timing, unchanged inputs, multiple tile budgets
 volume. The plotting check exercises physical transforms and renderer cleanup. NumPy, JAX and MLX were exercised
 locally; pressure and finite-element RF checks also passed on Dell's CUDA device, including RF parity with NumPy at a
 normalized absolute tolerance of 1e-4.
+
+### Scene depth and layout
+
+The default shallow scene spans 2–20 mm in depth and ±4 mm laterally, with a point target at 7 mm. The deeper 4–28 mm
+scene remains selectable. Fine preview uses twice the acoustic sampling spacing; full acoustic sampling and coarse
+preview are also available. Acquisition duration follows the propagation paths and pulse support.
+
+The 3D scene and XY slice occupy the top row. Taller XZ, YZ, RF-X, and RF-Y panels sit side by side below, preserving
+physical aspect ratios.
+
+![Shallow scene with four tall inspection panels](assets/3d-shallow-layout.png)

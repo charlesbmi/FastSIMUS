@@ -33,15 +33,15 @@ class WavefieldViewer:
         camera = pygfx.PerspectiveCamera(50)
         camera.local.z = -100  # Keep initial rulers away from the camera projection plane.
         self.figure = fpl.Figure(
-            shape=(3, 2),
+            rects=[(0, 0, 0.5, 0.4), (0.5, 0, 0.5, 0.4)] + [(i / 4, 0.4, 0.25, 0.6) for i in range(4)],
             cameras=[camera, "2d", "2d", "2d", "2d", "2d"],
             controller_types=["orbit", "panzoom", "panzoom", "panzoom", "panzoom", "panzoom"],
             controller_ids=[[0, 1], [2, 3], [4, 4]],
-            canvas=canvas or NotebookCanvas(size=(1000, 1050), max_fps=20),
+            canvas=canvas or NotebookCanvas(size=(1100, 900), max_fps=20),
         )
         self.images = []
         self.planes = []
-        self.scene = self.figure[0, 0]
+        self.scene = self.figure[0]
         self.scene.title = "Pressure slices (mm)"
         axes = [a * 1000 for a in simulation.slices.axes]
         x, y, z = axes
@@ -58,7 +58,7 @@ class WavefieldViewer:
             plane.rotation = rotations[i]
             plane.offset = origins[i]
             self.planes.append(plane)
-            subplot = self.figure[(i + 1) // 2, (i + 1) % 2]
+            subplot = self.figure[i + 1]
             subplot.title = labels[i] + " pressure (mm)"
             image = subplot.add_image(data, cmap="bwr", vmin=-1, vmax=1)
             image.scale = scales[i]
@@ -84,7 +84,7 @@ class WavefieldViewer:
             "scattered": max(float(np.max(np.abs(simulation.scattered))), 1e-30),
             "total": max(float(np.max(np.abs(simulation.incident + simulation.scattered))), 1e-30),
         }
-        self.received = ReceivedRFView(self.figure[2, 0], self.figure[2, 1], simulation)
+        self.received = ReceivedRFView(self.figure[4], self.figure[5], simulation)
         self.figure.add_animations(self.animate)
         self.widget = self.figure.show()
         self.received.fit()
@@ -195,8 +195,8 @@ class ReceivedRFView:
         self.row, self.column = row, column
         self.images[0].data = np.ascontiguousarray(self.rf[:, row, :])
         self.images[1].data = np.ascontiguousarray(self.rf[:, :, column])
-        self.panels[0].title = f"X (mm) / time (us) | Y row {row}: {self.axes[1][row] * 1000:.2f} mm"
-        self.panels[1].title = f"Y (mm) / time (us) | X column {column}: {self.axes[0][column] * 1000:.2f} mm"
+        self.panels[0].title = f"RF X (mm), t (us)\nY row {row}: {self.axes[1][row] * 1000:.2f} mm"
+        self.panels[1].title = f"RF Y (mm), t (us)\nX column {column}: {self.axes[0][column] * 1000:.2f} mm"
 
     def fit(self):
         """Show full histories with shared bounds and an undistorted travel-time aspect."""

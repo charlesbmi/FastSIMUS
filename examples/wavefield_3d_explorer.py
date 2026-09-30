@@ -36,7 +36,7 @@ def _(mo):
 
     **Transmission** {transmit}  {steer}  {focus}
 
-    **Observation planes** {spacing_factor}
+    **Observation planes** {depth_mm} {spacing_factor}
     """)
         .batch(
             **{
@@ -47,10 +47,13 @@ def _(mo):
                     ["Plane wave", "Focused", "Diverging"], value="Plane wave", label="Transmit"
                 ),
                 "steer": mo.ui.slider(-25, 25, value=0, step=1, label="Steering (degrees)"),
-                "focus": mo.ui.slider(8, 30, value=18, step=1, label="Focus / virtual-source depth (mm)"),
+                "focus": mo.ui.slider(8, 30, value=12, step=1, label="Focus / virtual-source depth (mm)"),
+                "depth_mm": mo.ui.dropdown(
+                    {"Shallow (2-20 mm)": 20, "Deep (4-28 mm)": 28}, value="Shallow (2-20 mm)", label="Depth range"
+                ),
                 "spacing_factor": mo.ui.dropdown(
-                    {"Acoustic sampling": 1, "Coarse preview (4x spacing)": 4},
-                    value="Coarse preview (4x spacing)",
+                    {"Acoustic sampling": 1, "Fine preview (2x spacing)": 2, "Coarse preview (4x spacing)": 4},
+                    value="Fine preview (2x spacing)",
                     label="Observation grid",
                 ),
             }
