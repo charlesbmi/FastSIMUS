@@ -165,3 +165,42 @@ def test_plan_bounds_and_cancellation():
         scattered_field_precompute(observers, scatterers, rc[:1], delays, probe)
     with pytest.raises(InterruptedError):
         list(iter_scattered_pfield_spectrum(observers, scatterers, rc, delays, plan, probe, cancelled=lambda: True))
+
+
+def test_coincident_point_regularization():
+    """The documented distance floor applies to phase, attenuation and spreading."""
+    from fast_simus._scattered import point_response
+
+    fc, frequency, speed, attenuation = 2e6, 1.5e6, 1480.0, 0.6
+    minimum = speed / (2 * fc)
+    distances = np.array([0, minimum / 4, minimum, 2 * minimum])
+    observers = np.column_stack([distances, np.zeros((4, 2))])
+    response = point_response(
+        np.zeros((1, 3)), observers, frequency, fc, MediumParams(speed_of_sound=speed, attenuation=attenuation), np
+    )
+    safe = np.maximum(distances, minimum)
+    expected = np.exp((2j * np.pi * frequency / speed - attenuation * np.log(10) / 20 * frequency * 1e-4) * safe) / safe
+    np.testing.assert_allclose(response[0], expected, rtol=1e-12)
+
+
+def test_scattered_rotation_invariance():
+    """A general rigid rotation preserves CW pressure with oriented elements."""
+    from fast_simus import transform_aperture
+
+    probe, observers, scatterers, rc, delays = scene()
+    angle = 0.63
+    rotation = np.array(
+        [[np.cos(angle), 0, np.sin(angle)], [0, 1, 0], [-np.sin(angle), 0, np.cos(angle)]], dtype=np.float32
+    )
+    shift = np.array([0.003, -0.004, 0.002], dtype=np.float32)
+    moved = Transducer(transform_aperture(probe.aperture, rotation, shift), "3d", 2e6)
+    expected, _ = scattered_pfield_spectrum(observers, scatterers, rc, delays, probe, tx_n_wavelengths=float("inf"))
+    actual, _ = scattered_pfield_spectrum(
+        observers @ rotation.T + shift,
+        scatterers @ rotation.T + shift,
+        rc,
+        delays,
+        moved,
+        tx_n_wavelengths=float("inf"),
+    )
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-4 * np.max(np.abs(expected)))

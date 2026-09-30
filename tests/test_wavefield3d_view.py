@@ -24,7 +24,7 @@ def test_physical_planes_and_canvas_close(monkeypatch):
         expected = simulation.slices.points[indices[row, column]] * 1000
         np.testing.assert_allclose(position[:3], expected, atol=1e-5)
     viewer.configure("scattered", False, 10, True)
-    index = int(np.argmin(np.abs(simulation.times - 2 * 0.017 / 1540)))
+    index = int(np.argmin(np.abs(simulation.times - 2 * simulation.scatterers[0, 2] / simulation.sound_speed)))
     viewer.update(index)
     time = simulation.times[index]
     for cursor in viewer.received.cursors:
@@ -70,6 +70,7 @@ def test_matrix_rf_slices_and_time_scaling(monkeypatch, sound_speed):
     view = ReceivedRFView(figure[0, 0], figure[0, 1], sim)
     figure.show()
     view.fit()
+    assert figure[0, 0].controller is figure[0, 1].controller
     assert (view.row, view.column) == (1, 1)
     view.select(3, 0)
     canvas.draw()

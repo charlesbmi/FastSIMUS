@@ -22,9 +22,9 @@ finishes before a pending cancellation is applied.
 
 ## Received RF during playback
 
-The bottom-left image shows RF along X at a selected Y row; the bottom-right image shows RF along Y at a selected X
-column. Choose either cross-section below the viewer without rerunning the simulation. Selectors and panel titles show
-zero-based indices and physical coordinates. The default is the lower-index central row and column (index 7 for 16×16).
+The two rightmost bottom panels show RF along X at a selected Y row and RF along Y at a selected X column. Choose either
+cross-section below the viewer without rerunning the simulation. Selectors and panel titles show zero-based indices and
+physical coordinates. The default is the lower-index central row and column (index 7 for 16×16).
 
 Horizontal ticks label element positions in millimeters; vertical ticks label time in microseconds. Rendering uses
 position divided by the simulation sound speed, so equal horizontal and vertical screen distances represent equal travel
@@ -112,16 +112,17 @@ The three planes intersect at the same physical coordinates; drag the 3D panel t
 
 ![Scattered propagation](assets/3d-scattered.png)
 
-On an Apple M4 Max with MLX, the default 10,000-scatterer phantom and coarse preview produced 969 observation points and
-280 time samples in 223 seconds using the pressure-only simulation before the RF panels were added; a browser run took
-213 seconds. The measured standalone process peak was 143 MiB, MLX peak device allocation 22.3 MiB, and stored pressure
-arrays 2.1 MiB. The plan's conservative numerical workspace estimate was 36.9 MiB. These are single-run measurements,
-not a real-time guarantee.
+On an Apple M4 Max with MLX, the original 4–28 mm, 10,000-scatterer phantom and coarse preview produced 969 observation
+points and 280 time samples in 223 seconds using the pressure-only simulation before the RF panels were added; a browser
+run took 213 seconds. The measured standalone process peak was 143 MiB, MLX peak device allocation 22.3 MiB, and stored
+pressure arrays 2.1 MiB. The plan's conservative numerical workspace estimate was 36.9 MiB. These are single-run
+measurements, not a real-time guarantee.
 
-On Dell's GTX 1060 Max-Q (CuPy 14.0.1, driver 535.288.01), the same default scene including received RF completed in 887
+On Dell's GTX 1060 Max-Q (CuPy 14.0.1, driver 535.288.01), the same deep scene including received RF completed in 887
 seconds: 690 seconds for pressure and 198 seconds for RF. It produced 362 RF samples across 256 receive elements. CuPy's
 memory pool reserved 25.8 MiB at completion; process peak resident memory was 540 MiB and stored output arrays were 2.8
-MiB. Pool reservation includes reusable allocations and is not a measurement of live tensor memory.
+MiB. Pool reservation includes reusable allocations and is not a measurement of live tensor memory. These measurements
+precede the shallow preset; the current 2–20 mm fine-preview default has not been benchmarked with 10,000 scatterers.
 
 Run the small deterministic scene and rendering check without opening the notebook:
 
