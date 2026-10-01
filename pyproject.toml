@@ -175,7 +175,7 @@ sequence = [
     { cmd = "uv lock --locked" },
     { cmd = "ruff format src tests" },
     { cmd = "ruff check --fix src tests" },
-    { cmd = "ty check" },
+    { cmd = "ty check", executor = { group = "plot3d" } },
     { cmd = "mdformat README.md examples/README.md tests/data/3d/README.md --wrap 120" },
     { cmd = "codespell src tests README.md examples/README.md" },
     { cmd = "deptry src" },
@@ -187,6 +187,12 @@ help = "Test only code affected by recent changes, in parallel"
 cmd = "pytest tests/ --ignore=tests/benchmarks --testmon -n auto -p no:benchmark"
 # Need isolated = true to avoid conflicts with pytest-benchmark
 executor = { group = "test-parallel" }
+
+[tool.poe.tasks.test-plot3d]
+help = "Run offscreen 3D visualization contracts"
+cmd = "python -m pytest tests/test_wavefield3d_view.py -p no:testmon -p no:benchmark -rA"
+executor = { group = ["test", "plot3d"] }
+env = { RENDERCANVAS_FORCE_OFFSCREEN = "1" }
 
 [tool.poe.tasks.test-all]
 help = "Test all code (no benchmarks)"
