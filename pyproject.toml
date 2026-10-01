@@ -176,8 +176,8 @@ sequence = [
     { cmd = "ruff format src tests" },
     { cmd = "ruff check --fix src tests" },
     { cmd = "ty check" },
-    { cmd = "mdformat README.md docs --wrap 120" },
-    { cmd = "codespell src tests docs README.md" },
+    { cmd = "mdformat README.md examples/README.md tests/data/3d/README.md --wrap 120" },
+    { cmd = "codespell src tests README.md examples/README.md" },
     { cmd = "deptry src" },
     { ref = "pre-commit" },
 ]

@@ -51,7 +51,7 @@ def test_matrix_rf_slices_and_time_scaling(monkeypatch, sound_speed):
     fpl = pytest.importorskip("fastplotlib")
     from rendercanvas.offscreen import RenderCanvas
 
-    from examples._wavefield3d_view import ReceivedRFView
+    from examples._wavefield3d_rf import ReceivedRFView
 
     nx, ny = 3, 4
     x, y = np.arange(nx) * 0.0003 - 0.0003, np.arange(ny) * 0.0005 - 0.00075

@@ -6,6 +6,7 @@ from time import perf_counter
 import numpy as np
 
 import fast_simus as fs
+from fast_simus.utils._array_api import as_numpy
 
 
 @dataclass(frozen=True)
@@ -59,18 +60,6 @@ def phantom(kind, count, seed=2026, depth_mm=20):
     return points, rc
 
 
-def namespace(name):
-    """Resolve explicit backend choices without importing optional GPU packages eagerly."""
-    return fs.get_backend(name.lower()).xp
-
-
-def host(array):
-    """Synchronize and copy only at the display boundary."""
-    if hasattr(array, "get"):
-        return array.get()
-    return np.asarray(array)
-
-
 @dataclass(frozen=True)
 class Simulation:
     """Latest completed notebook result, with time last and coordinates in meters."""
@@ -90,14 +79,10 @@ class Simulation:
     sound_speed: float
 
 
-def simulate(config, progress=None, cancelled=None):
-    """Simulate all scatterers on just three planes; callbacks run between blocks."""
-    start = perf_counter()
-    xp = namespace(config["backend"])
-    fc = 2e6
-    medium = fs.MediumParams()
+def observation_planes(config, sound_speed, frequency):
+    """Central slices sampled from retained bandwidth, with explicit preview coarsening."""
     # Physical Nyquist spacing for the retained grid up to 2*fc; preview is explicit.
-    spacing = medium.speed_of_sound / (4 * fc) * config.get("spacing_factor", 1)
+    spacing = sound_speed / (4 * frequency) * config.get("spacing_factor", 1)
     nx = max(3, int(np.ceil(0.008 / spacing)) + 1)
     depth_mm = config.get("depth_mm", 20)
     z_min, z_max = (0.002 if depth_mm == 20 else 0.004), depth_mm / 1000
@@ -106,7 +91,17 @@ def simulate(config, progress=None, cancelled=None):
     nz += (nz + 1) % 2
     if config.get("smoke"):
         nx, nz = 5, 7
-    slices = orthoslices(np.linspace(-0.004, 0.004, nx), np.linspace(-0.004, 0.004, nx), np.linspace(z_min, z_max, nz))
+    return orthoslices(np.linspace(-0.004, 0.004, nx), np.linspace(-0.004, 0.004, nx), np.linspace(z_min, z_max, nz))
+
+
+def simulate(config, progress=None, cancelled=None):
+    """Simulate all scatterers on just three planes; callbacks run between blocks."""
+    start = perf_counter()
+    xp = fs.get_backend(config["backend"].lower()).xp
+    fc = 2e6
+    medium = fs.MediumParams()
+    depth_mm = config.get("depth_mm", 20)
+    slices = observation_planes(config, medium.speed_of_sound, fc)
     scatterers, rc = phantom(config["scene"], config["count"], depth_mm=depth_mm)
     side = config.get("side", 16)
     aperture = fs.matrix_aperture(
@@ -135,7 +130,7 @@ def simulate(config, progress=None, cancelled=None):
         execution=fs.ExecutionOptions(128 * 1024 * 1024),
         frequency_step=1.0,
     )
-    times = host(fs.wavefield_times(plan))
+    times = as_numpy(fs.wavefield_times(plan))
     outputs = []
     for component in ("incident", "scattered"):
         if cancelled is not None and cancelled():
@@ -149,7 +144,7 @@ def simulate(config, progress=None, cancelled=None):
         for block in iterator:
             if cancelled is not None and cancelled():
                 raise InterruptedError("Simulation cancelled between spatial blocks")
-            frames[block.start : block.stop] = host(fs.spectrum_to_wavefield(block.values, plan).frames)
+            frames[block.start : block.stop] = as_numpy(fs.spectrum_to_wavefield(block.values, plan).frames)
             if progress:
                 progress(component, block.stop, len(slices.points))
         outputs.append(frames)
@@ -168,8 +163,8 @@ def simulate(config, progress=None, cancelled=None):
             frequency_step=1.0,
             execution=fs.ExecutionOptions(128 * 1024 * 1024),
         )
-        rf = host(fs.simus_compute(sources, strengths, delays, rf_plan, probe, medium).rf)
-        rf_times = host(rf_plan.sample_times)
+        rf = as_numpy(fs.simus_compute(sources, strengths, delays, rf_plan, probe, medium).rf)
+        rf_times = as_numpy(rf_plan.sample_times)
         workspace_bytes = max(workspace_bytes, rf_plan.estimated_workspace_bytes)
     else:
         rf = np.zeros((len(times), probe.n_elements), dtype=np.float32)
@@ -179,17 +174,17 @@ def simulate(config, progress=None, cancelled=None):
     if progress:
         progress("receive RF", 1, 1)
     return Simulation(
-        slices,
-        outputs[0],
-        outputs[1],
-        times,
-        host(aperture.centers),
-        scatterers,
-        perf_counter() - start,
-        workspace_bytes,
-        config["backend"],
-        rf,
-        rf_times,
-        (side, side),
-        medium.speed_of_sound,
+        slices=slices,
+        incident=outputs[0],
+        scattered=outputs[1],
+        times=times,
+        elements=as_numpy(aperture.centers),
+        scatterers=scatterers,
+        seconds=perf_counter() - start,
+        workspace_bytes=workspace_bytes,
+        backend=config["backend"],
+        rf=rf,
+        rf_times=rf_times,
+        matrix_shape=(side, side),
+        sound_speed=medium.speed_of_sound,
     )

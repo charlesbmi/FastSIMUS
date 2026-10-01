@@ -46,5 +46,4 @@ uv run --group plot3d marimo edit examples/wavefield_3d_explorer.py
 ```
 
 Choose the phantom, transmit law and observation resolution, then press **Simulate**. The rotatable scene and linked
-orthoslices show incident, scattered or total pressure. Playback controls reuse the in-notebook simulation. See the
-[scattered-wavefield guide](../docs/scattered-wavefields.md) for the physical model and public API.
+orthoslices show incident, scattered or total pressure. Playback controls reuse the in-notebook simulation.
