@@ -1,11 +1,11 @@
 """Opaque prepared plans for finite apertures; validation is eager, outside JIT."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import ceil, isfinite, prod
 from types import SimpleNamespace
 
 from fast_simus._blocking import Tiles, choose_tiles
-from fast_simus._frequency import FrequencyGrid, SamplingInfo, _two_way_pulse_duration, frequency_grid
+from fast_simus._frequency import FrequencyGrid, SamplingInfo, SamplingMetadata, _two_way_pulse_duration, frequency_grid
 from fast_simus.aperture import _same_arrays
 from fast_simus.execution import ExecutionOptions
 from fast_simus.lens import lens_reference_delay
@@ -213,7 +213,7 @@ def response_medium(plan):
 
 
 @dataclass(frozen=True, eq=False)
-class EchoPlan(FieldPlan):
+class EchoPlan(FieldPlan, SamplingMetadata):
     """Finite-aperture pulse-echo plan with explicit sampling metadata."""
 
     _sampling: SamplingInfo
@@ -230,24 +230,9 @@ class EchoPlan(FieldPlan):
         return 1.0
 
     @property
-    def requested_sampling_frequency(self):
-        """Requested sample rate in Hz."""
-        return self._sampling.requested_sampling_frequency
-
-    @property
-    def sampling_frequency(self):
-        """Effective sample rate in Hz."""
-        return self._sampling.sampling_frequency
-
-    @property
     def n_fft(self):
         """Full inverse transform length."""
         return self._sampling.n_fft
-
-    @property
-    def time_origin(self):
-        """Trigger-relative origin in seconds."""
-        return self._sampling.time_origin
 
     @property
     def sample_times(self):
@@ -302,19 +287,5 @@ def prepare_echo(
         params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, step, xp, positions.dtype
     )
     sampling = SamplingInfo(fs, ceil(fs / (2 * params.freq_center) * (grid.n_freq_full - 1)), grid.freq_step)
-    return EchoPlan(
-        grid,
-        params,
-        medium,
-        base._shape,
-        base._dtype,
-        base._counts,
-        base._path,
-        base._delay,
-        pulse,
-        probe,
-        base.execution,
-        base._tiles,
-        base._lens_delay,
-        sampling,
-    )
+    base = replace(base, _grid=grid, _pulse=pulse, _probe=probe)
+    return EchoPlan(**vars(base), _sampling=sampling)

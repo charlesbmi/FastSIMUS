@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from fast_simus._frequency import SamplingInfo
+from fast_simus._frequency import SamplingInfo, SamplingMetadata
 from fast_simus.aperture import _same_arrays
 from fast_simus.execution import ExecutionOptions
 from fast_simus.medium_params import MediumParams
@@ -39,27 +39,8 @@ class TransmitSequence:
                 raise ValueError("Sequence apodization must be finite and match delays")
 
 
-class _SequenceTiming:
-    _sampling: SamplingInfo
-
-    @property
-    def requested_sampling_frequency(self):
-        """Requested sample rate in Hz."""
-        return self._sampling.requested_sampling_frequency
-
-    @property
-    def sampling_frequency(self):
-        """Effective sample rate in Hz."""
-        return self._sampling.sampling_frequency
-
-    @property
-    def time_origin(self):
-        """Time origin relative to each independent trigger, in seconds."""
-        return self._sampling.time_origin
-
-
 @dataclass(frozen=True, eq=False)
-class SequencePlan(_SequenceTiming):
+class SequencePlan(SamplingMetadata):
     """Common echo plan and trigger-relative timing for a fixed event count."""
 
     echo_plan: SimusPlan | EchoPlan
@@ -82,7 +63,7 @@ class SequenceEvent(NamedTuple):
 
 
 @dataclass(frozen=True, eq=False)
-class SequenceResult(_SequenceTiming):
+class SequenceResult(SamplingMetadata):
     """Stacked RF (A,T,E) and spectra (A,F,E), with the original event definition."""
 
     rf: Array

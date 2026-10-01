@@ -121,3 +121,24 @@ class SamplingInfo:
     def times(self, xp, dtype):
         """Time axis in seconds for the retained causal half."""
         return xp.arange((self.n_fft + 1) // 2, dtype=dtype) / self.sampling_frequency + self.time_origin
+
+
+class SamplingMetadata:
+    """Read-only timing properties shared by echo and acquisition results."""
+
+    _sampling: SamplingInfo
+
+    @property
+    def requested_sampling_frequency(self):
+        """Requested sample rate in Hz."""
+        return self._sampling.requested_sampling_frequency
+
+    @property
+    def sampling_frequency(self):
+        """Effective sample rate in Hz."""
+        return self._sampling.sampling_frequency
+
+    @property
+    def time_origin(self):
+        """Time origin relative to each independent trigger, in seconds."""
+        return self._sampling.time_origin
