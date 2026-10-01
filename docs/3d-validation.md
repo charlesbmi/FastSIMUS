@@ -67,3 +67,20 @@ solver callback protocol was added.
 Planning uses a conservative center-distance plus half-diagonal path bound in bounded point blocks. This avoids
 retaining all patch-to-point distances. Frequency tiles contain one frequency; points, elements and patches use static
 bounded tiles. This trades conservative time support and planning overhead for compact reusable plans.
+
+## Main integration (2026-10-01)
+
+The integrated branch includes main through `30975d7`, including backend dispatch, scattering, canonical-frequency
+precision, and CUDA shared-memory safeguards. SIMUS and sequence calls use main's `backend=` policy: explicit portable
+names validate the input namespace, automatic requests permit portable fallback, and explicit native requests reject
+finite 3D apertures or workspace budgets. Portable strip pressure and RF share transfer setup; both scattering models
+reuse the ordinary receive contraction.
+
+The final local suite passes with 431 tests and 64 skips. Post-integration checks cover namespace validation, 2D
+workspace parity, finite 3D backend selection, oversampled wavefield timing, and native precision regressions. The
+public-index lockfile validates without changing package versions. The full lint gate, strict documentation build, and
+notebook validation pass in a clean environment. Live Marimo checks confirm linked RF pan and zoom, equal travel-time
+aspect, and synchronized cursors during scrubbing.
+
+Dell SSH timed out during this integration session. Earlier CUDA results above predate this merge; CUDA regression
+checks and the shallow-default GPU timing must be repeated when the machine is reachable.

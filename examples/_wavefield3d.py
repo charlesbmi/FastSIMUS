@@ -61,26 +61,7 @@ def phantom(kind, count, seed=2026, depth_mm=20):
 
 def namespace(name):
     """Resolve explicit backend choices without importing optional GPU packages eagerly."""
-    if name == "NumPy":
-        return np
-    if name == "Auto":
-        return fs.get_backend().xp
-    if name == "JAX":
-        import jax.numpy as jnp
-
-        return jnp
-    if name == "MLX":
-        import mlx.core as mx
-
-        from fast_simus.backends.mlx import ensure_compat
-
-        ensure_compat(mx)
-        return mx
-    if name == "CuPy":
-        import cupy as cp
-
-        return cp
-    raise ValueError(f"Unknown backend {name}")
+    return fs.get_backend(name.lower()).xp
 
 
 def host(array):

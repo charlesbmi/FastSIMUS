@@ -122,7 +122,14 @@ On Dell's GTX 1060 Max-Q (CuPy 14.0.1, driver 535.288.01), the same deep scene i
 seconds: 690 seconds for pressure and 198 seconds for RF. It produced 362 RF samples across 256 receive elements. CuPy's
 memory pool reserved 25.8 MiB at completion; process peak resident memory was 540 MiB and stored output arrays were 2.8
 MiB. Pool reservation includes reusable allocations and is not a measurement of live tensor memory. These measurements
-precede the shallow preset; the current 2–20 mm fine-preview default has not been benchmarked with 10,000 scatterers.
+precede the shallow preset.
+
+On 2026-10-01, the current 2–20 mm, fine-preview default with 10,000 scatterers completed in 308 seconds on the Apple M4
+Max using MLX. It evaluated 2,689 observation points with 220 pressure samples and produced 294 RF samples across 256
+elements. Pressure computation including planning took 245 seconds; received RF took 62 seconds. Peak process RSS was
+149 MiB, peak MLX allocation 17.5 MiB, stored output arrays 4.8 MiB, and estimated numerical workspace 30.7 MiB. Other
+local checks overlapped parts of this single run, so it is a measured session latency rather than an isolated throughput
+benchmark. Shallow-preset CUDA timing remains unmeasured.
 
 Run the small deterministic scene and rendering check without opening the notebook:
 

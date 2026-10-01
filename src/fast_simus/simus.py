@@ -273,9 +273,7 @@ def simus_compute(
         if execution is not None and execution != plan.execution:
             raise ValueError("execution differs from plan")
         require_portable_backend(array_namespace(scatterers), backend, "finite 3D apertures")
-        spect = echo_spectrum(
-            scatterers, rc, delays, plan, params, medium, tx_apodization, full_frequency_directivity, None
-        )
+        spect = echo_spectrum(scatterers, rc, delays, plan, params, medium, tx_apodization, full_frequency_directivity)
         rf, full = _irfft_and_threshold(spect, plan, params.n_elements, array_namespace(scatterers))
         return SimusResult(rf, full)
     if isinstance(plan, FieldPlan):

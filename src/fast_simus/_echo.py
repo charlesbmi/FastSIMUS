@@ -3,7 +3,6 @@
 import array_api_extra as xpx
 
 from fast_simus._blocking import block_count, point_block, run_loop
-from fast_simus._capabilities import _require_strategy
 from fast_simus._compat import _clean_transmit_inputs
 from fast_simus._contractions import _receive_spectrum
 from fast_simus._illumination import scatterer_illumination
@@ -12,16 +11,12 @@ from fast_simus.plans import response_medium
 from fast_simus.utils._array_api import array_namespace
 
 
-def echo_spectrum(points, rc, delays, plan, params, medium, apodization, full_directivity, strategy):
+def echo_spectrum(points, rc, delays, plan, params, medium, apodization, full_directivity):
     """Accumulate the complete event spectrum before applying RF thresholding."""
     plan.check_static(points, delays, params, medium)
     if rc.shape != points.shape[:-1]:
         raise ValueError("reflectivity must exactly match scatterer shape")
-    if strategy in ("metal", "cuda"):
-        raise NotImplementedError("Native kernels do not support finite 3D apertures")
     xp = array_namespace(points, rc, delays, apodization)
-    if strategy is not None:
-        _require_strategy(strategy, xp, params.baffle, full_directivity)
     if apodization is not None and apodization.shape != delays.shape:
         raise ValueError("Apodization must have shape (E,)")
     delays, apodization = _clean_transmit_inputs(delays, apodization, params.n_elements, xp)
