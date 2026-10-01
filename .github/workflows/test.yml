@@ -66,6 +66,8 @@ jobs:
 
   plot3d:
     runs-on: macos-latest
+    env:
+      RENDERCANVAS_FORCE_OFFSCREEN: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-python-env
