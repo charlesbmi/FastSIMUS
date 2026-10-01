@@ -129,7 +129,13 @@ Max using MLX. It evaluated 2,689 observation points with 220 pressure samples a
 elements. Pressure computation including planning took 245 seconds; received RF took 62 seconds. Peak process RSS was
 149 MiB, peak MLX allocation 17.5 MiB, stored output arrays 4.8 MiB, and estimated numerical workspace 30.7 MiB. Other
 local checks overlapped parts of this single run, so it is a measured session latency rather than an isolated throughput
-benchmark. Shallow-preset CUDA timing remains unmeasured.
+benchmark.
+
+The same shallow fine-preview scene on Dell's GTX 1060 Max-Q completed in 834 seconds with CuPy 14.0.1: 662 seconds for
+planning and pressure, then 172 seconds for received RF. It produced the same 2,689 observation points, 220 pressure
+samples and 294 RF samples across 256 elements. Peak process RSS was 509 MiB, CuPy's memory pool reserved 20.1 MiB at
+completion, stored output arrays were 5.1 MiB, and estimated numerical workspace was 30.7 MiB. This was a single
+standalone run after the test suite finished; pool reservation is not peak live GPU allocation.
 
 Run the small deterministic scene and rendering check without opening the notebook:
 
