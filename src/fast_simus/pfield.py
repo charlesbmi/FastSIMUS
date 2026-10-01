@@ -722,7 +722,6 @@ def rms_from_spectrum(
     both use the same per-frequency pressure.
 
     Args:
-        execution: Optional bound on live numerical workspace; retained by new plans.
         spectrum: Complex pressure from :func:`pfield_spectrum`.
         info: Metadata from the same call, or the ``PfieldPlan`` used by
             :func:`pfield_spectrum_compute`.
