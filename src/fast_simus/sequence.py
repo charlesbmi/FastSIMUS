@@ -148,7 +148,7 @@ def sequence_precompute(
 
 
 def iter_simus_sequence(
-    scatterers, rc, sequence, plan, params, medium=_DEFAULT_MEDIUM, *, strategy=None, full_frequency_directivity=False
+    scatterers, rc, sequence, plan, params, medium=_DEFAULT_MEDIUM, *, backend=None, full_frequency_directivity=False
 ):
     """Yield one event at a time; memory for all event outputs is never allocated."""
     xp = array_namespace(scatterers, sequence.delays)
@@ -175,7 +175,7 @@ def iter_simus_sequence(
             medium,
             tx_apodization=apodization,
             full_frequency_directivity=full_frequency_directivity,
-            strategy=strategy,
+            backend=backend,
             execution=plan.execution,
         )
         yield SequenceEvent(index, result)
@@ -190,7 +190,7 @@ def simus_sequence(
     *,
     fs=None,
     execution=None,
-    strategy=None,
+    backend=None,
     tx_n_wavelengths=1.0,
     db_thresh=-60.0,
     element_splitting=None,
@@ -219,7 +219,7 @@ def simus_sequence(
             plan,
             params,
             medium,
-            strategy=strategy,
+            backend=backend,
             full_frequency_directivity=full_frequency_directivity,
         )
     )

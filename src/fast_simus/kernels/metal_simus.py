@@ -21,7 +21,6 @@ Requires: MLX (mlx package) on Apple Silicon.
 Limitations:
     - Soft baffle only (BaffleType.SOFT assumed)
     - Center-frequency directivity only (full_frequency_directivity=False)
-    - Linear arrays only (convex array support needs testing)
 """
 
 from __future__ import annotations
@@ -32,7 +31,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import mlx.core as mx
 
-from fast_simus._pfield_math import NEPER_TO_DB, _subelement_centroids
+from fast_simus._pfield_math import NEPER_TO_DB, _canonical_frequency_grid, _subelement_centroids
+from fast_simus.backends.mlx import eval_eager
 from fast_simus.medium_params import MediumParams
 from fast_simus.transducer_params import TransducerParams
 from fast_simus.utils._array_api import Array, _ArrayNamespace
@@ -56,6 +56,14 @@ _TX_OPTIMAL_CHUNK: dict[int, int] = {
     128: 5_000,  # L11-5v class (128 elem, 256B registers/thread)
 }
 _TX_DEFAULT_CHUNK = 10_000
+
+
+def metal_simus_unsupported_reason(n_elements: int) -> str | None:
+    """Explain why a SIMUS shape exceeds the receive-kernel limit."""
+    if n_elements * _RX_SCAT_REDUCE <= 1024:
+        return None
+    return f"n_elements={n_elements} exceeds the Metal receive-kernel limit"
+
 
 # ---------------------------------------------------------------------------
 # Source caching
@@ -198,9 +206,7 @@ def _prepare_common(
         in_arc = (x_flat**2 + (z_flat + apex_offset) ** 2) <= params.radius**2
         is_out = mx.maximum(is_out, in_arc.astype(mx.float32))
 
-    # Recover the canonical grid; subtraction of rounded bins accumulates phase error.
-    freq_step = 2 * params.freq_center / (plan.n_freq_full - 1)
-    freq_start = plan.freq_idx_start * freq_step
+    freq_start, freq_step = _canonical_frequency_grid(params.freq_center, plan.n_freq_full, plan.freq_idx_start)
 
     ph_init = mx.array(2.0 * pi * freq_start, dtype=mx.float32) * delays_clean
     da_init_re = (mx.cos(ph_init) * tx_apodization).astype(mx.float32)
@@ -297,16 +303,18 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
     probe = d["probe_real"]
     scalars = d["scalars"]
 
-    # Build kernels for the standard chunk size (cached, compiled once per probe)
-    k_tx = _build_tx(n_elem, n_sub, n_freq, chunk_size)
-    k_rx = _build_rx(n_elem, n_sub, n_freq, chunk_size)
-
     total_re = mx.zeros(spect_size, dtype=mx.float32)
     total_im = mx.zeros(spect_size, dtype=mx.float32)
 
     for start in range(0, n_scat, chunk_size):
         end = min(start + chunk_size, n_scat)
         cn = end - start
+
+        # N_SCAT is a compile-time guard in both kernels. Specialize it to
+        # the active chunk so partially filled SIMD reduction groups do not
+        # read beyond the scatterer, coefficient, or TX buffers.
+        k_tx = _build_tx(n_elem, n_sub, n_freq, cn)
+        k_rx = _build_rx(n_elem, n_sub, n_freq, cn)
 
         cx = d["x_flat"][start:end]
         cz = d["z_flat"][start:end]
@@ -322,6 +330,10 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
             grid=(cn * tg, 1, 1),
             threadgroup=(tg, 1, 1),
         )
+        # Materialize the first custom-kernel result before dispatching a
+        # second custom kernel that consumes it. Without this barrier, MLX can
+        # expose uninitialized TX storage on the first cold Metal invocation.
+        eval_eager(tx_out[0], tx_out[1])
 
         # RX kernel: SCAT_REDUCE scatterers per threadgroup, SIMD reduction
         sr = _RX_SCAT_REDUCE
@@ -335,6 +347,7 @@ def _dispatch_split(d: dict[str, Any]) -> mx.array:
             threadgroup=(rx_tg, 1, 1),
             init_value=0.0,
         )
+        eval_eager(rx_out[0], rx_out[1])
 
         total_re = total_re + rx_out[0]
         total_im = total_im + rx_out[1]

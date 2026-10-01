@@ -133,6 +133,8 @@ class TestDistancesAndAngles:
         assert float(distances[0, 0, 0]) == pytest.approx(min_distance, abs=1e-10)
         assert bool(xp.all(xp.isfinite(theta_arr))), "Angles should be finite"
         assert bool(xp.all(xp.isfinite(sin_theta))), "Sine of angles should be finite"
+        assert float(theta_arr[0, 0, 0]) == pytest.approx(0.0, abs=1e-6)
+        assert float(sin_theta[0, 0, 0]) == pytest.approx(0.0, abs=1e-6)
 
 
 class TestSelectFrequencies:

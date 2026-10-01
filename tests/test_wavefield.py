@@ -77,6 +77,40 @@ def test_single_frequency_reconstructs_that_frequency(xp: _ArrayNamespace) -> No
     assert frequencies[np.argmax(np.abs(np.fft.rfft(trace)))] == pytest.approx(index * freq_step, rel=0.02)
 
 
+def test_time_oversampling_preserves_original_ifft_samples(xp: _ArrayNamespace) -> None:
+    """Frequency-domain zero padding gives denser samples of the same field."""
+    freq_step = 1.0e5
+    info = PfieldSpectrumInfo(
+        selected_freqs=xp.asarray([2.0e6, 2.1e6, 2.2e6]),
+        freq_idx_start=20,
+        n_freq_full=65,
+        freq_step=freq_step,
+        correction_factor=1.0,
+    )
+    spectrum = xp.reshape(xp.asarray([1.0 + 0.5j, -0.25 + 1.0j, 0.5 - 0.75j]), (1, 3))
+
+    original = spectrum_to_wavefield(spectrum, info)
+    dense = spectrum_to_wavefield(spectrum, info, time_oversampling=2)
+
+    assert dense.frames.shape[-1] == 2 * original.frames.shape[-1]
+    np.testing.assert_allclose(to_numpy(dense.frames)[..., ::2], to_numpy(original.frames), rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(to_numpy(dense.times)[::2], to_numpy(original.times), rtol=1e-7, atol=1e-12)
+
+
+def test_time_oversampling_requires_positive_integer(xp: _ArrayNamespace) -> None:
+    """Invalid zero-padding factors fail before any transform work."""
+    info = PfieldSpectrumInfo(
+        selected_freqs=xp.asarray([1.0e6]),
+        freq_idx_start=1,
+        n_freq_full=4,
+        freq_step=1.0e6,
+        correction_factor=1.0,
+    )
+
+    with pytest.raises(ValueError, match="positive integer"):
+        spectrum_to_wavefield(xp.asarray([1.0 + 0.0j]), info, time_oversampling=0)
+
+
 def test_wavefront_travels_at_speed_of_sound(xp: _ArrayNamespace) -> None:
     """Arrival time changes with range according to the medium sound speed."""
     params = P4_2v()

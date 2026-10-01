@@ -9,13 +9,13 @@ from fast_simus import (
     PfieldPlan,
     PfieldStrategy,
     SimusPlan,
-    SimusStrategy,
     TransducerParams,
     pfield,
     pfield_precompute,
     simus,
     simus_precompute,
 )
+from fast_simus.backends._selection import _namespace_kind
 from fast_simus.transducer_params import BaffleType
 from fast_simus.utils._array_api import Array
 from tests.conftest import to_numpy
@@ -65,19 +65,19 @@ def test_auto_echo_honors_requested_physics(xp, baffle, full_directivity):
     """Auto dispatch preserves physics unsupported by the native kernels."""
     params, points, rc, delays = _inputs(xp, baffle)
     options = {"full_frequency_directivity": full_directivity}
-    expected = simus(points, rc, delays, params, strategy=SimusStrategy.PYTHON, **options)
+    expected = simus(points, rc, delays, params, backend=_namespace_kind(xp), **options)
     actual = simus(points, rc, delays, params, **options)
     for observed, reference in zip(actual, expected, strict=True):
         peak = np.max(np.abs(to_numpy(reference)))
         np.testing.assert_allclose(to_numpy(observed), to_numpy(reference), rtol=0, atol=1e-4 * peak)
 
 
-@pytest.mark.parametrize("strategy", [SimusStrategy.METAL, SimusStrategy.CUDA])
-def test_explicit_native_echo_rejects_unsupported_physics(strategy):
+@pytest.mark.parametrize("backend", ["metal", "cuda"])
+def test_explicit_native_echo_rejects_wrong_namespace(backend):
     """Unsupported requests fail before importing or launching a native kernel."""
     params, points, rc, delays = _inputs(np, "rigid")
-    with pytest.raises(NotImplementedError, match="baffle"):
-        simus(points, rc, delays, params, strategy=strategy)
+    with pytest.raises(ValueError, match="namespace"):
+        simus(points, rc, delays, params, backend=backend)
 
 
 def test_explicit_metal_field_rejects_wrong_backend():
@@ -100,10 +100,10 @@ def test_supported_metal_calls_skip_portable_preparation(monkeypatch):
     def unexpected_preparation(*args, **kwargs):
         pytest.fail("Native execution entered portable geometry preparation")
 
-    for module_name, helper in (("pfield", "_prepare_frequency_sweep"), ("simus", "_prepare_simus_sweep")):
+    for module_name, helper in (("pfield", "_prepare_frequency_sweep"), ("_simus_dispatch", "_prepare_simus_sweep")):
         monkeypatch.setattr(importlib.import_module(f"fast_simus.{module_name}"), helper, unexpected_preparation)
     pressure = pfield(points, delays, params, strategy=PfieldStrategy.METAL)
-    echo = simus(points, rc, delays, params, strategy=SimusStrategy.METAL)
+    echo = simus(points, rc, delays, params, backend="metal")
     for result in (pressure, echo.rf, echo.spectrum):
         assert np.all(np.isfinite(to_numpy(result)))
 

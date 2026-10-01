@@ -71,7 +71,9 @@
         float r = metal::precise::sqrt(dx * dx + dz * dz);
         float rc_ = max(r, min_dist);
 
-        float th = metal::precise::asin((dx + 1e-16f) / (r + 1e-16f)) - te;
+        float sin_arg = (r > 0.0f) ? dx / r : 0.0f;
+        sin_arg = metal::clamp(sin_arg, -1.0f, 1.0f);
+        float th = metal::precise::asin(sin_arg) - te;
         float obliq = (fabs(th) >= M_PI_2_F) ? 1e-16f : metal::fast::cos(th);
 
         float sa = center_kw * seg_len * 0.5f * metal::fast::sin(th);

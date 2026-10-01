@@ -64,7 +64,7 @@ def namespace(name):
     if name == "NumPy":
         return np
     if name == "Auto":
-        return fs.default_namespace()
+        return fs.get_backend().xp
     if name == "JAX":
         import jax.numpy as jnp
 

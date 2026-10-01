@@ -14,51 +14,31 @@ References:
 
 from __future__ import annotations
 
-from enum import StrEnum
 from math import ceil, prod
-from types import ModuleType
-from typing import NamedTuple, cast, overload
+from typing import NamedTuple, overload
 
-from array_api_compat import is_jax_namespace
 from jaxtyping import Complex, Float
 
 from fast_simus._blocking import legacy_point_count
-from fast_simus._capabilities import _require_strategy, _unsupported
-from fast_simus._compat import _clean_transmit_inputs, _transfer_plan, _validate_apodization
+from fast_simus._compat import _clean_transmit_inputs, _validate_apodization
 from fast_simus._echo import echo_spectrum
 from fast_simus._frequency import _two_way_pulse_duration
 from fast_simus._pfield_math import _select_frequencies
+from fast_simus._simus_dispatch import _SimusSpectrumRequest, compute_simus_spectrum, require_portable_backend
 from fast_simus._spectral_output import _irfft_and_threshold
-from fast_simus._transfer import _prepare_strip_transfer
+from fast_simus.backends._selection import BackendKind
 from fast_simus.execution import ExecutionOptions
 from fast_simus.medium_params import MediumParams
 from fast_simus.plans import EchoPlan, FieldPlan, prepare_echo
 from fast_simus.transducer import Transducer
-from fast_simus.transducer_params import BaffleType, TransducerParams
+from fast_simus.transducer_params import TransducerParams
 from fast_simus.utils._array_api import (
     Array,
-    _ArrayNamespace,
     array_namespace,
 )
 from fast_simus.utils.geometry import element_positions
 
 _DEFAULT_MEDIUM = MediumParams()
-
-
-class SimusStrategy(StrEnum):
-    """Backend strategy for the simus frequency sweep.
-
-    Attributes:
-        PYTHON: Python for-loop (NumPy/CuPy, constant memory).
-        SCAN: JAX lax.scan for O(1) compilation cost.
-        METAL: Custom Metal kernel on Apple Silicon (MLX).
-        CUDA: Custom CUDA kernel on NVIDIA GPUs (CuPy + NVRTC).
-    """
-
-    PYTHON = "python"
-    SCAN = "scan"
-    METAL = "metal"
-    CUDA = "cuda"
 
 
 class SimusResult(NamedTuple):
@@ -185,7 +165,7 @@ def simus_precompute(
         )
     if isinstance(element_splitting, tuple):
         raise ValueError("2D element_splitting must be an integer")
-    xp = array_namespace(scatterers, delays)
+    xp = array_namespace(scatterers, rc, delays)
     speed_of_sound = medium.speed_of_sound
     fc = params.freq_center
 
@@ -255,67 +235,6 @@ def simus_precompute(
     )
 
 
-def _prepare_simus_sweep(
-    scatterers: Float[Array, "*batch 2"],
-    delays_clean: Float[Array, " n_elements"],
-    tx_apodization: Float[Array, " n_elements"],
-    plan: SimusPlan,
-    params: TransducerParams,
-    medium: MediumParams,
-    *,
-    full_frequency_directivity: bool,
-    xp: _ArrayNamespace,
-) -> dict:
-    """Compute geometry and phase arrays for simus frequency sweep.
-
-    Unlike pfield's _prepare_frequency_sweep, this keeps per-element structure
-    (n_scat, n_elem, n_sub) instead of flattening to (n_scat, n_sources).
-    Delay+apodization are NOT absorbed into the geometric progression --
-    they are kept separate for the TX/RX chain.
-    """
-    transfer = _prepare_strip_transfer(
-        scatterers,
-        delays_clean,
-        tx_apodization,
-        _transfer_plan(plan, params.freq_center),
-        params,
-        medium,
-        full_frequency_directivity=full_frequency_directivity,
-        xp=xp,
-    )
-    return {
-        "phase_init": transfer.phase,
-        "phase_step": transfer.phase_step,
-        "delay_apod_init": transfer.delay_apod,
-        "delay_apod_step": transfer.delay_apod_step,
-        "is_out": transfer.is_out,
-        "wavenumbers": transfer.wavenumbers,
-        "pulse_spect": plan.pulse_spectrum,
-        "probe_spect": plan.probe_spectrum,
-        "seg_length": plan.seg_length,
-        "sin_theta": transfer.sin_theta,
-        "full_frequency_directivity": full_frequency_directivity,
-    }
-
-
-def _select_simus_strategy(
-    xp: _ArrayNamespace,
-    strategy: SimusStrategy | None,
-    baffle: BaffleType | float = BaffleType.SOFT,
-    full_frequency_directivity: bool = False,
-) -> SimusStrategy:
-    """Select an execution path that supports the requested physics."""
-    if strategy is not None:
-        _require_strategy(strategy, xp, baffle, full_frequency_directivity)
-        return strategy
-    if is_jax_namespace(cast(ModuleType, xp)):
-        return SimusStrategy.SCAN
-    for native in (SimusStrategy.METAL, SimusStrategy.CUDA):
-        if not _unsupported(native, xp, baffle, full_frequency_directivity):
-            return native
-    return SimusStrategy.PYTHON
-
-
 def simus_compute(
     scatterers: Float[Array, "*batch 2"],
     rc: Float[Array, " *batch"],
@@ -326,7 +245,7 @@ def simus_compute(
     *,
     tx_apodization: Float[Array, " n_elements"] | None = None,
     full_frequency_directivity: bool = False,
-    strategy: SimusStrategy | None = None,
+    backend: BackendKind | str | None = None,
     execution: ExecutionOptions | None = None,
 ) -> SimusResult:
     """Compute RF signals given a precomputed plan.
@@ -342,8 +261,8 @@ def simus_compute(
         tx_apodization: Transmit apodization weights. Shape ``(n_elements,)``.
         full_frequency_directivity: If True, compute element directivity at
             every frequency.
-        strategy: Backend strategy for the frequency sweep. If None,
-            auto-selects based on the detected array backend.
+        backend: Optional backend name. Auto permits portable fallback; explicit
+            native kernels require a supported physical model and execution mode.
 
     Returns:
         SimusResult with RF signals and complex spectrum.
@@ -353,14 +272,17 @@ def simus_compute(
             raise ValueError("3D RF requires an EchoPlan")
         if execution is not None and execution != plan.execution:
             raise ValueError("execution differs from plan")
+        require_portable_backend(array_namespace(scatterers), backend, "finite 3D apertures")
         spect = echo_spectrum(
-            scatterers, rc, delays, plan, params, medium, tx_apodization, full_frequency_directivity, strategy
+            scatterers, rc, delays, plan, params, medium, tx_apodization, full_frequency_directivity, None
         )
         rf, full = _irfft_and_threshold(spect, plan, params.n_elements, array_namespace(scatterers))
         return SimusResult(rf, full)
     if isinstance(plan, FieldPlan):
         raise ValueError("2D RF requires a legacy plan")
-    xp = array_namespace(scatterers, rc, delays)
+    xp = array_namespace(
+        scatterers, rc, delays, tx_apodization, plan.selected_freqs, plan.pulse_spectrum, plan.probe_spectrum
+    )
 
     delays_clean, tx_apodization = _clean_transmit_inputs(delays, tx_apodization, params.n_elements, xp)
 
@@ -369,63 +291,21 @@ def simus_compute(
     scatterers_flat = xp.reshape(scatterers, (n_scat, 2))
     rc_flat = xp.reshape(rc, (n_scat,))
 
-    if execution is not None and strategy in (SimusStrategy.METAL, SimusStrategy.CUDA):
-        raise NotImplementedError("Native strategy does not support an execution budget")
-    selected = _select_simus_strategy(
-        xp, SimusStrategy.PYTHON if execution is not None else strategy, params.baffle, full_frequency_directivity
+    spect_selected = compute_simus_spectrum(
+        _SimusSpectrumRequest(
+            scatterers=scatterers_flat,
+            rc=rc_flat,
+            delays_clean=delays_clean,
+            tx_apodization=tx_apodization,
+            plan=plan,
+            params=params,
+            medium=medium,
+            full_frequency_directivity=full_frequency_directivity,
+            xp=xp,
+            backend=backend,
+            execution=execution,
+        )
     )
-
-    if selected == SimusStrategy.METAL:
-        import mlx.core as mx
-
-        from fast_simus.kernels.metal_simus import simus_metal
-
-        spect_selected = cast(
-            Array,
-            simus_metal(
-                scatterers=cast(mx.array, scatterers_flat),
-                rc=cast(mx.array, rc_flat),
-                params=params,
-                plan=plan,
-                medium=medium,
-                delays_clean=cast(mx.array, delays_clean),
-                tx_apodization=cast(mx.array, tx_apodization),
-            ),
-        )
-    elif selected == SimusStrategy.CUDA:
-        from fast_simus.kernels.cuda_simus import simus_cuda
-
-        spect_selected = cast(
-            Array,
-            simus_cuda(
-                scatterers=scatterers_flat,
-                rc=rc_flat,
-                params=params,
-                plan=plan,
-                medium=medium,
-                delays_clean=delays_clean,
-                tx_apodization=tx_apodization,
-            ),
-        )
-    else:
-        from fast_simus._simus_strategies import _simus_freq_outer_python, _simus_freq_outer_scan
-
-        driver = _simus_freq_outer_scan if selected == SimusStrategy.SCAN else _simus_freq_outer_python
-        size = n_scat if execution is None else legacy_point_count(execution, params.n_elements, plan.n_sub)
-        spect_selected = xp.zeros((plan.selected_freqs.shape[0], params.n_elements), dtype=plan.pulse_spectrum.dtype)
-        for start in range(0, n_scat, size):
-            sweep = _prepare_simus_sweep(
-                scatterers_flat[start : start + size, :],
-                delays_clean,
-                tx_apodization,
-                plan,
-                params,
-                medium,
-                full_frequency_directivity=full_frequency_directivity,
-                xp=xp,
-            )
-            block = driver(rc=rc_flat[start : start + size], xp=xp, **sweep)
-            spect_selected = spect_selected + block
 
     # Apply correction factor
     spect_selected = spect_selected * xp.asarray(plan.correction_factor)
@@ -449,7 +329,7 @@ def simus(
     full_frequency_directivity: bool = False,
     element_splitting: int | tuple[int, int] | None = None,
     frequency_step: float | int = 1.0,
-    strategy: SimusStrategy | None = None,
+    backend: BackendKind | str | None = None,
     execution: ExecutionOptions | None = None,
 ) -> SimusResult:
     """Simulate ultrasound RF signals for a linear or convex array.
@@ -476,8 +356,8 @@ def simus(
             every frequency. If False, use center-frequency-only directivity.
         element_splitting: Number of sub-elements per element (None = auto).
         frequency_step: Scaling factor for the frequency step.
-        strategy: Backend strategy for the frequency sweep. If None,
-            auto-selects based on the detected array backend.
+        backend: Optional backend name. Auto permits portable fallback; explicit
+            native kernels require a supported physical model and execution mode.
 
     Returns:
         SimusResult with:
@@ -508,6 +388,6 @@ def simus(
         medium,
         tx_apodization=tx_apodization,
         full_frequency_directivity=full_frequency_directivity,
-        strategy=strategy,
+        backend=backend,
         execution=execution,
     )

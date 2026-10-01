@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 
 from fast_simus.pfield import PfieldStrategy
-from fast_simus.simus import SimusStrategy
 from fast_simus.utils._array_api import _ArrayNamespace, as_numpy
 
 
@@ -250,18 +249,4 @@ def xp(request) -> _ArrayNamespace:
 )
 def strategy(request) -> PfieldStrategy | None:
     """Fixture providing different pfield strategies."""
-    return request.param
-
-
-@pytest.fixture(
-    params=[
-        pytest.param(None, id="auto"),
-        pytest.param(SimusStrategy.PYTHON, id="python"),
-        pytest.param(SimusStrategy.SCAN, id="scan"),
-        pytest.param(SimusStrategy.METAL, id="metal"),
-        pytest.param(SimusStrategy.CUDA, id="cuda"),
-    ]
-)
-def simus_strategy(request) -> SimusStrategy | None:
-    """Fixture providing different simus strategies."""
     return request.param
