@@ -82,5 +82,6 @@ public-index lockfile validates without changing package versions. The full lint
 notebook validation pass in a clean environment. Live Marimo checks confirm linked RF pan and zoom, equal travel-time
 aspect, and synchronized cursors during scrubbing.
 
-Dell SSH timed out during this integration session. Earlier CUDA results above predate this merge; CUDA regression
-checks and the shallow-default GPU timing must be repeated when the machine is reachable.
+The post-integration Dell suite passes with 427 tests and 73 skips on the GTX 1060 Max-Q (CuPy 14.0.1). This includes
+CUDA precision and backend-policy regressions, finite 3D field/RF comparisons, scattered pressure, and workspace
+budgets. Optional rendering tests were exercised locally; fastplotlib was unavailable in the Dell test environment.
