@@ -84,5 +84,4 @@ Run inside `flox activate` (or prefix with `flox activate --`):
 
 Without Flox: `uv run poe test`, `uv run poe lint`, etc.
 
-Finite rectangular 3D apertures, elevation lenses and independent acquisitions are described in the
-[3D simulation guide](https://charlesbmi.github.io/FastSIMUS/3d-simulation/).
+For the interactive 3D wavefield explorer, see [examples](https://github.com/charlesbmi/FastSIMUS/tree/main/examples).
