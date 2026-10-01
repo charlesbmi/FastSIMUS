@@ -43,6 +43,13 @@ def transmit_at_frequency(points, delays, apodization, plan, frequency, full_dir
     )
 
 
+def incident_at_frequency(points, delays, apodization, plan, k, full_directivity, xp):
+    """Incident pressure including one pulse and one transmit probe response."""
+    frequency = (plan.freq_idx_start + k) * plan.freq_step
+    pressure = transmit_at_frequency(points, delays, apodization, plan, frequency, full_directivity, xp)
+    return pressure * plan._pulse[k] * plan._probe[k]
+
+
 def field_block(points, delays, apodization, plan, full_directivity, xp, rms=False):
     """Compute one fixed point block, accumulating energy only after coherent TX."""
     n = plan.selected_freqs.shape[0]
@@ -50,12 +57,7 @@ def field_block(points, delays, apodization, plan, full_directivity, xp, rms=Fal
     output = xp.zeros(shape, dtype=points.dtype) if rms else xp.zeros(shape, dtype=points.dtype) + 0j
 
     def frequency_step(k, result):
-        f = (plan.freq_idx_start + k) * plan.freq_step
-        pressure = (
-            transmit_at_frequency(points, delays, apodization, plan, f, full_directivity, xp)
-            * plan._pulse[k]
-            * plan._probe[k]
-        )
+        pressure = incident_at_frequency(points, delays, apodization, plan, k, full_directivity, xp)
         if rms:
             return result + xp.real(pressure * xp.conj(pressure))
         return xpx.at(result)[:, k].set(pressure)  # type: ignore[attr-defined]

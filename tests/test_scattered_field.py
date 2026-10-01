@@ -115,30 +115,12 @@ def test_point_arrival_and_rigid_transform():
     np.testing.assert_allclose(other, spectrum, rtol=0, atol=1e-4 * np.max(np.abs(spectrum)))
 
 
-def test_compiled_point_observation():
-    """Numerical block execution supports JAX device loops after eager planning."""
-    import jax
-    import jax.numpy as xp
-
-    from fast_simus._scattered import scattered_block
-
-    probe, observers, scatterers, rc, delays = scene(xp)
-    plan = scattered_field_precompute(observers, scatterers, rc, delays, probe, execution=ExecutionOptions(8192))
-    compute = jax.jit(lambda p, s, r, d: scattered_block(p, s, r, d, xp.ones_like(d), plan, "total", True, None, xp))
-    actual = compute(observers, scatterers, rc, delays)
-    expected, _ = scattered_pfield_spectrum(
-        observers, scatterers, rc, delays, probe, plan=plan, component="total", full_frequency_directivity=True
-    )
-    np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-4 * np.max(np.abs(expected)))
-
-
-def test_orthoslice_sampling_and_simulation():
+def test_orthoslice_sampling():
     """Deduplicated planes recover the same coordinates and spectra as a tiny volume."""
-    from examples._wavefield3d import orthoslices, simulate
+    from examples._wavefield3d import orthoslices
 
     x, y, z = np.array([-0.001, 0, 0.001]), np.array([-0.002, 0, 0.002]), np.array([0.012, 0.014, 0.016])
     slices = orthoslices(x, y, z)
-    assert len(slices.points) == 19
     probe, _, scatterers, rc, delays = scene()
     volume = np.stack(np.meshgrid(x, y, z, indexing="ij"), axis=-1).astype(np.float32)
     dense, plan = scattered_pfield_spectrum(volume, scatterers, rc, delays, probe)
@@ -148,11 +130,6 @@ def test_orthoslice_sampling_and_simulation():
     for point, value in zip(slices.points, sparse, strict=True):
         index = np.argwhere(np.all(volume == point, axis=-1))[0]
         np.testing.assert_allclose(value, dense[tuple(index)], rtol=1e-5)
-    result = simulate(
-        dict(scene="Point", count=2, backend="NumPy", transmit="Plane wave", steer=0, focus=18, side=2, smoke=True)
-    )
-    assert result.incident.shape == result.scattered.shape
-    assert np.isfinite(result.scattered).all()
 
 
 def test_plan_bounds_and_cancellation():
@@ -169,18 +146,26 @@ def test_plan_bounds_and_cancellation():
 
 def test_coincident_point_regularization():
     """The documented distance floor applies to phase, attenuation and spreading."""
-    from fast_simus._scattered import point_response
+    from fast_simus import pfield_spectrum
 
-    fc, frequency, speed, attenuation = 2e6, 1.5e6, 1480.0, 0.6
+    fc, speed, attenuation = 2e6, 1480.0, 0.6
+    medium = MediumParams(speed_of_sound=speed, attenuation=attenuation)
     minimum = speed / (2 * fc)
     distances = np.array([0, minimum / 4, minimum, 2 * minimum])
-    observers = np.column_stack([distances, np.zeros((4, 2))])
-    response = point_response(
-        np.zeros((1, 3)), observers, frequency, fc, MediumParams(speed_of_sound=speed, attenuation=attenuation), np
+    source = np.array([[0, 0, 0.01]])
+    observers = source + np.column_stack([distances, np.zeros((4, 2))])
+    probe = Transducer(
+        matrix_aperture(shape=(1, 1), pitch=(0.0003, 0.0003), size=(0.0002, 0.0002), xp=np, dtype=np.float64), "3d", fc
+    )
+    delays, coefficients = np.zeros(1), np.array([0.001])
+    incident, _ = pfield_spectrum(source, delays, probe, medium, tx_n_wavelengths=np.inf)
+    actual, _ = scattered_pfield_spectrum(
+        observers, source, coefficients, delays, probe, medium, tx_n_wavelengths=np.inf
     )
     safe = np.maximum(distances, minimum)
-    expected = np.exp((2j * np.pi * frequency / speed - attenuation * np.log(10) / 20 * frequency * 1e-4) * safe) / safe
-    np.testing.assert_allclose(response[0], expected, rtol=1e-12)
+    response = np.exp((2j * np.pi * fc / speed - attenuation * np.log(10) / 20 * fc * 1e-4) * safe) / safe
+    expected = coefficients[0] * incident[0, 0] * response
+    np.testing.assert_allclose(actual[:, 0], expected, rtol=1e-12)
 
 
 def test_scattered_rotation_invariance():

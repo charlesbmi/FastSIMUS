@@ -72,3 +72,10 @@ def element_block(index, size, count, xp):
     indices = index * size + xp.arange(size)
     valid = indices < count
     return xp.minimum(indices, xp.asarray(count - 1)), valid
+
+
+def scatterer_block(points, coefficients, index, size, xp):
+    """Pad a source tile with finite positions and zero scattering strength."""
+    block, valid = point_block(points, index, size, xp)
+    strengths, _ = point_block(coefficients, index, size, xp)
+    return block, xp.where(valid, strengths, xp.zeros_like(strengths))

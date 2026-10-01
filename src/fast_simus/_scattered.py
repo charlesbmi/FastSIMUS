@@ -4,10 +4,9 @@ from math import pi
 
 import array_api_extra as xpx
 
-from fast_simus._blocking import block_count, point_block, run_loop
+from fast_simus._blocking import block_count, point_block, run_loop, scatterer_block
 from fast_simus._contractions import _receive_spectrum
-from fast_simus._field import transmit_at_frequency
-from fast_simus._illumination import scatterer_illumination
+from fast_simus._field import incident_at_frequency
 from fast_simus._pfield_math import NEPER_TO_DB
 from fast_simus._propagation import propagation_exponential
 
@@ -42,12 +41,10 @@ def illumination_cache(scatterers, rc, delays, apodization, plan, full, xp, canc
     result = xp.zeros((n_blocks, size, n_freq), dtype=scatterers.dtype) + 0j
 
     def source_step(i, result):
-        points, valid = point_block(scatterers, i, size, xp)
-        coefficients, _ = point_block(rc[:, None], i, size, xp)
-        coefficients = xp.where(valid, coefficients[:, 0], xp.zeros_like(coefficients[:, 0]))
+        points, coefficients = scatterer_block(scatterers, rc, i, size, xp)
 
         def frequency_step(k, block):
-            values = scatterer_illumination(points, coefficients, delays, apodization, plan._field, k, full, xp)
+            values = coefficients * incident_at_frequency(points, delays, apodization, plan._field, k, full, xp)
             return xpx.at(block)[:, k].set(values)  # type: ignore[attr-defined]
 
         block = run_loop(n_freq, frequency_step, xp.zeros((size, n_freq), dtype=scatterers.dtype) + 0j, xp)
@@ -73,17 +70,15 @@ def scattered_block(observers, scatterers, rc, delays, apodization, plan, compon
         frequency = (plan.freq_idx_start + k) * plan.freq_step
         values = xp.zeros_like(observers[:, 0]) + 0j
         if component != "scattered":
-            values = transmit_at_frequency(observers, delays, apodization, base, frequency, full, xp)
-            values = values * base._pulse[k] * base._probe[k]
+            values = incident_at_frequency(observers, delays, apodization, base, k, full, xp)
         if component != "incident" and scatterers.shape[0]:
 
             def source_step(i, pressure):
-                points, valid = point_block(scatterers, i, source_size, xp)
                 if cache is None:
-                    coefficients, _ = point_block(rc[:, None], i, source_size, xp)
-                    coefficients = xp.where(valid, coefficients[:, 0], xp.zeros_like(coefficients[:, 0]))
-                    weighted = scatterer_illumination(points, coefficients, delays, apodization, base, k, full, xp)
+                    points, coefficients = scatterer_block(scatterers, rc, i, source_size, xp)
+                    weighted = coefficients * incident_at_frequency(points, delays, apodization, base, k, full, xp)
                 else:
+                    points, _ = point_block(scatterers, i, source_size, xp)
                     indices = i * source_size + xp.arange(source_size)
                     weighted = xp.take(cache[:, k], indices, axis=0)
                 response = point_response(points, observers, frequency, base._params.freq_center, base._medium, xp)

@@ -6,8 +6,6 @@ from typing import cast
 
 from fast_simus._pfield_math import _first_last_true
 from fast_simus.spectrum import probe_spectrum, pulse_spectrum
-from fast_simus.spectrum import probe_spectrum as _probe_spectrum_fn
-from fast_simus.spectrum import pulse_spectrum as _pulse_spectrum_fn
 from fast_simus.utils._array_api import Array, _ArrayNamespace, _ArrayNamespaceWithFFT
 
 
@@ -83,8 +81,8 @@ def _two_way_pulse_duration(
     omega = 2.0 * pi * xp.linspace(0, 1.0 / dt / 2.0, n_fft)
 
     # Two-way spectrum: pulse * probe^2
-    ps = _pulse_spectrum_fn(omega, freq_center, tx_n_wavelengths)
-    pr = _probe_spectrum_fn(omega, freq_center, bandwidth)
+    ps = pulse_spectrum(omega, freq_center, tx_n_wavelengths)
+    pr = probe_spectrum(omega, freq_center, bandwidth)
     two_way = ps * pr**2
 
     pulse = xp_fft.fft.fftshift(xp_fft.fft.irfft(two_way))

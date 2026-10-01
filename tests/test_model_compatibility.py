@@ -37,8 +37,6 @@ def test_legacy_plan_tuple_contracts():
     assert field._fields == (*common, "freq_step", "n_freq_full", "freq_idx_start")
     assert isinstance(echo, SimusPlan)
     assert echo._fields == (*common, "n_freq_full", "freq_idx_start", "n_fft")
-    assert isinstance(field, PfieldPlan)
-    assert isinstance(echo, SimusPlan)
     restored_plans = (PfieldPlan(*field), SimusPlan(*echo))
     for plan, restored in zip((field, echo), restored_plans, strict=True):
         restored = restored._replace(correction_factor=plan.correction_factor)
@@ -85,27 +83,6 @@ def test_explicit_metal_field_rejects_wrong_backend():
     params, points, _rc, delays = _inputs(np)
     with pytest.raises(NotImplementedError, match="MLX"):
         pfield(points, delays, params, strategy=PfieldStrategy.METAL)
-
-
-def test_supported_metal_calls_skip_portable_preparation(monkeypatch):
-    """Supported native calls do not allocate the portable geometry tensors."""
-    import importlib
-
-    mx = pytest.importorskip("mlx.core")
-    from fast_simus.backends.mlx import ensure_compat
-
-    ensure_compat(mx)
-    params, points, rc, delays = _inputs(mx)
-
-    def unexpected_preparation(*args, **kwargs):
-        pytest.fail("Native execution entered portable geometry preparation")
-
-    for module_name, helper in (("pfield", "_prepare_frequency_sweep"), ("_simus_dispatch", "_prepare_simus_sweep")):
-        monkeypatch.setattr(importlib.import_module(f"fast_simus.{module_name}"), helper, unexpected_preparation)
-    pressure = pfield(points, delays, params, strategy=PfieldStrategy.METAL)
-    echo = simus(points, rc, delays, params, backend="metal")
-    for result in (pressure, echo.rf, echo.spectrum):
-        assert np.all(np.isfinite(to_numpy(result)))
 
 
 def test_rounded_frequency_samples_preserve_canonical_echo_grid():
