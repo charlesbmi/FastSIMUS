@@ -36,3 +36,14 @@ uv run marimo edit --sandbox wavefield_explorer.py
 uv run --script wavefield_explorer.py
 uv run --script scattering_explorer.py
 ```
+
+## 3D incident and scattered pressure
+
+From the repository root:
+
+```bash
+uv run --group plot3d marimo edit examples/wavefield_3d_explorer.py
+```
+
+Choose the phantom, transmit law and observation resolution, then press **Simulate**. The rotatable scene and linked
+orthoslices show incident, scattered or total pressure. Playback controls reuse the in-notebook simulation.

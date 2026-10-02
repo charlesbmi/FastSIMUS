@@ -7,6 +7,10 @@ on:
   pull_request:
     paths:
       - "tests/**"
+      - "examples/**"
+      - "docs/**"
+      - "README.md"
+      - "mkdocs.yml"
       - "src/**"
       - "pyproject.toml"
       - "uv.lock"
@@ -59,6 +63,18 @@ jobs:
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  plot3d:
+    runs-on: macos-latest
+    env:
+      RENDERCANVAS_FORCE_OFFSCREEN: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python-env
+      - name: Verify plotting dependencies
+        run: uv run --group plot3d python -c "import fastplotlib; import rendercanvas.offscreen"
+      - name: Test offscreen visualization contracts
+        run: uv run poe test-plot3d
 
   docs-test:
     runs-on: ubuntu-latest

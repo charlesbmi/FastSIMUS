@@ -110,6 +110,11 @@ test-parallel = [
     { include-group = "test" },
     "pytest-xdist>=3.8.0",
 ]
+plot3d = [
+    { include-group = "plot" },
+    "fastplotlib>=0.7,<0.8",
+    "rendercanvas>=2.7,<3",
+]
 test-plot = [
     { include-group = "test" },
     { include-group = "plot" },
@@ -170,9 +175,9 @@ sequence = [
     { cmd = "uv lock --locked" },
     { cmd = "ruff format src tests" },
     { cmd = "ruff check --fix src tests" },
-    { cmd = "ty check" },
-    { cmd = "mdformat README.md docs --wrap 120" },
-    { cmd = "codespell src tests docs README.md" },
+    { cmd = "ty check", executor = { group = "plot3d" } },
+    { cmd = "mdformat README.md examples/README.md tests/data/3d/README.md --wrap 120" },
+    { cmd = "codespell src tests README.md examples/README.md" },
     { cmd = "deptry src" },
     { ref = "pre-commit" },
 ]
@@ -182,6 +187,12 @@ help = "Test only code affected by recent changes, in parallel"
 cmd = "pytest tests/ --ignore=tests/benchmarks --testmon -n auto -p no:benchmark"
 # Need isolated = true to avoid conflicts with pytest-benchmark
 executor = { group = "test-parallel" }
+
+[tool.poe.tasks.test-plot3d]
+help = "Run offscreen 3D visualization contracts"
+cmd = "python -m pytest tests/test_wavefield3d_view.py -p no:testmon -p no:benchmark -rA"
+executor = { group = ["test", "plot3d"] }
+env = { RENDERCANVAS_FORCE_OFFSCREEN = "1" }
 
 [tool.poe.tasks.test-all]
 help = "Test all code (no benchmarks)"
@@ -333,6 +344,8 @@ ignore = [
 "src/fast_simus/utils/_array_api.py" = ["PLC0415"]  # optional backend conversions
 "src/fast_simus/tx_delay.py" = ["F722"]  # Jaxtyping variadic dims
 # Marimo notebooks are a DAG of cells; imports live inside cells by design.
+"examples/wavefield_3d_explorer.py" = ["PLC0415", "B018", "D103"]
+"examples/_wavefield3d*.py" = ["PLC0415"]
 "examples/wavefield_explorer.py" = ["PLC0415", "B018", "D103", "RUF046", "RUF059"]
 
 [tool.ruff.lint.pydocstyle]

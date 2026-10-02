@@ -3,28 +3,24 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
-from math import inf, pi
 from types import ModuleType
 from typing import TYPE_CHECKING, cast
 
-import array_api_extra as xpx
 from array_api_compat import is_jax_namespace
 from jaxtyping import Complex, Float
 
+from fast_simus._blocking import legacy_point_count
 from fast_simus._pfield_math import (
     _canonical_frequency_grid,
-    _distances_and_angles,
-    _init_exponentials,
-    _obliquity_factor,
-    _subelement_centroids,
 )
+from fast_simus._transfer import _prepare_strip_transfer, _TransferPlan
 from fast_simus.backends._selection import Backend, BackendKind, _coerce_backend_kind, _namespace_kind
+from fast_simus.execution import ExecutionOptions
 from fast_simus.medium_params import MediumParams
 from fast_simus.transducer_params import BaffleType, TransducerParams
 from fast_simus.utils._array_api import Array, _ArrayNamespace
-from fast_simus.utils.geometry import element_positions
 
 if TYPE_CHECKING:
     from fast_simus.simus import SimusPlan
@@ -57,6 +53,7 @@ class _SimusSpectrumRequest:
     full_frequency_directivity: bool
     xp: _ArrayNamespace
     backend: BackendKind | str | None
+    execution: ExecutionOptions | None = None
 
 
 def _expected_namespace_kind(kind: BackendKind) -> BackendKind:
@@ -104,6 +101,8 @@ def _resolve_backend_request(
 
 def _common_unsupported_reasons(request: _SimusSpectrumRequest) -> list[str]:
     reasons = []
+    if request.execution is not None:
+        reasons.append("an execution workspace budget")
     if request.full_frequency_directivity:
         reasons.append("full_frequency_directivity=True")
     if request.params.baffle != BaffleType.SOFT:
@@ -173,63 +172,33 @@ def _prepare_simus_sweep(request: _SimusSpectrumRequest) -> dict:
     params = request.params
     plan = request.plan
     medium = request.medium
-    element_pos, theta_elements, apex_offset = element_positions(params.n_elements, params.pitch, params.radius, xp)
-    if theta_elements is None:
-        theta_elements = xp.zeros(params.n_elements)
-
-    subelement_offsets = _subelement_centroids(params.element_width, plan.n_sub, theta_elements, xp)
-    x = request.scatterers[..., 0]
-    z = request.scatterers[..., 1]
-    is_out = z < 0
-    if params.radius != inf:
-        is_out = is_out | ((x**2 + (z + apex_offset) ** 2) <= params.radius**2)
-
-    distances, sin_theta, theta_arr = _distances_and_angles(
-        request.scatterers,
-        subelement_offsets,
-        element_pos,
-        theta_elements,
-        medium.speed_of_sound,
-        params.freq_center,
-        xp,
-    )
-    obliquity_factor = _obliquity_factor(theta_arr, params.baffle, xp)
     freq_start, freq_step = _canonical_frequency_grid(params.freq_center, plan.n_freq_full, plan.freq_idx_start)
-    phase_init, phase_step = _init_exponentials(
-        freq_start,
-        medium.speed_of_sound,
-        medium.attenuation,
-        distances,
-        obliquity_factor,
-        freq_step,
-        xp,
+    transfer = _prepare_strip_transfer(
+        request.scatterers,
+        request.delays_clean,
+        request.tx_apodization,
+        _TransferPlan(plan.selected_freqs, plan.n_sub, plan.seg_length, freq_start, freq_step),
+        params,
+        medium,
+        full_frequency_directivity=request.full_frequency_directivity,
+        xp=xp,
+    )
+    return dict(
+        phase_init=transfer.phase,
+        phase_step=transfer.phase_step,
+        delay_apod_init=transfer.delay_apod,
+        delay_apod_step=transfer.delay_apod_step,
+        is_out=transfer.is_out,
+        wavenumbers=transfer.wavenumbers,
+        pulse_spect=plan.pulse_spectrum,
+        probe_spect=plan.probe_spectrum,
+        seg_length=plan.seg_length,
+        sin_theta=transfer.sin_theta,
+        full_frequency_directivity=request.full_frequency_directivity,
     )
 
-    if not request.full_frequency_directivity:
-        center_wavenumber = 2.0 * pi * params.freq_center / medium.speed_of_sound
-        sinc_arg = xp.asarray(center_wavenumber * plan.seg_length / 2.0) * sin_theta / pi
-        phase_init = phase_init * xpx.sinc(sinc_arg, xp=xp)
 
-    delay_apod_init = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_start * request.delays_clean) * request.tx_apodization
-    delay_apod_step = xp.exp(xp.asarray(1j * 2.0 * pi) * freq_step * request.delays_clean)
-    wavenumbers = xp.asarray(2.0 * pi) * plan.selected_freqs / medium.speed_of_sound
-
-    return {
-        "phase_init": phase_init,
-        "phase_step": phase_step,
-        "delay_apod_init": delay_apod_init,
-        "delay_apod_step": delay_apod_step,
-        "is_out": is_out,
-        "wavenumbers": wavenumbers,
-        "pulse_spect": plan.pulse_spectrum,
-        "probe_spect": plan.probe_spectrum,
-        "seg_length": plan.seg_length,
-        "sin_theta": sin_theta,
-        "full_frequency_directivity": request.full_frequency_directivity,
-    }
-
-
-def _run_portable(request: _SimusSpectrumRequest) -> Array:
+def _run_portable_block(request: _SimusSpectrumRequest) -> Array:
     sweep = _prepare_simus_sweep(request)
     if is_jax_namespace(cast(ModuleType, request.xp)):
         from fast_simus._simus_strategies import _simus_freq_outer_scan
@@ -239,6 +208,28 @@ def _run_portable(request: _SimusSpectrumRequest) -> Array:
     from fast_simus._simus_strategies import _simus_freq_outer_python
 
     return _simus_freq_outer_python(rc=request.rc, xp=request.xp, **sweep)
+
+
+def require_portable_backend(xp, backend, feature):
+    """Validate explicit namespace requests and reject required unsupported kernels."""
+    resolved = _resolve_backend_request(xp, backend)
+    if resolved.kernel_policy is _KernelPolicy.REQUIRE and resolved.kernel_kind is not None:
+        raise NotImplementedError(f"Backend {resolved.kernel_kind.value!r} does not support {feature}")
+
+
+def _run_portable(request: _SimusSpectrumRequest) -> Array:
+    if request.execution is None:
+        return _run_portable_block(request)
+    size = legacy_point_count(request.execution, request.params.n_elements, request.plan.n_sub)
+    result = request.xp.zeros(
+        (request.plan.selected_freqs.shape[0], request.params.n_elements), dtype=request.plan.pulse_spectrum.dtype
+    )
+    for start in range(0, request.scatterers.shape[0], size):
+        block = replace(
+            request, scatterers=request.scatterers[start : start + size], rc=request.rc[start : start + size]
+        )
+        result = result + _run_portable_block(block)
+    return result
 
 
 def compute_simus_spectrum(

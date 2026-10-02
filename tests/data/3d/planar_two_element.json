@@ -1,0 +1,72 @@
+{
+  "pymust_commit": "df02b422bf06fe298d352cd608a083d775c89193",
+  "python": "3.13.9",
+  "numpy": "2.4.1",
+  "scipy": "1.17.0",
+  "parameters": {
+    "fc": 2000000.0,
+    "c": 1540.0,
+    "elements": [
+      [
+        -0.00015,
+        0.00015
+      ],
+      [
+        0.0,
+        0.0
+      ]
+    ],
+    "width": 0.0002,
+    "height": 0.0002,
+    "bandwidth": 75.0,
+    "baffle": "soft",
+    "attenuation": 0.0,
+    "TXnow": 1.0,
+    "TXapodization": [
+      [
+        1.0,
+        1.0
+      ]
+    ],
+    "fs": 8000000.0,
+    "TXfreqsweep": null,
+    "RXdelay": [
+      [
+        0.0,
+        0.0
+      ]
+    ]
+  },
+  "options": {
+    "ElementSplitting": [
+      1,
+      1
+    ],
+    "FullFrequencyDirectivity": true,
+    "dBThresh": -60.0,
+    "FrequencyStep": 1.0,
+    "WaitBar": false,
+    "ParPool": false
+  },
+  "source_sha256": {
+    "pfield3.py": "3d202641e29260a2685953c43906162412dffd85f5f0c9a96967f7b4d832577d",
+    "simus3.py": "e9bd1e0bbf68c145f7c84dfb6718e95a4cff9b4e3c6df88e7cb082a3195d0013",
+    "utils.py": "9bad0f75d30410c1f05354f8ef0410a8ffb1577ba5482ee507c70aac0eef0e7a",
+    "getpulse.py": "6dcc6b97cde7a248a13110e0d480dc57461761057c5e707de787f86086be8ff9"
+  },
+  "normalization": {
+    "element": "mean over rectangular patches; 1/r spreading",
+    "field_spectrum": "raw unscaled selected complex bins; point,frequency axes",
+    "field_rms": "sqrt(df * sum(abs(raw_field_spectrum)**2, axis=-1))",
+    "echo_spectrum": "raw unscaled full one-sided bins; frequency,element axes",
+    "rf": "irfft(conj(echo_spectrum), n=2*(Nf-1)); first half; PyMUST smooth threshold",
+    "field_df": 74074.07407407407,
+    "echo_df": 13513.513513513513,
+    "n_fft": 592
+  },
+  "notes": [
+    "Parameters include explicitly recorded effective defaults TXfreqsweep=None and RXdelay=zeros; ParPool defaults false.",
+    "pfield3 adds RC=None internally; simus3 sets RC to fixture reflectivity, CallFun=simus3, and FrequencyStep to its computed absolute frequency bound.",
+    "Both calls receive fresh deep copies; no extra receive delays or coherent transmit rows."
+  ]
+}

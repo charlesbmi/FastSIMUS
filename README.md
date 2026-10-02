@@ -83,3 +83,5 @@ Run inside `flox activate` (or prefix with `flox activate --`):
 - `poe docs` - Build and serve documentation
 
 Without Flox: `uv run poe test`, `uv run poe lint`, etc.
+
+For the interactive 3D wavefield explorer, see [examples](https://github.com/charlesbmi/FastSIMUS/tree/main/examples).

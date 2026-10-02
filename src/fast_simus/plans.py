@@ -1,0 +1,291 @@
+"""Opaque prepared plans for finite apertures; validation is eager, outside JIT."""
+
+from dataclasses import dataclass, replace
+from math import ceil, isfinite, prod
+from types import SimpleNamespace
+
+from fast_simus._blocking import Tiles, choose_tiles
+from fast_simus._frequency import FrequencyGrid, SamplingInfo, SamplingMetadata, _two_way_pulse_duration, frequency_grid
+from fast_simus.aperture import _same_arrays
+from fast_simus.execution import ExecutionOptions
+from fast_simus.lens import lens_reference_delay
+from fast_simus.medium_params import MediumParams
+from fast_simus.transducer import Transducer
+from fast_simus.utils._array_api import Array, array_namespace
+
+
+def _validate_arrays(positions, delays, params):
+    xp = _same_arrays(params.aperture.centers, positions, delays)
+    if positions.shape[-1:] != (3,) or prod(positions.shape[:-1]) == 0:
+        raise ValueError("3D points require nonempty (*shape,3) coordinates")
+    if delays.shape != (params.n_elements,):
+        raise ValueError("Delays must have shape (E,)")
+    flat = xp.reshape(positions, (-1, 3))
+    for start in range(0, flat.shape[0], 32):
+        if not bool(xp.all(xp.isfinite(flat[start : min(start + 32, flat.shape[0]), :]))):
+            raise ValueError("Positions must be finite")
+    active = xp.where(xp.isnan(delays), xp.zeros_like(delays), delays)
+    if not bool(xp.all(xp.isfinite(active))) or bool(xp.any(active < 0)):
+        raise ValueError("Active delays must be finite and nonnegative")
+    return xp
+
+
+def _path_bound(points, aperture, xp, block_size=32):
+    # Triangle inequality encloses every patch while avoiding P*E*Q allocation.
+    flat = xp.reshape(points, (-1, 3))
+    maximum = 0.0
+    for e in range(aperture.centers.shape[0]):
+        radius = xp.sqrt(xp.sum(aperture.sizes[e, :] ** 2)) / 2
+        for start in range(0, flat.shape[0], block_size):
+            distances = xp.sqrt(
+                xp.sum((flat[start : min(start + block_size, flat.shape[0]), :] - aperture.centers[e, :]) ** 2, axis=-1)
+            )
+            maximum = max(maximum, float(xp.max(distances) + radius))
+    return maximum
+
+
+@dataclass(frozen=True, eq=False)
+class FieldSpectrumInfo:
+    """Read-only selected-band metadata, with explicit CW semantics."""
+
+    _grid: FrequencyGrid
+
+    @property
+    def selected_freqs(self):
+        """Selected frequency samples in Hz."""
+        return self._grid.selected_freqs
+
+    @property
+    def freq_step(self):
+        """Canonical spacing in Hz."""
+        return self._grid.freq_step
+
+    @property
+    def n_freq_full(self):
+        """Number of bins on the full grid."""
+        return self._grid.n_freq_full
+
+    @property
+    def freq_idx_start(self):
+        """Offset of the selected band."""
+        return self._grid.freq_idx_start
+
+    @property
+    def is_cw(self):
+        """Whether this is a continuous-wave calculation."""
+        return self._grid.is_cw
+
+    @property
+    def correction_factor(self):
+        """Energy integration weight for raw pressure samples."""
+        return 1.0 if self.is_cw else self.freq_step
+
+
+@dataclass(frozen=True, eq=False)
+class FieldPlan(FieldSpectrumInfo):
+    """Prepared finite-aperture calculation, bound to an immutable description.
+
+    Runtime arrays may vary within the original shape and path/delay bounds.
+    Call validate_inputs eagerly before reusing a plan with different arrays.
+    """
+
+    _params: Transducer
+    _medium: MediumParams
+    _shape: tuple
+    _dtype: object
+    _counts: tuple
+    _path: float
+    _delay: float
+    _pulse: Array
+    _probe: Array
+    execution: ExecutionOptions
+    _tiles: Tiles
+    _lens_delay: float
+
+    @property
+    def estimated_workspace_bytes(self):
+        """Conservative live numerical workspace estimate, excluding outputs."""
+        return self._tiles.workspace_bytes
+
+    @property
+    def output_bytes(self):
+        """Dense complex field spectrum bytes (RF plans override this estimate)."""
+        return (
+            prod(self._shape[:-1]) * self.selected_freqs.shape[0] * (8 if str(self._dtype).endswith("float32") else 16)
+        )
+
+    @property
+    def lens_reference_delay(self):
+        """Common lens delay in seconds, applied once per propagation leg."""
+        return self._lens_delay
+
+    def validate_inputs(self, positions, delays):
+        """Eagerly enforce shapes, physical validity and original planning bounds."""
+        xp = _validate_arrays(positions, delays, self._params)
+        self.check_static(positions, delays, self._params, self._medium)
+        delay = float(xp.max(xp.where(xp.isnan(delays), xp.zeros_like(delays), delays)))
+        tolerance = 1e-6 if positions.dtype == xp.float32 else 1e-12
+        if _path_bound(positions, self._params.aperture, xp) > self._path * (1 + tolerance) or delay > self._delay:
+            raise ValueError("Inputs exceed plan bounds; replan")
+
+    def check_static(self, positions, delays, params, medium):
+        """Check immutable configuration and array metadata without tracing values."""
+        _same_arrays(params.aperture.centers, positions, delays)
+        if (
+            params is not self._params
+            or medium != self._medium
+            or positions.shape != self._shape
+            or positions.dtype != self._dtype
+            or delays.shape != (params.n_elements,)
+        ):
+            raise ValueError("Inputs are incompatible with plan configuration")
+
+
+def prepare_field(
+    positions, delays, params, medium, *, tx_n_wavelengths, db_thresh, element_splitting, frequency_step, execution=None
+):
+    """Resolve topology, support bounds and the uniform spectral grid."""
+    xp = _validate_arrays(positions, delays, params)
+    if not isfinite(frequency_step) or frequency_step <= 0:
+        raise ValueError("frequency_step must be positive and finite")
+    sizes = params.aperture.sizes
+    wavelength = medium.speed_of_sound / (params.freq_center * (1 + params.bandwidth / 2))
+    if element_splitting is None:
+        counts = tuple(
+            (max(1, ceil(float(sizes[e, 0]) / wavelength)), max(1, ceil(float(sizes[e, 1]) / wavelength)))
+            for e in range(params.n_elements)
+        )
+    else:
+        if (
+            not isinstance(element_splitting, tuple)
+            or len(element_splitting) != 2
+            or any(not isinstance(n, int) or isinstance(n, bool) or n <= 0 for n in element_splitting)
+        ):
+            raise ValueError("3D element_splitting must be a positive (nu,nv) tuple")
+        counts = (element_splitting,) * params.n_elements
+    if params.lens is not None:
+        refined = []
+        for e, (nu, nv) in enumerate(counts):
+            height = float(sizes[e, 1])
+            focus = float(params.lens.focal_lengths[e])
+            required = max(1, ceil(height / min(wavelength, wavelength * focus / (8 * height))))
+            if element_splitting is not None and nv < required:
+                raise ValueError(f"Lens phase requires at least {required} height subdivisions")
+            refined.append((nu, max(nv, required)))
+        counts = tuple(refined)
+    path = max(_path_bound(positions, params.aperture, xp), medium.speed_of_sound / (2 * params.freq_center))
+    delay = float(xp.max(xp.where(xp.isnan(delays), xp.zeros_like(delays), delays)))
+    duration = 0 if tx_n_wavelengths == float("inf") else tx_n_wavelengths / params.freq_center
+    max_step = frequency_step / (
+        2 * (path / medium.speed_of_sound + delay + duration + lens_reference_delay(params, medium.speed_of_sound))
+    )
+    grid, pulse, probe = frequency_grid(
+        params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, max_step, xp, positions.dtype
+    )
+    execution = execution or ExecutionOptions()
+    tiles = choose_tiles(prod(positions.shape[:-1]), counts, execution)
+    return FieldPlan(
+        grid,
+        params,
+        medium,
+        positions.shape,
+        positions.dtype,
+        counts,
+        path,
+        delay,
+        pulse,
+        probe,
+        execution,
+        tiles,
+        lens_reference_delay(params, medium.speed_of_sound),
+    )
+
+
+def response_medium(plan):
+    """Resolve response constants once before entering a driver."""
+    return SimpleNamespace(
+        speed_of_sound=plan._medium.speed_of_sound,
+        attenuation=plan._medium.attenuation,
+        baffle=plan._params.baffle,
+        lens=plan._params.lens,
+        lens_reference_delay=plan.lens_reference_delay,
+    )
+
+
+@dataclass(frozen=True, eq=False)
+class EchoPlan(FieldPlan, SamplingMetadata):
+    """Finite-aperture pulse-echo plan with explicit sampling metadata."""
+
+    _sampling: SamplingInfo
+
+    @property
+    def output_bytes(self):
+        """Returned full channel spectrum plus causal RF bytes."""
+        item = 4 if self._dtype == array_namespace(self.selected_freqs).float32 else 8
+        return self._params.n_elements * (self.n_freq_full * 2 * item + (self.n_fft + 1) // 2 * item)
+
+    @property
+    def correction_factor(self):
+        """Raw receive spectra use unscaled inverse-DFT normalization."""
+        return 1.0
+
+    @property
+    def n_fft(self):
+        """Full inverse transform length."""
+        return self._sampling.n_fft
+
+    @property
+    def sample_times(self):
+        """Causal RF sample times in seconds."""
+        return self._sampling.times(array_namespace(self.selected_freqs), self._dtype)
+
+
+def prepare_echo(
+    positions,
+    rc,
+    delays,
+    params,
+    medium,
+    *,
+    fs,
+    tx_n_wavelengths,
+    db_thresh,
+    element_splitting,
+    frequency_step,
+    execution=None,
+):
+    """Prepare round-trip support using the common spectral grid builder."""
+    if not isfinite(tx_n_wavelengths) or tx_n_wavelengths <= 0:
+        raise ValueError("RF requires a finite positive pulse duration")
+    fs = 4 * params.freq_center if fs is None else fs
+    if not isfinite(fs) or fs < 4 * params.freq_center:
+        raise ValueError("RF sampling frequency must be at least 4*fc")
+    xp = _validate_arrays(positions, delays, params)
+    _same_arrays(positions, rc)
+    if rc.shape != positions.shape[:-1]:
+        raise ValueError("Finite reflectivity must exactly match scatterer shape")
+    flat_rc = xp.reshape(rc, (-1,))
+    for start in range(0, flat_rc.shape[0], 32):
+        if not bool(xp.all(xp.isfinite(flat_rc[start : min(start + 32, flat_rc.shape[0])]))):
+            raise ValueError("Finite reflectivity must exactly match scatterer shape")
+    base = prepare_field(
+        positions,
+        delays,
+        params,
+        medium,
+        tx_n_wavelengths=tx_n_wavelengths,
+        db_thresh=db_thresh,
+        element_splitting=element_splitting,
+        frequency_step=frequency_step,
+        execution=execution,
+    )
+    duration = _two_way_pulse_duration(params.freq_center, params.bandwidth, tx_n_wavelengths, xp)
+    step = frequency_step / (
+        2 * (2 * (base._path / medium.speed_of_sound + duration + base.lens_reference_delay) + base._delay)
+    )
+    grid, pulse, probe = frequency_grid(
+        params.freq_center, params.bandwidth, tx_n_wavelengths, db_thresh, step, xp, positions.dtype
+    )
+    sampling = SamplingInfo(fs, ceil(fs / (2 * params.freq_center) * (grid.n_freq_full - 1)), grid.freq_step)
+    base = replace(base, _grid=grid, _pulse=pulse, _probe=probe)
+    return EchoPlan(**vars(base), _sampling=sampling)
