@@ -113,7 +113,7 @@ test-parallel = [
 plot3d = [
     { include-group = "plot" },
     "fastplotlib>=0.7,<0.8",
-    "rendercanvas>=2.7,<3",
+    "rendercanvas>=3,<4",
 ]
 test-plot = [
     { include-group = "test" },
